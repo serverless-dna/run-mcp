@@ -1,0 +1,168 @@
+#!/bin/sh
+# run-mcp - Simple MCP server container runner
+# Usage: run-mcp [runtime] <command> [args...]
+#   run-mcp uvx mcp-server-sqlite --db-path /data/db.sqlite
+#   run-mcp python uvx mcp-server-sqlite --db-path /data/db.sqlite
+#   run-mcp node npx @modelcontextprotocol/server-filesystem /data
+
+set -eu
+
+# --- Configuration ---
+MCP_NODEJS_IMAGE="${MCP_NODEJS_IMAGE:-ghcr.io/owner/mcp-nodejs:node22}"
+MCP_PYTHON_IMAGE="${MCP_PYTHON_IMAGE:-ghcr.io/owner/mcp-python:python3.12}"
+MCP_DATA_DIR="${MCP_DATA_DIR:-$HOME}"
+
+# --- Runtime Detection ---
+detect_runtime() {
+    if [ -n "${MCP_CONTAINER_RUNTIME:-}" ]; then
+        echo "$MCP_CONTAINER_RUNTIME"
+        return 0
+    fi
+    
+    for rt in docker podman nerdctl "lima nerdctl"; do
+        if command -v ${rt%% *} >/dev/null 2>&1; then
+            echo "$rt"
+            return 0
+        fi
+    done
+    echo "Error: No container runtime found. Install docker, podman, or nerdctl." >&2
+    exit 1
+}
+
+# --- Language Detection ---
+detect_language() {
+    case "$1" in
+        npx|node|yarn|tsx)
+            echo "nodejs"
+            ;;
+        uvx|python|python3|pip|uv)
+            echo "python"
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
+}
+
+# --- Image Selection ---
+get_image() {
+    case "$1" in
+        nodejs|node)
+            echo "$MCP_NODEJS_IMAGE"
+            ;;
+        python)
+            echo "$MCP_PYTHON_IMAGE"
+            ;;
+        *)
+            echo "Error: Unknown runtime '$1'. Use 'node' or 'python'." >&2
+            exit 1
+            ;;
+    esac
+}
+
+# --- Environment Variable Collection ---
+collect_env_args() {
+    ENV_ARGS=""
+    
+    # Default allowlist prefixes
+    ALLOWED_PREFIXES="AWS_ OPENAI_ ANTHROPIC_ AZURE_ GOOGLE_ MCP_ HF_ REPLICATE_ COHERE_"
+    
+    # Exact matches
+    ALLOWED_EXACT="GITHUB_TOKEN GITLAB_TOKEN DATABASE_URL REDIS_URL"
+    
+    # User-specified additional vars from MCP_PASSTHROUGH_ENV
+    if [ -n "${MCP_PASSTHROUGH_ENV:-}" ]; then
+        # Convert comma-separated list to space-separated
+        CUSTOM_VARS=$(echo "$MCP_PASSTHROUGH_ENV" | tr ',' ' ')
+        ALLOWED_EXACT="$ALLOWED_EXACT $CUSTOM_VARS"
+    fi
+    
+    # Process all environment variables
+    for var in $(env | cut -d= -f1); do
+        MATCHED=false
+        
+        # Check exact matches first
+        for exact in $ALLOWED_EXACT; do
+            if [ "$var" = "$exact" ]; then
+                ENV_ARGS="$ENV_ARGS -e $var"
+                MATCHED=true
+                break
+            fi
+        done
+        
+        # If not exact match, check prefixes
+        if [ "$MATCHED" = false ]; then
+            for prefix in $ALLOWED_PREFIXES; do
+                case "$var" in
+                    $prefix*)
+                        ENV_ARGS="$ENV_ARGS -e $var"
+                        MATCHED=true
+                        break
+                        ;;
+                esac
+            done
+        fi
+    done
+    
+    echo "$ENV_ARGS"
+}
+
+# --- Volume Mount Collection ---
+collect_volume_args() {
+    VOLUME_ARGS="-v $MCP_DATA_DIR:/data"
+    [ -d "$HOME/.aws" ] && VOLUME_ARGS="$VOLUME_ARGS -v $HOME/.aws:/home/mcp/.aws:ro"
+    [ -d "$HOME/.config" ] && VOLUME_ARGS="$VOLUME_ARGS -v $HOME/.config:/home/mcp/.config:ro"
+    echo "$VOLUME_ARGS"
+}
+
+# --- Main Logic ---
+main() {
+    RUNTIME=""
+    
+    # Check if first arg is explicit runtime
+    case "${1:-}" in
+        node|nodejs)
+            RUNTIME="nodejs"
+            shift
+            ;;
+        python)
+            RUNTIME="python"
+            shift
+            ;;
+    esac
+    
+    # Remaining args are the command
+    COMMAND="${1:-}"
+    shift || true
+    
+    if [ -z "$COMMAND" ]; then
+        echo "Usage: run-mcp [node|python] <command> [args...]" >&2
+        echo "Examples:" >&2
+        echo "  run-mcp uvx mcp-server-sqlite --db-path /data/db.sqlite" >&2
+        echo "  run-mcp npx @modelcontextprotocol/server-filesystem /data" >&2
+        exit 1
+    fi
+    
+    # Auto-detect language if not specified
+    if [ -z "$RUNTIME" ]; then
+        RUNTIME=$(detect_language "$COMMAND")
+        if [ "$RUNTIME" = "unknown" ]; then
+            echo "Error: Cannot detect runtime for '$COMMAND'. Specify 'node' or 'python'." >&2
+            exit 1
+        fi
+    fi
+    
+    # Build and execute container command
+    CONTAINER_RT=$(detect_runtime)
+    IMAGE=$(get_image "$RUNTIME")
+    ENV_ARGS=$(collect_env_args)
+    VOLUME_ARGS=$(collect_volume_args)
+    
+    exec $CONTAINER_RT run -i --rm \
+        $ENV_ARGS \
+        $VOLUME_ARGS \
+        "$IMAGE" \
+        "$COMMAND" "$@"
+}
+
+main "$@"
