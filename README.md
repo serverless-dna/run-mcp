@@ -166,7 +166,8 @@ make check-tools
 **WSL2 Docker Options:**
 - **Docker Desktop**: Easiest setup, integrates with Windows
 - **Native Docker**: Better performance, runs entirely in WSL2
-- **Podman**: Alternative container runtime
+- **Podman**: Alternative container runtime, docker-compatible
+- **Finch**: AWS's container runtime, optimized for development
 
 ### Configuration
 
@@ -307,7 +308,7 @@ You can manually trigger builds using the GitHub Actions workflow_dispatch event
 
 ### run-mcp Binary Features
 - **Cross-platform**: Single binary works on Windows, macOS, and Linux
-- **Auto-detection**: Automatically detects Docker, Podman, or nerdctl
+- **Auto-detection**: Automatically detects Docker, Podman, nerdctl, or Finch
 - **Language inference**: Detects Node.js (npx, node) or Python (uvx, python) from commands
 - **Secure environment passthrough**: Allowlist-based environment variable filtering
 - **Custom variables**: Support for additional variables via `MCP_PASSTHROUGH_ENV`

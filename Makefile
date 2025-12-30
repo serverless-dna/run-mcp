@@ -1,10 +1,16 @@
 # Makefile for MCP Container Images
 # Manages testing, building, and publishing container images
 
-# Docker command detection for WSL2
+# Docker command detection for WSL2 and cross-platform
 DOCKER_CMD := $(shell \
 	if command -v docker >/dev/null 2>&1; then \
 		echo "docker"; \
+	elif command -v podman >/dev/null 2>&1; then \
+		echo "podman"; \
+	elif command -v nerdctl >/dev/null 2>&1; then \
+		echo "nerdctl"; \
+	elif command -v finch >/dev/null 2>&1; then \
+		echo "finch"; \
 	elif command -v docker.exe >/dev/null 2>&1; then \
 		echo "docker.exe"; \
 	else \
@@ -14,11 +20,13 @@ DOCKER_CMD := $(shell \
 # Check if Docker is available
 define check_docker
 	@if [ -z "$(DOCKER_CMD)" ]; then \
-		echo "$(RED)Error: Docker not found$(NC)"; \
-		echo "$(YELLOW)WSL2 Docker Setup Options:$(NC)"; \
-		echo "1. Docker Desktop: Install Docker Desktop for Windows and enable WSL2 integration"; \
-		echo "2. Native Docker: Install Docker directly in WSL2 with: curl -fsSL https://get.docker.com | sh"; \
-		echo "3. Alternative: Use podman as container runtime"; \
+		echo "$(RED)Error: No container runtime found$(NC)"; \
+		echo "$(YELLOW)Container Runtime Options:$(NC)"; \
+		echo "1. Docker: Install Docker Desktop or Docker Engine"; \
+		echo "2. Podman: Install Podman (docker-compatible)"; \
+		echo "3. nerdctl: Install nerdctl with containerd"; \
+		echo "4. Finch: Install AWS Finch (macOS/Linux)"; \
+		echo "5. WSL2: Use docker.exe via Docker Desktop"; \
 		exit 1; \
 	fi
 endef
@@ -170,18 +178,23 @@ setup-dev: ## Set up development environment
 		chmod +x /tmp/hadolint; \
 		sudo mv /tmp/hadolint /usr/local/bin/hadolint; \
 	fi
-	@if ! command -v docker >/dev/null 2>&1 && ! command -v docker.exe >/dev/null 2>&1; then \
-		echo "$(YELLOW)Docker Setup Required:$(NC)"; \
+	@if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1 && ! command -v nerdctl >/dev/null 2>&1 && ! command -v finch >/dev/null 2>&1 && ! command -v docker.exe >/dev/null 2>&1; then \
+		echo "$(YELLOW)Container Runtime Setup Required:$(NC)"; \
 		echo "$(BLUE)Option 1 - Docker Desktop (Recommended):$(NC)"; \
-		echo "  1. Install Docker Desktop for Windows"; \
-		echo "  2. Enable WSL2 integration in Docker Desktop settings"; \
+		echo "  1. Install Docker Desktop for Windows/macOS"; \
+		echo "  2. Enable WSL2 integration (Windows only)"; \
 		echo "  3. Restart WSL2: wsl --shutdown && wsl"; \
-		echo "$(BLUE)Option 2 - Native Docker in WSL2:$(NC)"; \
+		echo "$(BLUE)Option 2 - Native Docker in WSL2/Linux:$(NC)"; \
 		echo "  1. Run: curl -fsSL https://get.docker.com | sh"; \
 		echo "  2. Add user to docker group: sudo usermod -aG docker $$USER"; \
 		echo "  3. Start Docker: sudo service docker start"; \
 		echo "$(BLUE)Option 3 - Podman Alternative:$(NC)"; \
 		echo "  1. Install podman: sudo apt-get install -y podman"; \
+		echo "$(BLUE)Option 4 - AWS Finch (macOS/Linux):$(NC)"; \
+		echo "  1. macOS: brew install finch"; \
+		echo "  2. Linux: Download from GitHub releases"; \
+		echo "$(BLUE)Option 5 - nerdctl with containerd:$(NC)"; \
+		echo "  1. Install containerd and nerdctl"; \
 	fi
 	@echo "$(GREEN)✓ Development environment setup complete$(NC)"
 
@@ -197,17 +210,25 @@ setup-wsl2-docker: ## Set up Docker in WSL2 (native installation)
 check-tools: ## Check if required tools are installed
 	@echo "$(BLUE)Checking required tools...$(NC)"
 	@echo "$(YELLOW)Environment: WSL2 detected$(NC)"
-	@echo -n "Docker: "; \
+	@echo -n "Container Runtime: "; \
 		if command -v docker >/dev/null 2>&1; then \
-			echo "$(GREEN)✓$(NC)"; \
+			echo "$(GREEN)✓ Docker$(NC)"; \
+		elif command -v podman >/dev/null 2>&1; then \
+			echo "$(GREEN)✓ Podman$(NC)"; \
+		elif command -v nerdctl >/dev/null 2>&1; then \
+			echo "$(GREEN)✓ nerdctl$(NC)"; \
+		elif command -v finch >/dev/null 2>&1; then \
+			echo "$(GREEN)✓ Finch (AWS)$(NC)"; \
 		elif command -v docker.exe >/dev/null 2>&1; then \
-			echo "$(GREEN)✓ (Windows Docker via docker.exe)$(NC)"; \
+			echo "$(GREEN)✓ Docker (Windows via docker.exe)$(NC)"; \
 		else \
 			echo "$(RED)✗$(NC)"; \
-			echo "$(YELLOW)  WSL2 Docker Setup:$(NC)"; \
-			echo "  1. Install Docker Desktop for Windows"; \
-			echo "  2. Enable WSL2 integration in Docker Desktop settings"; \
-			echo "  3. Or install Docker directly in WSL2: curl -fsSL https://get.docker.com | sh"; \
+			echo "$(YELLOW)  Container Runtime Setup:$(NC)"; \
+			echo "  1. Docker: Install Docker Desktop or Docker Engine"; \
+			echo "  2. Podman: Install Podman (docker-compatible)"; \
+			echo "  3. nerdctl: Install nerdctl with containerd"; \
+			echo "  4. Finch: Install AWS Finch (brew install finch)"; \
+			echo "  5. WSL2: Enable Docker Desktop WSL2 integration"; \
 		fi
 	@echo -n "Bats: "; command -v bats >/dev/null 2>&1 && echo "$(GREEN)✓$(NC)" || echo "$(RED)✗$(NC)"
 	@echo -n "Hadolint: "; command -v hadolint >/dev/null 2>&1 && echo "$(GREEN)✓$(NC)" || echo "$(RED)✗$(NC)"

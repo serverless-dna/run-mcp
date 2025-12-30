@@ -168,7 +168,7 @@ A system for building and distributing language-specific container images that e
 
 #### Acceptance Criteria
 
-1. THE run-mcp binary SHALL auto-detect available container runtimes (Docker, Podman, nerdctl) on Windows, macOS, and Linux
+1. THE run-mcp binary SHALL auto-detect available container runtimes (Docker, Podman, nerdctl, Finch) on Windows, macOS, and Linux
 2. THE run-mcp binary SHALL auto-detect the required language runtime from the command (npx→Node.js, uvx→Python)
 3. THE run-mcp binary SHALL pass environment variables from the MCP client to the container using a secure allowlist approach with predefined prefixes
 4. THE run-mcp binary SHALL mount common credential directories (~/.aws, ~/.config) read-only with cross-platform path handling

@@ -433,7 +433,8 @@ run-mcp node npx @modelcontextprotocol/server-memory
 1. `docker`
 2. `podman`
 3. `nerdctl`
-4. `lima nerdctl` (macOS only)
+4. `finch` (AWS Finch)
+5. `lima nerdctl` (macOS only)
 
 **Language Detection**:
 | Command | Detected Runtime |
@@ -620,8 +621,8 @@ func (rd *RuntimeDetector) Detect() (string, error) {
         return rt, nil
     }
     
-    // Platform-specific runtime list
-    runtimes := []string{"docker", "podman", "nerdctl"}
+    // Platform-specific runtime list with priority order
+    runtimes := []string{"docker", "podman", "nerdctl", "finch"}
     if runtime.GOOS == "darwin" {
         runtimes = append(runtimes, "lima nerdctl")
     }
@@ -632,7 +633,7 @@ func (rd *RuntimeDetector) Detect() (string, error) {
         }
     }
     
-    return "", fmt.Errorf("no container runtime found. Install docker, podman, or nerdctl")
+    return "", fmt.Errorf("no container runtime found. Install docker, podman, nerdctl, or finch")
 }
 
 func (rd *RuntimeDetector) isAvailable(runtime string) bool {
@@ -845,7 +846,7 @@ interface ContainerRunnerConfig {
 **Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.6**
 
 ### Property 19: Container Runtime Detection
-*For any* system with available container runtimes, the run-mcp binary should correctly detect and use the first available runtime in the priority order (docker, podman, nerdctl, lima).
+*For any* system with available container runtimes, the run-mcp binary should correctly detect and use the first available runtime in the priority order (docker, podman, nerdctl, finch, lima).
 **Validates: Requirements 13.1, 13.7**
 
 ### Property 20: Language Auto-Detection

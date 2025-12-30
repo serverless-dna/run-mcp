@@ -248,7 +248,7 @@ This implementation plan creates a system for building and distributing language
     - _Requirements: 13.9_
 
   - [ ] 12.2 Implement container runtime detection
-    - Implement cross-platform runtime detection (docker, podman, nerdctl)
+    - Implement cross-platform runtime detection (docker, podman, nerdctl, finch)
     - Add platform-specific handling (lima nerdctl for macOS)
     - Support MCP_CONTAINER_RUNTIME override
     - Provide clear error messages when no runtime found
