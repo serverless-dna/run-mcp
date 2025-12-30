@@ -32,78 +32,80 @@ This implementation plan creates a system for building and distributing language
     - Test error handling and fallback mechanisms
     - _Requirements: 4.3, 4.5_
 
-- [ ] 3. Create Node.js container image
-  - [ ] 3.1 Create Node.js Dockerfile with multi-stage build
+- [x] 3. Create Node.js container image
+  - [x] 3.1 Create Node.js Dockerfile with multi-stage build
     - Use node:lts-alpine as base image
     - Install npm and yarn package managers
     - Set up non-root user and security best practices
     - Configure multi-architecture build support
     - _Requirements: 1.1, 5.5, 6.1, 6.2, 9.1, 9.2_
 
-  - [ ] 3.2 Create Node.js entrypoint script
+  - [x] 3.2 Create Node.js entrypoint script
     - Create simple passthrough entrypoint (exec "$@")
     - Ensure unbuffered stdio for MCP protocol
     - Set up UID 1000 for volume permission compatibility
     - _Requirements: 1.5, 5.3, 10.6, 10.7, 10.8, 10.9_
 
-  - [ ] 3.3 Create Node.js package.json and configuration
+  - [x] 3.3 Create Node.js package.json and configuration
     - Support both CommonJS and ES modules
     - Include TypeScript compilation capabilities
     - Include MCP SDK dependencies
     - Set up dependency caching
     - _Requirements: 6.3, 6.4, 6.5, 11.1_
 
-  - [ ] 3.4 Create Node.js container README.md
+  - [x] 3.4 Create Node.js container README.md
     - Document usage examples and volume mounting
     - Explain MCP transport configuration
     - Provide troubleshooting guide
     - _Requirements: 10.2, 10.4_
 
-  - [ ] 3.5 Add Dockerfile linting with hadolint
+  - [x] 3.5 Add Dockerfile linting with hadolint
     - Integrate hadolint validation in build process
     - Configure linting rules for security and best practices
     - _Requirements: 8.4_
 
-  - [ ]* 3.6 Write property tests for Node.js container
+  - [x] 3.6 Write property tests for Node.js container
+
     - **Property 1: Language-Specific Container Creation**
     - **Property 13: LTS Version Compliance**
     - **Property 15: Node.js Module System Support**
     - **Validates: Requirements 1.1, 6.1, 6.4, 6.5**
 
-- [ ] 4. Create Python container image
-  - [ ] 4.1 Create Python Dockerfile with multi-stage build
+- [x] 4. Create Python container image
+  - [x] 4.1 Create Python Dockerfile with multi-stage build
     - Use python:3.12-slim as base image
     - Install uv package manager
     - Set up virtual environment and non-root user
     - Configure multi-architecture build support
     - _Requirements: 1.2, 5.5, 7.1, 7.2, 9.1, 9.2_
 
-  - [ ] 4.2 Create Python entrypoint script
+  - [x] 4.2 Create Python entrypoint script
     - Create simple passthrough entrypoint (exec "$@")
     - Ensure unbuffered stdio for MCP protocol
     - Set up UID 1000 for volume permission compatibility
     - _Requirements: 1.5, 5.3, 10.6, 10.7, 10.8, 10.9_
 
-  - [ ] 4.3 Create Python pyproject.toml and configuration
+  - [x] 4.3 Create Python pyproject.toml and configuration
     - Configure uv for fast dependency resolution
     - Include common Python development tools
     - Include MCP SDK dependencies
     - Set up virtual environment isolation
     - _Requirements: 7.3, 7.4, 7.5, 11.1_
 
-  - [ ] 4.4 Create Python container README.md
+  - [x] 4.4 Create Python container README.md
     - Document usage examples and volume mounting
     - Explain MCP transport configuration
     - Provide troubleshooting guide
     - _Requirements: 10.2, 10.4_
 
-  - [ ]* 4.5 Write property tests for Python container
+  - [x] 4.5 Write property tests for Python container
+
     - **Property 1: Language-Specific Container Creation**
     - **Property 13: LTS Version Compliance**
     - **Property 16: Python Environment Management**
     - **Validates: Requirements 1.2, 7.1, 7.4, 7.5**
 
-- [ ] 5. Checkpoint - Ensure container images build locally
+- [x] 5. Checkpoint - Ensure container images build locally
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 6. Create GitHub Actions workflow
@@ -154,7 +156,8 @@ This implementation plan creates a system for building and distributing language
     - Report size in build logs
     - _Requirements: 8.1, 8.2_
 
-  - [ ]* 6.8 Write property tests for GitHub Actions workflow
+  - [ ] 6.8 Write property tests for GitHub Actions workflow
+
     - **Property 4: Change-Triggered Builds**
     - **Property 5: Successful Build Publishing**
     - **Property 7: Runtime-Based Tagging**
@@ -183,7 +186,8 @@ This implementation plan creates a system for building and distributing language
     - Provide clear startup information for containers
     - _Requirements: 4.5, 5.3_
 
-  - [ ]* 8.3 Write property tests for error handling
+  - [ ] 8.3 Write property tests for error handling
+
     - **Property 6: Build Failure Handling**
     - **Property 11: Build Logging Transparency**
     - **Validates: Requirements 2.4, 4.5, 5.3**
