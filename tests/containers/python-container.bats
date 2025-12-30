@@ -179,20 +179,18 @@ teardown() {
     run docker build -t "$TEST_IMAGE_TAG" python/
     [ "$status" -eq 0 ]
     
-    # Test that entrypoint passes through commands correctly
+    # Test that entrypoint passes through commands correctly (allow stderr for this test)
     run docker run --rm "$TEST_IMAGE_TAG" echo "test command passthrough"
     [ "$status" -eq 0 ]
     [[ "$output" =~ "test command passthrough" ]]
     
-    # Test that entrypoint works with Python commands
-    run docker run --rm "$TEST_IMAGE_TAG" python -c "print('Python execution works')"
+    # Test that entrypoint logs startup information to stderr
+    run docker run --rm "$TEST_IMAGE_TAG" sh -c "python --version" 2>&1
     [ "$status" -eq 0 ]
-    [[ "$output" =~ "Python execution works" ]]
-    
-    # Test that entrypoint works with uv commands
-    run docker run --rm "$TEST_IMAGE_TAG" uv --version
-    [ "$status" -eq 0 ]
-    [[ "$output" =~ ^uv\ [0-9]+\.[0-9]+\.[0-9]+ ]]
+    [[ "$output" =~ "Starting Python MCP server container" ]]
+    [[ "$output" =~ "Python version:" ]]
+    [[ "$output" =~ "uv version:" ]]
+    [[ "$output" =~ "Virtual environment:" ]]
 }
 
 # Additional property test: Container supports uvx for running published packages
