@@ -85,6 +85,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Log build start
+        run: |
+          echo "🚀 Starting Node.js container build"
+          echo "Build reason: ${{ needs.detect-changes.outputs.build-reason }}"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -110,12 +118,15 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
       
       - name: Lint Dockerfile
+        id: lint-nodejs
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: nodejs/Dockerfile
           config: nodejs/.hadolint.yaml
+        continue-on-error: false
       
       - name: Build and push Node.js image
+        id: build-nodejs
         uses: docker/build-push-action@v5
         with:
           context: ./nodejs
@@ -126,9 +137,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+        continue-on-error: false
       
       - name: Validate image size
+        id: validate-nodejs-size
         run: |
+          echo "🔍 Validating Node.js image size..."
+          
           # Get image size for AMD64 (first platform)
           IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 | \
             jq -r '.manifests[] | select(.platform.architecture=="amd64") | .size')
@@ -138,9 +153,39 @@ jobs:
           
           if [[ $IMAGE_SIZE_MB -gt 200 ]]; then
             echo "❌ Node.js image size (${IMAGE_SIZE_MB}MB) exceeds 200MB limit"
+            echo "::error title=Image Size Exceeded::Node.js image size (${IMAGE_SIZE_MB}MB) exceeds the 200MB limit"
             exit 1
           else
             echo "✅ Node.js image size (${IMAGE_SIZE_MB}MB) is within 200MB limit"
+          fi
+        continue-on-error: false
+      
+      - name: Log build success
+        if: success()
+        run: |
+          echo "✅ Node.js container build completed successfully"
+          echo "Image tags: ${{ steps.meta.outputs.tags }}"
+          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+      
+      - name: Log build failure
+        if: failure()
+        run: |
+          echo "❌ Node.js container build failed"
+          echo "Failed step: ${{ job.status }}"
+          echo "Failure time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "::error title=Node.js Build Failed::The Node.js container build process failed. Check the logs above for details."
+          
+          # Provide specific failure context
+          if [[ "${{ steps.lint-nodejs.outcome }}" == "failure" ]]; then
+            echo "::error title=Dockerfile Lint Failed::The Node.js Dockerfile failed hadolint validation"
+          fi
+          
+          if [[ "${{ steps.build-nodejs.outcome }}" == "failure" ]]; then
+            echo "::error title=Docker Build Failed::The Node.js Docker build process failed"
+          fi
+          
+          if [[ "${{ steps.validate-nodejs-size.outcome }}" == "failure" ]]; then
+            echo "::error title=Image Size Validation Failed::The Node.js image exceeded the size limit"
           fi
 
   build-python:
@@ -153,6 +198,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      
+      - name: Log build start
+        run: |
+          echo "🚀 Starting Python container build"
+          echo "Build reason: ${{ needs.detect-changes.outputs.build-reason }}"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
       
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -179,12 +232,15 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
       
       - name: Lint Dockerfile
+        id: lint-python
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: python/Dockerfile
           config: python/.hadolint.yaml
+        continue-on-error: false
       
       - name: Build and push Python image
+        id: build-python
         uses: docker/build-push-action@v5
         with:
           context: ./python
@@ -195,9 +251,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+        continue-on-error: false
       
       - name: Validate image size
+        id: validate-python-size
         run: |
+          echo "🔍 Validating Python image size..."
+          
           # Get image size for AMD64 (first platform)
           IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 | \
             jq -r '.manifests[] | select(.platform.architecture=="amd64") | .size')
@@ -207,9 +267,39 @@ jobs:
           
           if [[ $IMAGE_SIZE_MB -gt 300 ]]; then
             echo "❌ Python image size (${IMAGE_SIZE_MB}MB) exceeds 300MB limit"
+            echo "::error title=Image Size Exceeded::Python image size (${IMAGE_SIZE_MB}MB) exceeds the 300MB limit"
             exit 1
           else
             echo "✅ Python image size (${IMAGE_SIZE_MB}MB) is within 300MB limit"
+          fi
+        continue-on-error: false
+      
+      - name: Log build success
+        if: success()
+        run: |
+          echo "✅ Python container build completed successfully"
+          echo "Image tags: ${{ steps.meta.outputs.tags }}"
+          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+      
+      - name: Log build failure
+        if: failure()
+        run: |
+          echo "❌ Python container build failed"
+          echo "Failed step: ${{ job.status }}"
+          echo "Failure time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "::error title=Python Build Failed::The Python container build process failed. Check the logs above for details."
+          
+          # Provide specific failure context
+          if [[ "${{ steps.lint-python.outcome }}" == "failure" ]]; then
+            echo "::error title=Dockerfile Lint Failed::The Python Dockerfile failed hadolint validation"
+          fi
+          
+          if [[ "${{ steps.build-python.outcome }}" == "failure" ]]; then
+            echo "::error title=Docker Build Failed::The Python Docker build process failed"
+          fi
+          
+          if [[ "${{ steps.validate-python-size.outcome }}" == "failure" ]]; then
+            echo "::error title=Image Size Validation Failed::The Python image exceeded the size limit"
           fi
 
   integration-test:
@@ -220,81 +310,103 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Log integration test start
+        run: |
+          echo "🧪 Starting integration tests"
+          echo "Node.js build result: ${{ needs.build-nodejs.result }}"
+          echo "Python build result: ${{ needs.build-python.result }}"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+      
       - name: Test Node.js container (if built)
+        id: test-nodejs
         if: needs.build-nodejs.result == 'success'
         run: |
-          echo "Testing Node.js container startup and basic functionality..."
+          echo "🔍 Testing Node.js container startup and basic functionality..."
           
           # Test container startup
           timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 node --version || {
             echo "❌ Node.js container failed to start or respond"
+            echo "::error title=Node.js Container Test Failed::Node.js container failed to start or respond to basic commands"
             exit 1
           }
           
           # Test npm availability
           timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 npm --version || {
             echo "❌ npm not available in Node.js container"
+            echo "::error title=Node.js npm Test Failed::npm is not available in the Node.js container"
             exit 1
           }
           
           # Test yarn availability
           timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 yarn --version || {
             echo "❌ yarn not available in Node.js container"
+            echo "::error title=Node.js yarn Test Failed::yarn is not available in the Node.js container"
             exit 1
           }
           
           # Test npx availability
           timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 npx --version || {
             echo "❌ npx not available in Node.js container"
+            echo "::error title=Node.js npx Test Failed::npx is not available in the Node.js container"
             exit 1
           }
           
           echo "✅ Node.js container tests passed"
+        continue-on-error: true
       
       - name: Test Python container (if built)
+        id: test-python
         if: needs.build-python.result == 'success'
         run: |
-          echo "Testing Python container startup and basic functionality..."
+          echo "🔍 Testing Python container startup and basic functionality..."
           
           # Test container startup
           timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 python --version || {
             echo "❌ Python container failed to start or respond"
+            echo "::error title=Python Container Test Failed::Python container failed to start or respond to basic commands"
             exit 1
           }
           
           # Test uv availability
           timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 uv --version || {
             echo "❌ uv not available in Python container"
+            echo "::error title=Python uv Test Failed::uv is not available in the Python container"
             exit 1
           }
           
           # Test uvx availability
           timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 uvx --version || {
             echo "❌ uvx not available in Python container"
+            echo "::error title=Python uvx Test Failed::uvx is not available in the Python container"
             exit 1
           }
           
           echo "✅ Python container tests passed"
+        continue-on-error: true
       
       - name: Test stdio mode behavior
+        id: test-stdio
         if: needs.build-nodejs.result == 'success'
         run: |
-          echo "Testing stdio mode with Node.js container..."
+          echo "🔍 Testing stdio mode with Node.js container..."
           
           # Test that container properly handles stdin/stdout without TTY
           echo '{"jsonrpc": "2.0", "method": "test", "id": 1}' | \
             timeout 5s docker run -i --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 \
             node -e "process.stdin.on('data', d => { console.log('received:', d.toString().trim()); process.exit(0); })" || {
             echo "❌ stdio mode test failed"
+            echo "::error title=stdio Mode Test Failed::Container failed to handle stdin/stdout communication properly"
             exit 1
           }
           
           echo "✅ stdio mode tests passed"
+        continue-on-error: true
       
       - name: Test volume mounting
+        id: test-volumes
         if: needs.build-nodejs.result == 'success'
         run: |
-          echo "Testing volume mounting behavior..."
+          echo "🔍 Testing volume mounting behavior..."
           
           # Create test data
           mkdir -p /tmp/test-data
@@ -306,37 +418,87 @@ jobs:
           
           if [[ "$RESULT" != "test file content" ]]; then
             echo "❌ Volume mounting test failed. Expected 'test file content', got: $RESULT"
+            echo "::error title=Volume Mount Test Failed::Container failed to properly mount and access volumes"
             exit 1
           fi
           
           echo "✅ Volume mounting tests passed"
+        continue-on-error: true
+      
+      - name: Log integration test results
+        if: always()
+        run: |
+          echo "📊 Integration test results summary:"
+          echo "Node.js container test: ${{ steps.test-nodejs.outcome }}"
+          echo "Python container test: ${{ steps.test-python.outcome }}"
+          echo "stdio mode test: ${{ steps.test-stdio.outcome }}"
+          echo "Volume mounting test: ${{ steps.test-volumes.outcome }}"
+          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          
+          # Check if any critical tests failed
+          if [[ "${{ steps.test-nodejs.outcome }}" == "failure" && "${{ needs.build-nodejs.result }}" == "success" ]]; then
+            echo "::error title=Node.js Integration Test Failed::Node.js container integration tests failed despite successful build"
+          fi
+          
+          if [[ "${{ steps.test-python.outcome }}" == "failure" && "${{ needs.build-python.result }}" == "success" ]]; then
+            echo "::error title=Python Integration Test Failed::Python container integration tests failed despite successful build"
+          fi
 
   vulnerability-scan:
     runs-on: ubuntu-latest
     needs: [build-nodejs, build-python]
     if: always() && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
     steps:
+      - name: Log vulnerability scan start
+        run: |
+          echo "🔒 Starting vulnerability scans"
+          echo "Node.js build result: ${{ needs.build-nodejs.result }}"
+          echo "Python build result: ${{ needs.build-python.result }}"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+      
       - name: Run Trivy vulnerability scanner on Node.js image
+        id: scan-nodejs
         if: needs.build-nodejs.result == 'success'
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22
           format: 'sarif'
           output: 'nodejs-trivy-results.sarif'
+        continue-on-error: true
       
       - name: Run Trivy vulnerability scanner on Python image
+        id: scan-python
         if: needs.build-python.result == 'success'
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12
           format: 'sarif'
           output: 'python-trivy-results.sarif'
+        continue-on-error: true
       
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v2
         if: always()
         with:
           sarif_file: '.'
+        continue-on-error: true
+      
+      - name: Log vulnerability scan results
+        if: always()
+        run: |
+          echo "📊 Vulnerability scan results summary:"
+          echo "Node.js scan result: ${{ steps.scan-nodejs.outcome }}"
+          echo "Python scan result: ${{ steps.scan-python.outcome }}"
+          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          
+          # Log warnings for failed scans (but don't fail the job)
+          if [[ "${{ steps.scan-nodejs.outcome }}" == "failure" && "${{ needs.build-nodejs.result }}" == "success" ]]; then
+            echo "::warning title=Node.js Vulnerability Scan Failed::Node.js container vulnerability scan failed, but build continues"
+          fi
+          
+          if [[ "${{ steps.scan-python.outcome }}" == "failure" && "${{ needs.build-python.result }}" == "success" ]]; then
+            echo "::warning title=Python Vulnerability Scan Failed::Python container vulnerability scan failed, but build continues"
+          fi
 
   update-versions:
     runs-on: ubuntu-latest
