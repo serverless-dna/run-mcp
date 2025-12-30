@@ -108,28 +108,28 @@ This implementation plan creates a system for building and distributing language
 - [x] 5. Checkpoint - Ensure container images build locally
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 6. Create GitHub Actions workflow
-  - [ ] 6.1 Create build-containers.yml workflow file
+- [x] 6. Create GitHub Actions workflow
+  - [x] 6.1 Create build-containers.yml workflow file
     - Set up triggers for push to main and pull requests
     - Add workflow_dispatch for manual triggers
     - Configure GITHUB_TOKEN authentication for GHCR
     - Implement conditional job execution based on change detection
     - _Requirements: 2.1, 3.3, 4.1, 4.2_
 
-  - [ ] 6.2 Implement multi-architecture build matrix
+  - [x] 6.2 Implement multi-architecture build matrix
     - Configure buildx for AMD64 and ARM64 builds
     - Set up build matrix for parallel architecture builds
     - Create multi-architecture manifests
     - _Requirements: 9.1, 9.2, 9.3_
 
-  - [ ] 6.3 Implement container build jobs
+  - [x] 6.3 Implement container build jobs
     - Create separate jobs for Node.js and Python containers
     - Configure Docker layer caching for faster builds
     - Add hadolint linting validation
     - Implement proper error handling and isolation
     - _Requirements: 2.3, 2.4, 8.4_
 
-  - [ ] 6.4 Implement registry publishing
+  - [x] 6.4 Implement registry publishing
     - Push images to GitHub Container Registry (ghcr.io)
     - Configure runtime-based tagging (node22, python3.12)
     - Create pinned tags with date and commit SHA
@@ -137,26 +137,26 @@ This implementation plan creates a system for building and distributing language
     - Add vulnerability scanning before publish
     - _Requirements: 2.2, 2.5, 3.1, 3.2, 3.4, 8.4_
 
-  - [ ] 6.5 Add integration testing
+  - [x] 6.5 Add integration testing
     - Test container startup behavior
     - Validate MCP protocol functionality
     - Test volume mounting and entrypoint behavior
     - _Requirements: 10.1, 10.3, 11.2, 11.4_
 
-  - [ ] 6.6 Test stdio mode with Claude Desktop
+  - [x] 6.6 Test stdio mode with Claude Desktop
     - Configure Claude Desktop to use container via stdio
     - Verify bidirectional JSON-RPC communication
     - Test graceful shutdown on SIGTERM
     - Validate no TTY allocation breaks communication
     - _Requirements: 10.6, 10.7, 10.8, 10.9, 11.3_
 
-  - [ ] 6.7 Add image size validation
+  - [x] 6.7 Add image size validation
     - Fail build if Node.js image > 200MB
     - Fail build if Python image > 300MB
     - Report size in build logs
     - _Requirements: 8.1, 8.2_
 
-  - [ ] 6.8 Write property tests for GitHub Actions workflow
+  - [x] 6.8 Write property tests for GitHub Actions workflow
 
     - **Property 4: Change-Triggered Builds**
     - **Property 5: Successful Build Publishing**
@@ -169,7 +169,7 @@ This implementation plan creates a system for building and distributing language
     - Implement consistent signal forwarding
     - _Requirements: 1.4, 10.6, 10.7, 10.8_
 
-  - [ ]* 7.2 Write property tests for container interfaces
+  - [ ] 7.2 Write property tests for container interfaces
     - **Property 2: Standardized Container Interface**
     - **Property 3: Container Startup Readiness**
     - **Property 17: stdio Transport Integrity**

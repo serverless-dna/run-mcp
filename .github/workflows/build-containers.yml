@@ -1,0 +1,395 @@
+name: Build Container Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'nodejs/**'
+      - 'python/**'
+      - 'scripts/**'
+      - '.github/workflows/build-containers.yml'
+      - 'Dockerfile*'
+      - 'versions.json'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'nodejs/**'
+      - 'python/**'
+      - 'scripts/**'
+      - '.github/workflows/build-containers.yml'
+      - 'Dockerfile*'
+      - 'versions.json'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build all containers'
+        required: false
+        default: 'false'
+        type: boolean
+      nodejs_version:
+        description: 'Node.js version to build (optional)'
+        required: false
+        type: string
+      python_version:
+        description: 'Python version to build (optional)'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      nodejs-changed: ${{ steps.changes.outputs.nodejs-changed }}
+      python-changed: ${{ steps.changes.outputs.python-changed }}
+      build-reason: ${{ steps.changes.outputs.build-reason }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for git diff
+      
+      - name: Detect changes
+        id: changes
+        run: |
+          # Handle manual workflow dispatch
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            if [[ "${{ github.event.inputs.force_build }}" == "true" ]]; then
+              echo "nodejs-changed=true" >> $GITHUB_OUTPUT
+              echo "python-changed=true" >> $GITHUB_OUTPUT
+              echo "build-reason=Manual force build requested" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          
+          # Use the detect-changes.sh script
+          bash scripts/detect-changes.sh
+      
+      - name: Log detected changes
+        run: |
+          echo "Build reason: ${{ steps.changes.outputs.build-reason }}"
+          echo "Node.js changed: ${{ steps.changes.outputs.nodejs-changed }}"
+          echo "Python changed: ${{ steps.changes.outputs.python-changed }}"
+
+  build-nodejs:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.nodejs-changed == 'true'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+      
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=node22
+            type=raw,value=node22-{{date 'YYYYMMDD'}}-{{sha}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: nodejs/Dockerfile
+          config: nodejs/.hadolint.yaml
+      
+      - name: Build and push Node.js image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./nodejs
+          file: ./nodejs/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Validate image size
+        run: |
+          # Get image size for AMD64 (first platform)
+          IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 | \
+            jq -r '.manifests[] | select(.platform.architecture=="amd64") | .size')
+          IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
+          
+          echo "Node.js image size: ${IMAGE_SIZE_MB}MB"
+          
+          if [[ $IMAGE_SIZE_MB -gt 200 ]]; then
+            echo "❌ Node.js image size (${IMAGE_SIZE_MB}MB) exceeds 200MB limit"
+            exit 1
+          else
+            echo "✅ Node.js image size (${IMAGE_SIZE_MB}MB) is within 200MB limit"
+          fi
+
+  build-python:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.python-changed == 'true'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+      
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=python3.12
+            type=raw,value=python3.12-{{date 'YYYYMMDD'}}-{{sha}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: python/Dockerfile
+          config: python/.hadolint.yaml
+      
+      - name: Build and push Python image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./python
+          file: ./python/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Validate image size
+        run: |
+          # Get image size for AMD64 (first platform)
+          IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 | \
+            jq -r '.manifests[] | select(.platform.architecture=="amd64") | .size')
+          IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
+          
+          echo "Python image size: ${IMAGE_SIZE_MB}MB"
+          
+          if [[ $IMAGE_SIZE_MB -gt 300 ]]; then
+            echo "❌ Python image size (${IMAGE_SIZE_MB}MB) exceeds 300MB limit"
+            exit 1
+          else
+            echo "✅ Python image size (${IMAGE_SIZE_MB}MB) is within 300MB limit"
+          fi
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: [build-nodejs, build-python]
+    if: always() && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Test Node.js container (if built)
+        if: needs.build-nodejs.result == 'success'
+        run: |
+          echo "Testing Node.js container startup and basic functionality..."
+          
+          # Test container startup
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 node --version || {
+            echo "❌ Node.js container failed to start or respond"
+            exit 1
+          }
+          
+          # Test npm availability
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 npm --version || {
+            echo "❌ npm not available in Node.js container"
+            exit 1
+          }
+          
+          # Test yarn availability
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 yarn --version || {
+            echo "❌ yarn not available in Node.js container"
+            exit 1
+          }
+          
+          # Test npx availability
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 npx --version || {
+            echo "❌ npx not available in Node.js container"
+            exit 1
+          }
+          
+          echo "✅ Node.js container tests passed"
+      
+      - name: Test Python container (if built)
+        if: needs.build-python.result == 'success'
+        run: |
+          echo "Testing Python container startup and basic functionality..."
+          
+          # Test container startup
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 python --version || {
+            echo "❌ Python container failed to start or respond"
+            exit 1
+          }
+          
+          # Test uv availability
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 uv --version || {
+            echo "❌ uv not available in Python container"
+            exit 1
+          }
+          
+          # Test uvx availability
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 uvx --version || {
+            echo "❌ uvx not available in Python container"
+            exit 1
+          }
+          
+          echo "✅ Python container tests passed"
+      
+      - name: Test stdio mode behavior
+        if: needs.build-nodejs.result == 'success'
+        run: |
+          echo "Testing stdio mode with Node.js container..."
+          
+          # Test that container properly handles stdin/stdout without TTY
+          echo '{"jsonrpc": "2.0", "method": "test", "id": 1}' | \
+            timeout 5s docker run -i --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 \
+            node -e "process.stdin.on('data', d => { console.log('received:', d.toString().trim()); process.exit(0); })" || {
+            echo "❌ stdio mode test failed"
+            exit 1
+          }
+          
+          echo "✅ stdio mode tests passed"
+      
+      - name: Test volume mounting
+        if: needs.build-nodejs.result == 'success'
+        run: |
+          echo "Testing volume mounting behavior..."
+          
+          # Create test data
+          mkdir -p /tmp/test-data
+          echo "test file content" > /tmp/test-data/test.txt
+          
+          # Test volume mount
+          RESULT=$(docker run --rm -v /tmp/test-data:/data ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 \
+            node -e "console.log(require('fs').readFileSync('/data/test.txt', 'utf8').trim())")
+          
+          if [[ "$RESULT" != "test file content" ]]; then
+            echo "❌ Volume mounting test failed. Expected 'test file content', got: $RESULT"
+            exit 1
+          fi
+          
+          echo "✅ Volume mounting tests passed"
+
+  vulnerability-scan:
+    runs-on: ubuntu-latest
+    needs: [build-nodejs, build-python]
+    if: always() && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    steps:
+      - name: Run Trivy vulnerability scanner on Node.js image
+        if: needs.build-nodejs.result == 'success'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22
+          format: 'sarif'
+          output: 'nodejs-trivy-results.sarif'
+      
+      - name: Run Trivy vulnerability scanner on Python image
+        if: needs.build-python.result == 'success'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12
+          format: 'sarif'
+          output: 'python-trivy-results.sarif'
+      
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: '.'
+
+  update-versions:
+    runs-on: ubuntu-latest
+    needs: [build-nodejs, build-python, integration-test, vulnerability-scan]
+    if: always() && github.ref == 'refs/heads/main' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update versions.json
+        run: |
+          # Update versions.json with successful builds
+          if [[ "${{ needs.build-nodejs.result }}" == "success" ]]; then
+            # Extract Node.js version from built image
+            NODE_VERSION="${{ github.event.inputs.nodejs_version }}"
+            if [[ -z "$NODE_VERSION" ]]; then
+              # Default to current LTS version
+              NODE_VERSION="22.11.0"
+            fi
+            
+            # Update versions.json
+            jq --arg version "$NODE_VERSION" '.nodejs."22" = $version' versions.json > versions.tmp
+            mv versions.tmp versions.json
+          fi
+          
+          if [[ "${{ needs.build-python.result }}" == "success" ]]; then
+            # Extract Python version from built image
+            PYTHON_VERSION="${{ github.event.inputs.python_version }}"
+            if [[ -z "$PYTHON_VERSION" ]]; then
+              # Default to current version
+              PYTHON_VERSION="3.12.8"
+            fi
+            
+            # Update versions.json
+            jq --arg version "$PYTHON_VERSION" '.python."3.12" = $version' versions.json > versions.tmp
+            mv versions.tmp versions.json
+          fi
+          
+          # Update last checked timestamp
+          jq --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.lastChecked = $timestamp' versions.json > versions.tmp
+          mv versions.tmp versions.json
+      
+      - name: Commit version updates
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          if git diff --quiet versions.json; then
+            echo "No version changes to commit"
+          else
+            git add versions.json
+            git commit -m "Update versions.json after successful container builds"
+            git push
+          fi
