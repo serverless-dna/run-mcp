@@ -1,0 +1,59 @@
+{
+  "name": "mcp-nodejs-container",
+  "version": "1.0.0",
+  "description": "Node.js container image for running MCP servers",
+  "type": "module",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "build": "tsc",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "tsx": "^4.0.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.5.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "container",
+    "nodejs",
+    "docker"
+  ],
+  "author": "MCP Container Images",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/owner/mcp-container-images"
+  },
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "require": "./index.cjs",
+      "types": "./index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "index.js",
+    "index.cjs",
+    "index.d.ts"
+  ]
+}

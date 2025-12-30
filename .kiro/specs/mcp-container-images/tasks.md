@@ -198,7 +198,7 @@ This implementation plan creates a system for building and distributing language
     - Set up proper tagging strategy
     - _Requirements: 3.5_
 
-  - [ ]* 9.2 Write property tests for version management
+  - [ ] 9.2 Write property tests for version management
     - **Property 8: Version Retention**
     - **Property 10: Build Skipping Logic**
     - **Validates: Requirements 3.5, 4.4**
@@ -209,7 +209,7 @@ This implementation plan creates a system for building and distributing language
     - Minimize attack surface in container images
     - _Requirements: 5.5_
 
-  - [ ]* 10.2 Write property tests for security practices
+  - [ ] 10.2 Write property tests for security practices
     - **Property 12: Docker Security Best Practices**
     - **Property 14: Language-Specific Package Managers**
     - **Validates: Requirements 5.5, 6.2, 6.3, 7.2, 7.3**
@@ -240,7 +240,7 @@ This implementation plan creates a system for building and distributing language
     - Update versions.json after successful build
     - _Requirements: 12.3, 12.4, 12.6_
 
-  - [ ]* 11.5 Write property tests for upstream version detection
+  - [ ] 11.5 Write property tests for upstream version detection
     - **Property 18: Upstream Version Detection**
     - **Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.6**
 
@@ -303,7 +303,7 @@ This implementation plan creates a system for building and distributing language
     - Validate cross-platform volume mounting
     - _Requirements: 13.3, 13.4, 13.5_
 
-  - [ ]* 12.10 Write property tests for run-mcp binary
+  - [ ] 12.10 Write property tests for run-mcp binary
     - **Property 19: Container Runtime Detection**
     - **Property 20: Language Auto-Detection**
     - **Property 21: Secure Environment Variable Passthrough**

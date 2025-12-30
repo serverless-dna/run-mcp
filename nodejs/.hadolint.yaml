@@ -1,0 +1,37 @@
+# Hadolint configuration for Node.js MCP container
+# Enforces Docker best practices and security guidelines
+
+# Ignore specific rules that don't apply to our use case
+ignored:
+  # DL3008: Pin versions in apt get install (we use apk on Alpine)
+  - DL3008
+  # DL3009: Delete the apt-get lists after installing (we use apk on Alpine)  
+  - DL3009
+  # DL3015: Avoid additional packages by specifying --no-install-recommends (apk doesn't have this)
+  - DL3015
+  # DL3018: Pin versions in apk add (Alpine packages change frequently, pinning causes build failures)
+  - DL3018
+  # DL3059: Multiple consecutive RUN instructions (acceptable for readability in multi-stage)
+  - DL3059
+
+# Trusted registries for base images
+trustedRegistries:
+  - docker.io
+  - registry-1.docker.io
+
+# Override specific rules
+override:
+  # Allow specific shell commands that are safe in our context
+  error: []
+  warning: []
+  info: []
+  style: []
+
+# Strict mode - treat warnings as errors for security
+strictLabels: false
+
+# Format for output (can be: tty, json, checkstyle, codeclimate, gitlab_codeclimate, gnu, codacy, sonarqube, sarif)
+format: tty
+
+# Failure threshold (error, warning, info, style)
+failure-threshold: warning

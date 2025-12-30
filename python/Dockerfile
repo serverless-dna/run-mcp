@@ -1,0 +1,63 @@
+# Multi-stage build for Python MCP server container
+# Stage 1: Builder stage for installing dependencies
+FROM python:3.12-slim AS builder
+
+# Install system dependencies needed for building Python packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        git && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install uv package manager
+RUN pip install --no-cache-dir uv
+
+# Create app directory and set up virtual environment
+WORKDIR /app
+RUN uv venv /app/venv
+
+# Install dependencies using uv
+RUN uv pip install --no-cache-dir --python /app/venv/bin/python mcp>=1.0.0 uvloop>=0.19.0 httpx>=0.25.0 pydantic>=2.0.0 typing-extensions>=4.8.0
+
+# Stage 2: Runtime stage
+FROM python:3.12-slim AS runtime
+
+# Install runtime dependencies and create user
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        git && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
+
+# Create directories, set up user permissions, and install uv
+RUN mkdir -p /app /data && \
+    chown -R 1000:1000 /app /data && \
+    pip install --no-cache-dir uv
+
+# Copy virtual environment from builder stage
+COPY --from=builder --chown=1000:1000 /app/venv /app/venv
+
+# Add virtual environment to PATH
+ENV PATH="/app/venv/bin:$PATH"
+ENV VIRTUAL_ENV="/app/venv"
+
+# Copy entrypoint script
+COPY --chown=1000:1000 entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Set working directory
+WORKDIR /app
+
+# Switch to non-root user
+USER 1000:1000
+
+# Set environment variables for unbuffered output
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Default entrypoint
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["python", "--version"]

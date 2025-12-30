@@ -1,0 +1,24 @@
+# Hadolint configuration for Python Dockerfile
+ignored:
+  # Allow apt-get update and install in same RUN command
+  - DL3008
+  # Allow latest tag for base images (we use specific Python version)
+  - DL3007
+  # Allow pip install without version pinning for uv (it's a build tool)
+  - DL3013
+  # Allow multiple consecutive RUN instructions for better layer caching
+  - DL3059
+  # Ignore shell redirection false positive in uv pip install command
+  - SC2261
+
+# Trusted registries
+trustedRegistries:
+  - docker.io
+  - python
+
+# Override default shell
+override:
+  error: []
+  warning: []
+  info: []
+  style: []

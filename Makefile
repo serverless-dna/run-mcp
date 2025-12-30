@@ -38,8 +38,8 @@ BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 DATE := $(shell date +%Y%m%d)
 
 # Image names and tags
-NODEJS_IMAGE := $(REGISTRY)/$(OWNER)/mcp-nodejs
-PYTHON_IMAGE := $(REGISTRY)/$(OWNER)/mcp-python
+NODEJS_IMAGE := $(REGISTRY)/$(OWNER)/run-mcp-nodejs
+PYTHON_IMAGE := $(REGISTRY)/$(OWNER)/run-mcp-python
 
 # Default Node.js and Python versions (can be overridden)
 NODE_VERSION ?= 22
@@ -103,35 +103,67 @@ test-detect-changes: ## Test change detection script with current repo
 # Build targets
 build: build-nodejs build-python ## Build all container images
 
-build-nodejs: ## Build Node.js container image
+build-nodejs: ## Build Node.js container image (current platform)
 	$(call check_docker)
-	@echo "$(BLUE)Building Node.js container image...$(NC)"
+	@echo "$(BLUE)Building Node.js container image for current platform...$(NC)"
 	@if [ ! -f nodejs/Dockerfile ]; then \
 		echo "$(RED)Error: nodejs/Dockerfile not found$(NC)"; \
 		exit 1; \
 	fi
 	$(DOCKER_CMD) build \
-		--platform linux/amd64,linux/arm64 \
 		--tag $(NODEJS_IMAGE):$(NODEJS_TAG) \
 		--tag $(NODEJS_IMAGE):$(NODEJS_PINNED_TAG) \
 		--tag $(NODEJS_IMAGE):latest \
 		nodejs/
 	@echo "$(GREEN)✓ Node.js image built: $(NODEJS_IMAGE):$(NODEJS_TAG)$(NC)"
 
-build-python: ## Build Python container image
+build-nodejs-multiarch: ## Build Node.js container image (multi-architecture)
 	$(call check_docker)
-	@echo "$(BLUE)Building Python container image...$(NC)"
+	@echo "$(BLUE)Building Node.js container image for multiple architectures...$(NC)"
+	@if [ ! -f nodejs/Dockerfile ]; then \
+		echo "$(RED)Error: nodejs/Dockerfile not found$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)Note: Multi-arch build requires proper buildx setup with ARM64 emulation$(NC)"
+	$(DOCKER_CMD) buildx build \
+		--platform linux/amd64,linux/arm64 \
+		--tag $(NODEJS_IMAGE):$(NODEJS_TAG) \
+		--tag $(NODEJS_IMAGE):$(NODEJS_PINNED_TAG) \
+		--tag $(NODEJS_IMAGE):latest \
+		--push \
+		nodejs/
+	@echo "$(GREEN)✓ Node.js multi-arch image built and pushed: $(NODEJS_IMAGE):$(NODEJS_TAG)$(NC)"
+
+build-python: ## Build Python container image (current platform)
+	$(call check_docker)
+	@echo "$(BLUE)Building Python container image for current platform...$(NC)"
 	@if [ ! -f python/Dockerfile ]; then \
 		echo "$(RED)Error: python/Dockerfile not found$(NC)"; \
 		exit 1; \
 	fi
 	$(DOCKER_CMD) build \
-		--platform linux/amd64,linux/arm64 \
 		--tag $(PYTHON_IMAGE):$(PYTHON_TAG) \
 		--tag $(PYTHON_IMAGE):$(PYTHON_PINNED_TAG) \
 		--tag $(PYTHON_IMAGE):latest \
 		python/
 	@echo "$(GREEN)✓ Python image built: $(PYTHON_IMAGE):$(PYTHON_TAG)$(NC)"
+
+build-python-multiarch: ## Build Python container image (multi-architecture)
+	$(call check_docker)
+	@echo "$(BLUE)Building Python container image for multiple architectures...$(NC)"
+	@if [ ! -f python/Dockerfile ]; then \
+		echo "$(RED)Error: python/Dockerfile not found$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)Note: Multi-arch build requires proper buildx setup with ARM64 emulation$(NC)"
+	$(DOCKER_CMD) buildx build \
+		--platform linux/amd64,linux/arm64 \
+		--tag $(PYTHON_IMAGE):$(PYTHON_TAG) \
+		--tag $(PYTHON_IMAGE):$(PYTHON_PINNED_TAG) \
+		--tag $(PYTHON_IMAGE):latest \
+		--push \
+		python/
+	@echo "$(GREEN)✓ Python multi-arch image built and pushed: $(PYTHON_IMAGE):$(PYTHON_TAG)$(NC)"
 
 # Registry targets
 login: ## Login to GitHub Container Registry
@@ -172,12 +204,7 @@ setup-dev: ## Set up development environment
 		echo "Installing bats..."; \
 		sudo apt-get update && sudo apt-get install -y bats; \
 	fi
-	@if ! command -v hadolint >/dev/null 2>&1; then \
-		echo "Installing hadolint..."; \
-		wget -O /tmp/hadolint https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64; \
-		chmod +x /tmp/hadolint; \
-		sudo mv /tmp/hadolint /usr/local/bin/hadolint; \
-	fi
+	@echo "$(GREEN)Note: hadolint will run via Docker (hadolint/hadolint:latest)$(NC)"
 	@if ! command -v docker >/dev/null 2>&1 && ! command -v podman >/dev/null 2>&1 && ! command -v nerdctl >/dev/null 2>&1 && ! command -v finch >/dev/null 2>&1 && ! command -v docker.exe >/dev/null 2>&1; then \
 		echo "$(YELLOW)Container Runtime Setup Required:$(NC)"; \
 		echo "$(BLUE)Option 1 - Docker Desktop (Recommended):$(NC)"; \
@@ -231,27 +258,26 @@ check-tools: ## Check if required tools are installed
 			echo "  5. WSL2: Enable Docker Desktop WSL2 integration"; \
 		fi
 	@echo -n "Bats: "; command -v bats >/dev/null 2>&1 && echo "$(GREEN)✓$(NC)" || echo "$(RED)✗$(NC)"
-	@echo -n "Hadolint: "; command -v hadolint >/dev/null 2>&1 && echo "$(GREEN)✓$(NC)" || echo "$(RED)✗$(NC)"
+	@echo -n "Hadolint: "; echo "$(GREEN)✓ (via Docker: hadolint/hadolint:latest)$(NC)"
 	@echo -n "Git: "; command -v git >/dev/null 2>&1 && echo "$(GREEN)✓$(NC)" || echo "$(RED)✗$(NC)"
 
 # Validation targets
 lint: validate-dockerfiles ## Run all linting checks
 
 validate-dockerfiles: ## Validate Dockerfiles with hadolint
-	@echo "$(BLUE)Validating Dockerfiles...$(NC)"
-	@if command -v hadolint >/dev/null 2>&1; then \
-		if [ -f nodejs/Dockerfile ]; then \
-			echo "Linting nodejs/Dockerfile..."; \
-			hadolint nodejs/Dockerfile; \
-		fi; \
-		if [ -f python/Dockerfile ]; then \
-			echo "Linting python/Dockerfile..."; \
-			hadolint python/Dockerfile; \
-		fi; \
-		echo "$(GREEN)✓ Dockerfile validation completed$(NC)"; \
-	else \
-		echo "$(YELLOW)Warning: hadolint not found, skipping Dockerfile validation$(NC)"; \
+	$(call check_docker)
+	@echo "$(BLUE)Validating Dockerfiles with hadolint...$(NC)"
+	@if [ -f nodejs/Dockerfile ]; then \
+		echo "Linting nodejs/Dockerfile..."; \
+		$(DOCKER_CMD) run --rm -i -v "$(PWD)/nodejs/.hadolint.yaml:/hadolint.yaml:ro" \
+			hadolint/hadolint:latest hadolint --config /hadolint.yaml - < nodejs/Dockerfile; \
 	fi
+	@if [ -f python/Dockerfile ]; then \
+		echo "Linting python/Dockerfile..."; \
+		$(DOCKER_CMD) run --rm -i -v "$(PWD)/python/.hadolint.yaml:/hadolint.yaml:ro" \
+			hadolint/hadolint:latest hadolint --config /hadolint.yaml - < python/Dockerfile; \
+	fi
+	@echo "$(GREEN)✓ Dockerfile validation completed$(NC)"
 
 check-changes: ## Check what containers would be built based on git changes
 	@echo "$(BLUE)Checking what would be built based on changes...$(NC)"
