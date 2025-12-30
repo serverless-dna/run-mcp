@@ -12,8 +12,8 @@ This implementation plan creates a system for building and distributing language
   - Set up basic project documentation
   - _Requirements: 4.3, 4.5_
 
-- [ ] 2. Implement change detection system
-  - [ ] 2.1 Create detect-changes.sh script with robust error handling
+- [-] 2. Implement change detection system
+  - [-] 2.1 Create detect-changes.sh script with robust error handling
     - Write git diff logic with shallow clone and first commit handling
     - Set GitHub Actions outputs for conditional builds
     - Handle edge cases like deleted directories and merge conflicts
