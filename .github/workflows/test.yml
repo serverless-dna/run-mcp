@@ -1,0 +1,100 @@
+name: Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test-scripts:
+    runs-on: ubuntu-latest
+    name: Test Shell Scripts
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git diff tests
+      
+      - name: Install Bats
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats
+      
+      - name: Run shell script tests
+        run: |
+          echo "Running Bats tests for shell scripts..."
+          bats tests/scripts/
+      
+      - name: Test detect-changes.sh directly
+        run: |
+          echo "Testing detect-changes.sh with current repository..."
+          # Test that the script runs without error on the current repo
+          GITHUB_OUTPUT=/tmp/test-output bash scripts/detect-changes.sh
+          echo "Script output:"
+          cat /tmp/test-output
+          
+          # Validate output format
+          grep -E "^nodejs-changed=(true|false)$" /tmp/test-output
+          grep -E "^python-changed=(true|false)$" /tmp/test-output
+          grep -E "^build-reason=.+$" /tmp/test-output
+          
+          echo "✓ detect-changes.sh produces valid output format"
+
+  test-integration:
+    runs-on: ubuntu-latest
+    name: Integration Tests
+    needs: test-scripts
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Test change detection with real scenarios
+        run: |
+          echo "Testing change detection with simulated scenarios..."
+          
+          # Test 1: No changes (should skip builds)
+          git commit --allow-empty -m "Empty commit for testing"
+          GITHUB_OUTPUT=/tmp/no-changes bash scripts/detect-changes.sh
+          
+          if grep -q "nodejs-changed=false" /tmp/no-changes && grep -q "python-changed=false" /tmp/no-changes; then
+            echo "✓ No changes correctly detected"
+          else
+            echo "✗ No changes test failed"
+            cat /tmp/no-changes
+            exit 1
+          fi
+          
+          # Test 2: Create nodejs change
+          echo "# Test change" >> nodejs/.gitkeep
+          git add nodejs/.gitkeep
+          git commit -m "Test nodejs change"
+          GITHUB_OUTPUT=/tmp/nodejs-change bash scripts/detect-changes.sh
+          
+          if grep -q "nodejs-changed=true" /tmp/nodejs-change && grep -q "python-changed=false" /tmp/nodejs-change; then
+            echo "✓ Node.js changes correctly detected"
+          else
+            echo "✗ Node.js change test failed"
+            cat /tmp/nodejs-change
+            exit 1
+          fi
+          
+          # Test 3: Create python change
+          echo "# Test change" >> python/.gitkeep
+          git add python/.gitkeep
+          git commit -m "Test python change"
+          GITHUB_OUTPUT=/tmp/python-change bash scripts/detect-changes.sh
+          
+          if grep -q "python-changed=true" /tmp/python-change && grep -q "nodejs-changed=false" /tmp/python-change; then
+            echo "✓ Python changes correctly detected"
+          else
+            echo "✗ Python change test failed"
+            cat /tmp/python-change
+            exit 1
+          fi
+          
+          echo "All integration tests passed!"
