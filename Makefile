@@ -1,11 +1,31 @@
 # Makefile for MCP Container Images
 # Manages testing, building, and publishing container images
 
+# Docker command detection for WSL2
+DOCKER_CMD := $(shell \
+	if command -v docker >/dev/null 2>&1; then \
+		echo "docker"; \
+	elif command -v docker.exe >/dev/null 2>&1; then \
+		echo "docker.exe"; \
+	else \
+		echo ""; \
+	fi)
+
+# Check if Docker is available
+define check_docker
+	@if [ -z "$(DOCKER_CMD)" ]; then \
+		echo "$(RED)Error: Docker not found$(NC)"; \
+		echo "$(YELLOW)WSL2 Docker Setup Options:$(NC)"; \
+		echo "1. Docker Desktop: Install Docker Desktop for Windows and enable WSL2 integration"; \
+		echo "2. Native Docker: Install Docker directly in WSL2 with: curl -fsSL https://get.docker.com | sh"; \
+		echo "3. Alternative: Use podman as container runtime"; \
+		exit 1; \
+	fi
+endef
 # Configuration
 REGISTRY := ghcr.io
 OWNER := $(shell git config --get remote.origin.url | sed 's/.*github.com[:/]\([^/]*\).*/\1/')
 REPO_NAME := $(shell basename `git rev-parse --show-toplevel`)
-COMMIT_SHA := $(shell git rev-parse --short HEAD)
 BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 DATE := $(shell date +%Y%m%d)
 
@@ -76,12 +96,13 @@ test-detect-changes: ## Test change detection script with current repo
 build: build-nodejs build-python ## Build all container images
 
 build-nodejs: ## Build Node.js container image
+	$(call check_docker)
 	@echo "$(BLUE)Building Node.js container image...$(NC)"
 	@if [ ! -f nodejs/Dockerfile ]; then \
 		echo "$(RED)Error: nodejs/Dockerfile not found$(NC)"; \
 		exit 1; \
 	fi
-	docker build \
+	$(DOCKER_CMD) build \
 		--platform linux/amd64,linux/arm64 \
 		--tag $(NODEJS_IMAGE):$(NODEJS_TAG) \
 		--tag $(NODEJS_IMAGE):$(NODEJS_PINNED_TAG) \
@@ -90,12 +111,13 @@ build-nodejs: ## Build Node.js container image
 	@echo "$(GREEN)✓ Node.js image built: $(NODEJS_IMAGE):$(NODEJS_TAG)$(NC)"
 
 build-python: ## Build Python container image
+	$(call check_docker)
 	@echo "$(BLUE)Building Python container image...$(NC)"
 	@if [ ! -f python/Dockerfile ]; then \
 		echo "$(RED)Error: python/Dockerfile not found$(NC)"; \
 		exit 1; \
 	fi
-	docker build \
+	$(DOCKER_CMD) build \
 		--platform linux/amd64,linux/arm64 \
 		--tag $(PYTHON_IMAGE):$(PYTHON_TAG) \
 		--tag $(PYTHON_IMAGE):$(PYTHON_PINNED_TAG) \
@@ -105,34 +127,38 @@ build-python: ## Build Python container image
 
 # Registry targets
 login: ## Login to GitHub Container Registry
+	$(call check_docker)
 	@echo "$(BLUE)Logging into GitHub Container Registry...$(NC)"
 	@if [ -z "$$GITHUB_TOKEN" ]; then \
 		echo "$(RED)Error: GITHUB_TOKEN environment variable not set$(NC)"; \
 		echo "$(YELLOW)Set it with: export GITHUB_TOKEN=your_token$(NC)"; \
 		exit 1; \
 	fi
-	@echo "$$GITHUB_TOKEN" | docker login $(REGISTRY) -u $(OWNER) --password-stdin
+	@echo "$$GITHUB_TOKEN" | $(DOCKER_CMD) login $(REGISTRY) -u $(OWNER) --password-stdin
 	@echo "$(GREEN)✓ Logged into $(REGISTRY)$(NC)"
 
 push: login push-nodejs push-python ## Push all images to registry
 
 push-nodejs: ## Push Node.js image to registry
+	$(call check_docker)
 	@echo "$(BLUE)Pushing Node.js image to registry...$(NC)"
-	docker push $(NODEJS_IMAGE):$(NODEJS_TAG)
-	docker push $(NODEJS_IMAGE):$(NODEJS_PINNED_TAG)
-	docker push $(NODEJS_IMAGE):latest
+	$(DOCKER_CMD) push $(NODEJS_IMAGE):$(NODEJS_TAG)
+	$(DOCKER_CMD) push $(NODEJS_IMAGE):$(NODEJS_PINNED_TAG)
+	$(DOCKER_CMD) push $(NODEJS_IMAGE):latest
 	@echo "$(GREEN)✓ Node.js image pushed to $(REGISTRY)$(NC)"
 
 push-python: ## Push Python image to registry
+	$(call check_docker)
 	@echo "$(BLUE)Pushing Python image to registry...$(NC)"
-	docker push $(PYTHON_IMAGE):$(PYTHON_TAG)
-	docker push $(PYTHON_IMAGE):$(PYTHON_PINNED_TAG)
-	docker push $(PYTHON_IMAGE):latest
+	$(DOCKER_CMD) push $(PYTHON_IMAGE):$(PYTHON_TAG)
+	$(DOCKER_CMD) push $(PYTHON_IMAGE):$(PYTHON_PINNED_TAG)
+	$(DOCKER_CMD) push $(PYTHON_IMAGE):latest
 	@echo "$(GREEN)✓ Python image pushed to $(REGISTRY)$(NC)"
 
 # Development targets
 setup-dev: ## Set up development environment
 	@echo "$(BLUE)Setting up development environment...$(NC)"
+	@echo "$(YELLOW)Environment: WSL2 detected$(NC)"
 	@echo "$(YELLOW)Installing required tools...$(NC)"
 	@if ! command -v bats >/dev/null 2>&1; then \
 		echo "Installing bats..."; \
@@ -144,14 +170,45 @@ setup-dev: ## Set up development environment
 		chmod +x /tmp/hadolint; \
 		sudo mv /tmp/hadolint /usr/local/bin/hadolint; \
 	fi
-	@if ! command -v docker >/dev/null 2>&1; then \
-		echo "$(RED)Warning: Docker not found. Please install Docker.$(NC)"; \
+	@if ! command -v docker >/dev/null 2>&1 && ! command -v docker.exe >/dev/null 2>&1; then \
+		echo "$(YELLOW)Docker Setup Required:$(NC)"; \
+		echo "$(BLUE)Option 1 - Docker Desktop (Recommended):$(NC)"; \
+		echo "  1. Install Docker Desktop for Windows"; \
+		echo "  2. Enable WSL2 integration in Docker Desktop settings"; \
+		echo "  3. Restart WSL2: wsl --shutdown && wsl"; \
+		echo "$(BLUE)Option 2 - Native Docker in WSL2:$(NC)"; \
+		echo "  1. Run: curl -fsSL https://get.docker.com | sh"; \
+		echo "  2. Add user to docker group: sudo usermod -aG docker $$USER"; \
+		echo "  3. Start Docker: sudo service docker start"; \
+		echo "$(BLUE)Option 3 - Podman Alternative:$(NC)"; \
+		echo "  1. Install podman: sudo apt-get install -y podman"; \
 	fi
 	@echo "$(GREEN)✓ Development environment setup complete$(NC)"
 
+setup-wsl2-docker: ## Set up Docker in WSL2 (native installation)
+	@echo "$(BLUE)Setting up Docker natively in WSL2...$(NC)"
+	@echo "$(YELLOW)This will install Docker directly in WSL2$(NC)"
+	curl -fsSL https://get.docker.com | sh
+	sudo usermod -aG docker $$USER
+	sudo service docker start
+	@echo "$(GREEN)✓ Docker installed in WSL2$(NC)"
+	@echo "$(YELLOW)Note: You may need to restart your WSL2 session$(NC)"
+
 check-tools: ## Check if required tools are installed
 	@echo "$(BLUE)Checking required tools...$(NC)"
-	@echo -n "Docker: "; command -v docker >/dev/null 2>&1 && echo "$(GREEN)✓$(NC)" || echo "$(RED)✗$(NC)"
+	@echo "$(YELLOW)Environment: WSL2 detected$(NC)"
+	@echo -n "Docker: "; \
+		if command -v docker >/dev/null 2>&1; then \
+			echo "$(GREEN)✓$(NC)"; \
+		elif command -v docker.exe >/dev/null 2>&1; then \
+			echo "$(GREEN)✓ (Windows Docker via docker.exe)$(NC)"; \
+		else \
+			echo "$(RED)✗$(NC)"; \
+			echo "$(YELLOW)  WSL2 Docker Setup:$(NC)"; \
+			echo "  1. Install Docker Desktop for Windows"; \
+			echo "  2. Enable WSL2 integration in Docker Desktop settings"; \
+			echo "  3. Or install Docker directly in WSL2: curl -fsSL https://get.docker.com | sh"; \
+		fi
 	@echo -n "Bats: "; command -v bats >/dev/null 2>&1 && echo "$(GREEN)✓$(NC)" || echo "$(RED)✗$(NC)"
 	@echo -n "Hadolint: "; command -v hadolint >/dev/null 2>&1 && echo "$(GREEN)✓$(NC)" || echo "$(RED)✗$(NC)"
 	@echo -n "Git: "; command -v git >/dev/null 2>&1 && echo "$(GREEN)✓$(NC)" || echo "$(RED)✗$(NC)"
@@ -250,15 +307,23 @@ clean: ## Clean up temporary files and Docker images
 	@echo "$(BLUE)Cleaning up...$(NC)"
 	@rm -f /tmp/makefile-* /tmp/test-output*
 	@echo "$(YELLOW)Removing dangling Docker images...$(NC)"
-	@docker image prune -f || true
+	@if [ -n "$(DOCKER_CMD)" ]; then \
+		$(DOCKER_CMD) image prune -f || true; \
+	else \
+		echo "$(YELLOW)Docker not available, skipping image cleanup$(NC)"; \
+	fi
 	@echo "$(GREEN)✓ Cleanup completed$(NC)"
 
 clean-all: ## Clean up everything including built images
 	@echo "$(BLUE)Cleaning up everything...$(NC)"
 	$(MAKE) clean
-	@echo "$(YELLOW)Removing built images...$(NC)"
-	@docker rmi $(NODEJS_IMAGE):$(NODEJS_TAG) $(NODEJS_IMAGE):latest || true
-	@docker rmi $(PYTHON_IMAGE):$(PYTHON_TAG) $(PYTHON_IMAGE):latest || true
+	@if [ -n "$(DOCKER_CMD)" ]; then \
+		echo "$(YELLOW)Removing built images...$(NC)"; \
+		$(DOCKER_CMD) rmi $(NODEJS_IMAGE):$(NODEJS_TAG) $(NODEJS_IMAGE):latest || true; \
+		$(DOCKER_CMD) rmi $(PYTHON_IMAGE):$(PYTHON_TAG) $(PYTHON_IMAGE):latest || true; \
+	else \
+		echo "$(YELLOW)Docker not available, skipping image removal$(NC)"; \
+	fi
 	@echo "$(GREEN)✓ Full cleanup completed$(NC)"
 
 info: ## Show build information

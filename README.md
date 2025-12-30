@@ -140,6 +140,34 @@ choco install run-mcp
 # See releases page for distribution-specific packages
 ```
 
+### WSL2 Development Setup
+
+This project is optimized for WSL2 development. Use the Makefile for easy setup:
+
+```bash
+# Check current tool status
+make check-tools
+
+# Set up development environment (installs bats, hadolint)
+make setup-dev
+
+# Option 1: Use Docker Desktop (Recommended)
+# 1. Install Docker Desktop for Windows
+# 2. Enable WSL2 integration in Docker Desktop settings
+# 3. Restart WSL2: wsl --shutdown && wsl
+
+# Option 2: Install Docker natively in WSL2
+make setup-wsl2-docker
+
+# Verify setup
+make check-tools
+```
+
+**WSL2 Docker Options:**
+- **Docker Desktop**: Easiest setup, integrates with Windows
+- **Native Docker**: Better performance, runs entirely in WSL2
+- **Podman**: Alternative container runtime
+
 ### Configuration
 
 Configure via environment variables:
@@ -198,7 +226,63 @@ Only explicitly allowed variables are passed through. System variables like `PAT
 
 ## Development
 
-The build system uses GitHub Actions to automatically build and publish container images when source files change. Only affected containers are rebuilt for efficiency.
+This project uses a comprehensive Makefile for development workflows, optimized for WSL2:
+
+### Quick Start
+```bash
+# Set up development environment
+make setup-dev
+
+# Run all tests
+make test
+
+# Check what would be built
+make check-changes
+
+# Build containers (requires Docker)
+make build
+
+# Simulate CI workflow
+make simulate-pr
+```
+
+### Available Make Targets
+```bash
+# Development
+make setup-dev          # Set up development environment
+make setup-wsl2-docker   # Install Docker natively in WSL2
+make check-tools         # Check required tools
+make dev-cycle          # Quick dev cycle: test → check → build
+
+# Testing
+make test               # Run all tests (Bats + integration)
+make test-scripts       # Run Bats tests for shell scripts
+make test-integration   # Run integration tests
+make ci-test           # Simulate CI testing workflow
+
+# Building
+make build             # Build all container images
+make build-nodejs      # Build Node.js container only
+make build-python      # Build Python container only
+make build-changed     # Build only changed containers
+
+# Registry
+make login             # Login to GitHub Container Registry
+make push              # Push all images to registry
+make push-changed      # Push only changed containers
+
+# Utilities
+make check-changes     # Show what would be built
+make clean             # Clean temporary files
+make info              # Show build configuration
+make help              # Show all available targets
+```
+
+### WSL2 Considerations
+- Docker commands automatically detect `docker` or `docker.exe`
+- Makefile provides WSL2-specific setup instructions
+- All paths and commands work correctly in WSL2 environment
+- Integration with Windows Docker Desktop supported
 
 ### Change Detection
 
