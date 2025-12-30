@@ -46,26 +46,25 @@ graph TB
 ### 1. Repository Structure
 
 ```
-├── nodejs/
-│   ├── Dockerfile
-│   ├── package.json
-│   ├── entrypoint.sh
-│   └── README.md
-├── python/
-│   ├── Dockerfile
-│   ├── pyproject.toml
-│   ├── entrypoint.sh
-│   └── README.md
-├── .github/
-│   └── workflows/
-│       ├── build-containers.yml
-│       └── check-upstream.yml
-├── scripts/
-│   ├── detect-changes.sh
-│   ├── check-upstream-versions.sh
-│   └── run-mcp
+├── nodejs/              # Node.js container source files
+├── python/              # Python container source files  
+├── cmd/
+│   └── run-mcp/         # Go binary source code
+│       ├── main.go
+│       ├── config.go
+│       ├── runtime.go
+│       └── env.go
+├── scripts/             # Build and utility scripts
+│   ├── detect-changes.sh    # Change detection for builds
+│   └── check-upstream-versions.sh  # Upstream version checking
+├── .github/workflows/   # GitHub Actions workflows
+│   ├── build-containers.yml
+│   ├── check-upstream.yml
+│   └── build-run-mcp.yml    # Cross-platform binary builds
 ├── versions.json
-└── README.md
+├── go.mod               # Go module definition
+├── go.sum               # Go module checksums
+└── README.md           # This file
 ```
 
 ### 2. GitHub Actions Workflow
@@ -396,11 +395,13 @@ Current built versions stored in `versions.json` at repo root:
 - No sensitive data exposed in version checking process
 - Rate limiting respected for upstream APIs
 
-### 6. Container Runner Script
+### 6. Container Runner Binary
 
-**Script**: `run-mcp`
+**Binary**: `run-mcp`
+- **Language**: Go (cross-platform compatibility)
 - **Purpose**: Simple drop-in replacement for running MCP servers in containers
-- **Installation**: Single script, copy to PATH or use via package managers
+- **Installation**: Single binary, download from releases or build from source
+- **Platforms**: Windows (AMD64), macOS (AMD64, ARM64), Linux (AMD64, ARM64)
 
 **Usage Patterns**:
 ```bash
@@ -432,7 +433,7 @@ run-mcp node npx @modelcontextprotocol/server-memory
 1. `docker`
 2. `podman`
 3. `nerdctl`
-4. `lima nerdctl`
+4. `lima nerdctl` (macOS only)
 
 **Language Detection**:
 | Command | Detected Runtime |
@@ -443,7 +444,7 @@ run-mcp node npx @modelcontextprotocol/server-memory
 **Environment Variable Handling**:
 - **Allowlist prefixes**: `AWS_*`, `OPENAI_*`, `ANTHROPIC_*`, `AZURE_*`, `GOOGLE_*`, `MCP_*`, `HF_*`, `REPLICATE_*`, `COHERE_*`
 - **Exact matches**: `GITHUB_TOKEN`, `GITLAB_TOKEN`, `DATABASE_URL`, `REDIS_URL`
-- **Custom variables**: Use `MCP_PASSTHROUGH_ENV` for additional variables
+- **Custom variables**: Use `MCP_PASSTHROUGH_ENV` for additional variables (comma-separated)
 - **Security**: Only explicitly allowed variables are passed through (no "pass all" footgun)
 
 **Volume Mounts**:
@@ -461,174 +462,192 @@ run-mcp node npx @modelcontextprotocol/server-memory
 | `MCP_DATA_DIR` | `$HOME` | Host directory mounted as `/data` |
 | `MCP_CONTAINER_RUNTIME` | (auto-detect) | Force specific runtime |
 
-**Script Implementation**:
-```bash
-#!/bin/sh
-# run-mcp - Simple MCP server container runner
-# Usage: run-mcp [runtime] <command> [args...]
+**Go Implementation Structure**:
+```go
+package main
 
-set -eu
+import (
+    "fmt"
+    "os"
+    "os/exec"
+    "path/filepath"
+    "runtime"
+    "strings"
+)
 
-# --- Configuration ---
-MCP_NODEJS_IMAGE="${MCP_NODEJS_IMAGE:-ghcr.io/owner/mcp-nodejs:node22}"
-MCP_PYTHON_IMAGE="${MCP_PYTHON_IMAGE:-ghcr.io/owner/mcp-python:python3.12}"
-MCP_DATA_DIR="${MCP_DATA_DIR:-$HOME}"
-
-# --- Runtime Detection ---
-detect_runtime() {
-    if [ -n "${MCP_CONTAINER_RUNTIME:-}" ]; then
-        echo "$MCP_CONTAINER_RUNTIME"
-        return 0
-    fi
-    
-    for rt in docker podman nerdctl "lima nerdctl"; do
-        if command -v ${rt%% *} >/dev/null 2>&1; then
-            echo "$rt"
-            return 0
-        fi
-    done
-    echo "Error: No container runtime found. Install docker, podman, or nerdctl." >&2
-    exit 1
+// Configuration holds runtime configuration
+type Config struct {
+    NodejsImage       string
+    PythonImage       string
+    DataDir           string
+    ContainerRuntime  string
 }
 
-# --- Language Detection ---
-detect_language() {
-    case "$1" in
-        npx|node|yarn|tsx)
-            echo "nodejs"
-            ;;
-        uvx|python|python3|pip|uv)
-            echo "python"
-            ;;
-        *)
-            echo "unknown"
-            ;;
-    esac
+// RuntimeDetector handles container runtime detection
+type RuntimeDetector struct {
+    runtimes []string
 }
 
-# --- Image Selection ---
-get_image() {
-    case "$1" in
-        nodejs|node)
-            echo "$MCP_NODEJS_IMAGE"
-            ;;
-        python)
-            echo "$MCP_PYTHON_IMAGE"
-            ;;
-        *)
-            echo "Error: Unknown runtime '$1'. Use 'node' or 'python'." >&2
-            exit 1
-            ;;
-    esac
+// LanguageDetector handles language detection from commands
+type LanguageDetector struct {
+    commandMap map[string]string
 }
 
-# --- Environment Variable Collection ---
-collect_env_args() {
-    ENV_ARGS=""
+// EnvFilter handles environment variable filtering
+type EnvFilter struct {
+    allowedPrefixes []string
+    allowedExact    map[string]bool
+}
+
+func main() {
+    config := loadConfig()
     
-    # Default allowlist prefixes
-    ALLOWED_PREFIXES="AWS_ OPENAI_ ANTHROPIC_ AZURE_ GOOGLE_ MCP_ HF_ REPLICATE_ COHERE_"
+    // Parse command line arguments
+    args := os.Args[1:]
+    if len(args) == 0 {
+        printUsage()
+        os.Exit(1)
+    }
     
-    # Exact matches
-    ALLOWED_EXACT="GITHUB_TOKEN GITLAB_TOKEN DATABASE_URL REDIS_URL"
+    // Detect runtime and language
+    detector := NewRuntimeDetector()
+    runtime, err := detector.Detect()
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+        os.Exit(1)
+    }
     
-    # User-specified additional vars from MCP_PASSTHROUGH_ENV
-    if [ -n "${MCP_PASSTHROUGH_ENV:-}" ]; then
-        # Convert comma-separated list to space-separated
-        CUSTOM_VARS=$(echo "$MCP_PASSTHROUGH_ENV" | tr ',' ' ')
-        ALLOWED_EXACT="$ALLOWED_EXACT $CUSTOM_VARS"
-    fi
+    langDetector := NewLanguageDetector()
+    language := langDetector.DetectFromArgs(args)
     
-    # Process all environment variables
-    for var in $(env | cut -d= -f1); do
-        MATCHED=false
+    // Build container command
+    cmd := buildContainerCommand(config, runtime, language, args)
+    
+    // Execute container
+    if err := cmd.Run(); err != nil {
+        os.Exit(1)
+    }
+}
+
+// Environment variable filtering with allowlist approach
+func getEnvArgs() []string {
+    var args []string
+    
+    // Default allowlist prefixes
+    allowedPrefixes := []string{
+        "AWS_", "OPENAI_", "ANTHROPIC_", "AZURE_", "GOOGLE_",
+        "MCP_", "HF_", "REPLICATE_", "COHERE_",
+    }
+    
+    // Exact matches
+    allowedExact := map[string]bool{
+        "GITHUB_TOKEN": true,
+        "GITLAB_TOKEN": true,
+        "DATABASE_URL": true,
+        "REDIS_URL":    true,
+    }
+    
+    // User-specified additional vars from MCP_PASSTHROUGH_ENV
+    if extra := os.Getenv("MCP_PASSTHROUGH_ENV"); extra != "" {
+        for _, v := range strings.Split(extra, ",") {
+            v = strings.TrimSpace(v)
+            if v != "" {
+                allowedExact[v] = true
+            }
+        }
+    }
+    
+    seen := make(map[string]bool)
+    
+    for _, env := range os.Environ() {
+        parts := strings.SplitN(env, "=", 2)
+        if len(parts) != 2 {
+            continue
+        }
+        key := parts[0]
         
-        # Check exact matches first
-        for exact in $ALLOWED_EXACT; do
-            if [ "$var" = "$exact" ]; then
-                ENV_ARGS="$ENV_ARGS -e $var"
-                MATCHED=true
+        if seen[key] {
+            continue
+        }
+        
+        // Check exact match
+        if allowedExact[key] {
+            args = append(args, "-e", env)
+            seen[key] = true
+            continue
+        }
+        
+        // Check prefix match
+        for _, prefix := range allowedPrefixes {
+            if strings.HasPrefix(key, prefix) {
+                args = append(args, "-e", env)
+                seen[key] = true
                 break
-            fi
-        done
-        
-        # If not exact match, check prefixes
-        if [ "$MATCHED" = false ]; then
-            for prefix in $ALLOWED_PREFIXES; do
-                case "$var" in
-                    $prefix*)
-                        ENV_ARGS="$ENV_ARGS -e $var"
-                        MATCHED=true
-                        break
-                        ;;
-                esac
-            done
-        fi
-    done
+            }
+        }
+    }
     
-    echo "$ENV_ARGS"
+    return args
 }
 
-# --- Volume Mount Collection ---
-collect_volume_args() {
-    VOLUME_ARGS="-v $MCP_DATA_DIR:/data"
-    [ -d "$HOME/.aws" ] && VOLUME_ARGS="$VOLUME_ARGS -v $HOME/.aws:/home/mcp/.aws:ro"
-    [ -d "$HOME/.config" ] && VOLUME_ARGS="$VOLUME_ARGS -v $HOME/.config:/home/mcp/.config:ro"
-    echo "$VOLUME_ARGS"
+// Cross-platform path handling for volume mounts
+func getVolumeMounts(config *Config) []string {
+    var mounts []string
+    
+    // Data directory mount
+    mounts = append(mounts, "-v", fmt.Sprintf("%s:/data", config.DataDir))
+    
+    // Credential directory mounts (cross-platform)
+    homeDir, _ := os.UserHomeDir()
+    
+    awsDir := filepath.Join(homeDir, ".aws")
+    if _, err := os.Stat(awsDir); err == nil {
+        mounts = append(mounts, "-v", fmt.Sprintf("%s:/home/mcp/.aws:ro", awsDir))
+    }
+    
+    configDir := filepath.Join(homeDir, ".config")
+    if _, err := os.Stat(configDir); err == nil {
+        mounts = append(mounts, "-v", fmt.Sprintf("%s:/home/mcp/.config:ro", configDir))
+    }
+    
+    return mounts
 }
 
-# --- Main Logic ---
-main() {
-    RUNTIME=""
+// Cross-platform runtime detection
+func (rd *RuntimeDetector) Detect() (string, error) {
+    // Check for explicit override
+    if rt := os.Getenv("MCP_CONTAINER_RUNTIME"); rt != "" {
+        return rt, nil
+    }
     
-    # Check if first arg is explicit runtime
-    case "${1:-}" in
-        node|nodejs)
-            RUNTIME="nodejs"
-            shift
-            ;;
-        python)
-            RUNTIME="python"
-            shift
-            ;;
-    esac
+    // Platform-specific runtime list
+    runtimes := []string{"docker", "podman", "nerdctl"}
+    if runtime.GOOS == "darwin" {
+        runtimes = append(runtimes, "lima nerdctl")
+    }
     
-    # Remaining args are the command
-    COMMAND="${1:-}"
-    shift || true
+    for _, rt := range runtimes {
+        if rd.isAvailable(rt) {
+            return rt, nil
+        }
+    }
     
-    if [ -z "$COMMAND" ]; then
-        echo "Usage: run-mcp [node|python] <command> [args...]" >&2
-        echo "Examples:" >&2
-        echo "  run-mcp uvx mcp-server-sqlite --db-path /data/db.sqlite" >&2
-        echo "  run-mcp npx @modelcontextprotocol/server-filesystem /data" >&2
-        exit 1
-    fi
-    
-    # Auto-detect language if not specified
-    if [ -z "$RUNTIME" ]; then
-        RUNTIME=$(detect_language "$COMMAND")
-        if [ "$RUNTIME" = "unknown" ]; then
-            echo "Error: Cannot detect runtime for '$COMMAND'. Specify 'node' or 'python'." >&2
-            exit 1
-        fi
-    fi
-    
-    # Build and execute container command
-    CONTAINER_RT=$(detect_runtime)
-    IMAGE=$(get_image "$RUNTIME")
-    ENV_ARGS=$(collect_env_args)
-    VOLUME_ARGS=$(collect_volume_args)
-    
-    exec $CONTAINER_RT run -i --rm \
-        $ENV_ARGS \
-        $VOLUME_ARGS \
-        "$IMAGE" \
-        "$COMMAND" "$@"
+    return "", fmt.Errorf("no container runtime found. Install docker, podman, or nerdctl")
 }
 
-main "$@"
+func (rd *RuntimeDetector) isAvailable(runtime string) bool {
+    parts := strings.Fields(runtime)
+    _, err := exec.LookPath(parts[0])
+    return err == nil
+}
 ```
+
+**Build and Release Process**:
+- **GitHub Actions**: Automated builds for all platforms on release tags
+- **Cross-compilation**: Single workflow builds all platform binaries
+- **Release artifacts**: Compressed binaries for each platform
+- **Checksums**: SHA256 checksums for verification
+- **Installation**: Direct download or package managers (brew, chocolatey, etc.)
 
 ## Data Models
 
@@ -826,15 +845,15 @@ interface ContainerRunnerConfig {
 **Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.6**
 
 ### Property 19: Container Runtime Detection
-*For any* system with available container runtimes, the run-mcp script should correctly detect and use the first available runtime in the priority order (docker, podman, nerdctl, lima).
+*For any* system with available container runtimes, the run-mcp binary should correctly detect and use the first available runtime in the priority order (docker, podman, nerdctl, lima).
 **Validates: Requirements 13.1, 13.7**
 
 ### Property 20: Language Auto-Detection
-*For any* supported command (npx, uvx, python, node, etc.), the run-mcp script should correctly identify the required language runtime and select the appropriate container image.
+*For any* supported command (npx, uvx, python, node, etc.), the run-mcp binary should correctly identify the required language runtime and select the appropriate container image.
 **Validates: Requirements 13.2**
 
 ### Property 21: Secure Environment Variable Passthrough
-*For any* environment variable, the run-mcp script should only pass through variables that match the allowlist prefixes, exact matches, or are specified in MCP_PASSTHROUGH_ENV, ensuring no system or sensitive variables leak through.
+*For any* environment variable, the run-mcp binary should only pass through variables that match the allowlist prefixes, exact matches, or are specified in MCP_PASSTHROUGH_ENV, ensuring no system or sensitive variables leak through.
 **Validates: Requirements 13.3, 13.8**
 
 ## Error Handling

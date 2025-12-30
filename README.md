@@ -102,28 +102,42 @@ docker run -i --rm -v ~/data:/data ghcr.io/owner/mcp-python \
 ```
 ├── nodejs/              # Node.js container source files
 ├── python/              # Python container source files  
+├── cmd/run-mcp/         # Go binary source code
 ├── scripts/             # Build and utility scripts
 │   ├── detect-changes.sh    # Change detection for builds
-│   ├── check-upstream-versions.sh  # Upstream version checking
-│   └── run-mcp             # Simple container runner script
+│   └── check-upstream-versions.sh  # Upstream version checking
 ├── .github/workflows/   # GitHub Actions workflows
 └── README.md           # This file
 ```
 
 ## Installation
 
-### Installing run-mcp Script
+### Installing run-mcp Binary
 
-The `run-mcp` script simplifies running MCP servers in containers:
+The `run-mcp` binary simplifies running MCP servers in containers and works on all platforms:
 
+**Download from Releases:**
 ```bash
-# Download and install to your PATH
-curl -o ~/.local/bin/run-mcp https://raw.githubusercontent.com/owner/mcp-containers/main/scripts/run-mcp
-chmod +x ~/.local/bin/run-mcp
+# Linux/macOS
+curl -L -o run-mcp https://github.com/owner/mcp-containers/releases/latest/download/run-mcp-$(uname -s)-$(uname -m)
+chmod +x run-mcp
+sudo mv run-mcp /usr/local/bin/
 
-# Or copy from this repository
-cp scripts/run-mcp ~/.local/bin/
-chmod +x ~/.local/bin/run-mcp
+# Windows (PowerShell)
+Invoke-WebRequest -Uri "https://github.com/owner/mcp-containers/releases/latest/download/run-mcp-windows-amd64.exe" -OutFile "run-mcp.exe"
+# Move to a directory in your PATH
+```
+
+**Package Managers:**
+```bash
+# macOS (Homebrew)
+brew install owner/tap/run-mcp
+
+# Windows (Chocolatey)
+choco install run-mcp
+
+# Linux (various package managers)
+# See releases page for distribution-specific packages
 ```
 
 ### Configuration
@@ -207,7 +221,8 @@ You can manually trigger builds using the GitHub Actions workflow_dispatch event
 
 ## Container Features
 
-### run-mcp Script Features
+### run-mcp Binary Features
+- **Cross-platform**: Single binary works on Windows, macOS, and Linux
 - **Auto-detection**: Automatically detects Docker, Podman, or nerdctl
 - **Language inference**: Detects Node.js (npx, node) or Python (uvx, python) from commands
 - **Secure environment passthrough**: Allowlist-based environment variable filtering

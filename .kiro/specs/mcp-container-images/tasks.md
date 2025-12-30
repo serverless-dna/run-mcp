@@ -13,7 +13,7 @@ This implementation plan creates a system for building and distributing language
   - _Requirements: 4.3, 4.5_
 
 - [-] 2. Implement change detection system
-  - [-] 2.1 Create detect-changes.sh script with robust error handling
+  - [x] 2.1 Create detect-changes.sh script with robust error handling
     - Write git diff logic with shallow clone and first commit handling
     - Set GitHub Actions outputs for conditional builds
     - Handle edge cases like deleted directories and merge conflicts
@@ -238,38 +238,70 @@ This implementation plan creates a system for building and distributing language
     - **Property 18: Upstream Version Detection**
     - **Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.6**
 
-- [ ] 12. Implement run-mcp container runner script
-  - [ ] 12.1 Create run-mcp shell script
-    - Implement container runtime detection (docker, podman, nerdctl)
-    - Implement language auto-detection from command
-    - Handle environment variable passthrough
-    - Configure standard volume mounts
-    - _Requirements: 13.1, 13.2, 13.3, 13.4_
+- [ ] 12. Implement run-mcp container runner binary
+  - [ ] 12.1 Create Go project structure and dependencies
+    - Initialize Go module with proper dependencies
+    - Set up cross-platform build configuration
+    - Create main.go with CLI argument parsing
+    - _Requirements: 13.9_
 
-  - [ ] 12.2 Add configuration options
-    - Support MCP_NODEJS_IMAGE override
-    - Support MCP_PYTHON_IMAGE override
-    - Support MCP_DATA_DIR override
+  - [ ] 12.2 Implement container runtime detection
+    - Implement cross-platform runtime detection (docker, podman, nerdctl)
+    - Add platform-specific handling (lima nerdctl for macOS)
     - Support MCP_CONTAINER_RUNTIME override
-    - _Requirements: 13.5, 13.6_
+    - Provide clear error messages when no runtime found
+    - _Requirements: 13.1, 13.7_
 
-  - [ ] 12.3 Create installation documentation
-    - Document single-script installation
-    - Provide Claude Desktop configuration examples
-    - Document environment variable configuration
+  - [ ] 12.3 Implement language auto-detection
+    - Create command-to-language mapping (npx→Node.js, uvx→Python)
+    - Support explicit runtime specification (run-mcp python uvx ...)
+    - Handle unknown commands with clear error messages
+    - _Requirements: 13.2, 13.6_
+
+  - [ ] 12.4 Implement secure environment variable passthrough
+    - Implement allowlist-based environment filtering with predefined prefixes
+    - Support exact matches (GITHUB_TOKEN, GITLAB_TOKEN, DATABASE_URL, REDIS_URL)
+    - Handle MCP_PASSTHROUGH_ENV comma-separated custom variables
+    - Ensure no system variables leak through (security)
+    - _Requirements: 13.3, 13.8, 13.10_
+
+  - [ ] 12.5 Implement cross-platform volume mounting
+    - Handle cross-platform path resolution for credential directories
+    - Mount ~/.aws and ~/.config with proper permissions
+    - Support MCP_DATA_DIR configuration with platform-specific defaults
+    - _Requirements: 13.4, 13.5_
+
+  - [ ] 12.6 Add configuration and image selection
+    - Support MCP_NODEJS_IMAGE and MCP_PYTHON_IMAGE overrides
+    - Implement image selection based on detected language
+    - Add configuration validation and defaults
     - _Requirements: 13.5_
 
-  - [ ] 12.4 Test with Claude Desktop
-    - Verify drop-in replacement works
-    - Test environment variable passthrough
-    - Test with AWS, OpenAI credentials
+  - [ ] 12.7 Create cross-platform build system
+    - Set up GitHub Actions for multi-platform builds
+    - Build for Windows (AMD64), macOS (AMD64, ARM64), Linux (AMD64, ARM64)
+    - Create release artifacts with checksums
+    - _Requirements: 13.9_
+
+  - [ ] 12.8 Create installation documentation
+    - Document binary installation for all platforms
+    - Provide Claude Desktop configuration examples
+    - Document environment variable configuration
+    - Create usage examples and troubleshooting guide
+    - _Requirements: 13.5_
+
+  - [ ] 12.9 Test with Claude Desktop integration
+    - Verify drop-in replacement works on all platforms
+    - Test environment variable passthrough with real credentials
+    - Test with AWS, OpenAI, and other service credentials
+    - Validate cross-platform volume mounting
     - _Requirements: 13.3, 13.4, 13.5_
 
-  - [ ]* 12.5 Write property tests for run-mcp
+  - [ ]* 12.10 Write property tests for run-mcp binary
     - **Property 19: Container Runtime Detection**
     - **Property 20: Language Auto-Detection**
     - **Property 21: Secure Environment Variable Passthrough**
-    - **Validates: Requirements 13.1, 13.2, 13.3, 13.8**
+    - **Validates: Requirements 13.1, 13.2, 13.3, 13.8, 13.10**
 
 - [ ] 13. Final checkpoint - Complete system validation
   - Ensure all tests pass, ask the user if questions arise.

@@ -162,17 +162,19 @@ A system for building and distributing language-specific container images that e
 5. THE Build_System SHALL log all version checks and detected updates
 6. THE Build_System SHALL NOT rebuild if the upstream version is already built
 
-### Requirement 13: Simple Container Runner Script
+### Requirement 13: Cross-Platform Container Runner Binary
 
-**User Story:** As a user, I want a simple command to run MCP servers in containers without writing verbose Docker commands, so that I can easily switch from local execution to containerized execution.
+**User Story:** As a user on any operating system, I want a simple binary to run MCP servers in containers without writing verbose Docker commands, so that I can easily switch from local execution to containerized execution regardless of my platform.
 
 #### Acceptance Criteria
 
-1. THE run-mcp script SHALL auto-detect available container runtimes (Docker, Podman, nerdctl)
-2. THE run-mcp script SHALL auto-detect the required language runtime from the command (npx→Node.js, uvx→Python)
-3. THE run-mcp script SHALL pass environment variables from the MCP client to the container using a secure allowlist approach
-4. THE run-mcp script SHALL mount common credential directories (~/.aws, ~/.config) read-only
-5. THE run-mcp script SHALL work as a drop-in replacement for direct command execution in MCP configs
-6. THE run-mcp script SHALL support explicit runtime specification (run-mcp python uvx ...)
-7. THE run-mcp script SHALL provide clear error messages when no container runtime is found
-8. THE run-mcp script SHALL support custom environment variables via MCP_PASSTHROUGH_ENV configuration
+1. THE run-mcp binary SHALL auto-detect available container runtimes (Docker, Podman, nerdctl) on Windows, macOS, and Linux
+2. THE run-mcp binary SHALL auto-detect the required language runtime from the command (npx→Node.js, uvx→Python)
+3. THE run-mcp binary SHALL pass environment variables from the MCP client to the container using a secure allowlist approach with predefined prefixes
+4. THE run-mcp binary SHALL mount common credential directories (~/.aws, ~/.config) read-only with cross-platform path handling
+5. THE run-mcp binary SHALL work as a drop-in replacement for direct command execution in MCP configs on all platforms
+6. THE run-mcp binary SHALL support explicit runtime specification (run-mcp python uvx ...)
+7. THE run-mcp binary SHALL provide clear error messages when no container runtime is found
+8. THE run-mcp binary SHALL support custom environment variables via MCP_PASSTHROUGH_ENV configuration with comma-separated values
+9. THE run-mcp binary SHALL be compiled for Windows (AMD64), macOS (AMD64, ARM64), and Linux (AMD64, ARM64) architectures
+10. THE run-mcp binary SHALL use only allowlisted environment variable prefixes (AWS_*, OPENAI_*, ANTHROPIC_*, AZURE_*, GOOGLE_*, MCP_*, HF_*, REPLICATE_*, COHERE_*) and exact matches (GITHUB_TOKEN, GITLAB_TOKEN, DATABASE_URL, REDIS_URL)
