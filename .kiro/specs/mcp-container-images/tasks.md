@@ -163,13 +163,13 @@ This implementation plan creates a system for building and distributing language
     - **Property 7: Runtime-Based Tagging**
     - **Validates: Requirements 2.1, 2.2, 2.5, 4.1**
 
-- [ ] 7. Implement standardized container interfaces
-  - [ ] 7.1 Ensure consistent stdio behavior across containers
+- [x] 7. Implement standardized container interfaces
+  - [x] 7.1 Ensure consistent stdio behavior across containers
     - Standardize passthrough entrypoint behavior
     - Implement consistent signal forwarding
     - _Requirements: 1.4, 10.6, 10.7, 10.8_
 
-  - [ ] 7.2 Write property tests for container interfaces
+  - [x] 7.2 Write property tests for container interfaces
     - **Property 2: Standardized Container Interface**
     - **Property 3: Container Startup Readiness**
     - **Property 17: stdio Transport Integrity**

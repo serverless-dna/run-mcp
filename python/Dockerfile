@@ -28,7 +28,8 @@ RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
         curl \
-        git && \
+        git \
+        dumb-init && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean
 
@@ -58,6 +59,6 @@ USER 1000:1000
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# Default entrypoint
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# Default entrypoint with dumb-init for proper signal handling
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["python", "--version"]
