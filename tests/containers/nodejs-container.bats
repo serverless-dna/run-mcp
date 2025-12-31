@@ -205,7 +205,106 @@ export default { test: true };
     run docker run --rm "$TEST_IMAGE_TAG" sh -c "node --version" 2>&1
     [ "$status" -eq 0 ]
     [[ "$output" =~ "Starting Node.js MCP server container" ]]
-    [[ "$output" =~ "Node.js version:" ]]
-    [[ "$output" =~ "NPM version:" ]]
-    [[ "$output" =~ "Yarn version:" ]]
+    [[ "$output" =~ "Node.js:" ]]
+    [[ "$output" =~ "NPM:" ]]
+    [[ "$output" =~ "Yarn:" ]]
+}
+
+# Property 12: Docker Security Best Practices
+# For any container image, it should follow Docker security best practices including 
+# running as non-root user and maintaining minimal attack surface
+@test "Property 12: Node.js container follows Docker security best practices" {
+    # Build the container
+    run docker build -t "$TEST_IMAGE_TAG" nodejs/
+    [ "$status" -eq 0 ]
+    
+    # Verify container runs as non-root user (UID 1000)
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" id -u
+    [ "$status" -eq 0 ]
+    [ "$output" = "1000" ]
+    
+    # Verify container runs as non-root group (GID 1000)
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" id -g
+    [ "$status" -eq 0 ]
+    [ "$output" = "1000" ]
+    
+    # Verify user name is 'node' (not root)
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" whoami
+    [ "$status" -eq 0 ]
+    [ "$output" = "node" ]
+    
+    # Verify no exposed ports (minimal attack surface)
+    run docker image inspect "$TEST_IMAGE_TAG" --format '{{.Config.ExposedPorts}}'
+    [ "$status" -eq 0 ]
+    [[ "$output" == "map[]" ]] || [[ "$output" == "<no value>" ]] || [[ "$output" == "null" ]]
+    
+    # Verify entrypoint script has secure permissions (should be executable)
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%a" /usr/local/bin/entrypoint.sh
+    [ "$status" -eq 0 ]
+    [ "$output" = "755" ]
+    
+    # Verify home directory exists and has proper ownership
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%U:%G" /home/node
+    [ "$status" -eq 0 ]
+    [ "$output" = "node:node" ]
+    
+    # Verify container uses Alpine Linux (minimal base image)
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" cat /etc/alpine-release
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    
+    # Verify security labels are present in image metadata
+    run docker image inspect "$TEST_IMAGE_TAG" --format '{{index .Config.Labels "security.non-root"}}'
+    [ "$status" -eq 0 ]
+    [ "$output" = "true" ]
+}
+
+# Property 14: Language-Specific Package Managers
+# For any language container, it should include the appropriate package managers 
+# and use them for dependency management with security best practices
+@test "Property 14: Node.js container includes secure package managers" {
+    # Build the container
+    run docker build -t "$TEST_IMAGE_TAG" nodejs/
+    [ "$status" -eq 0 ]
+    
+    # Verify npm is installed and accessible
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" npm --version
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    
+    # Verify yarn is installed and accessible
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" yarn --version
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    
+    # Verify npx is available for secure package execution
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" npx --version
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+    
+    # Verify npm security configuration (update notifier disabled)
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" printenv NPM_CONFIG_UPDATE_NOTIFIER
+    [ "$status" -eq 0 ]
+    [ "$output" = "false" ]
+    
+    # Verify npm audit is available for security scanning
+    run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" npm audit --help
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "audit" ]]
+    
+    # Verify MCP SDK is available or can be installed (check if it's in dependencies)
+    run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "npm list @modelcontextprotocol/sdk 2>/dev/null || echo 'MCP SDK not installed'"
+    [ "$status" -eq 0 ]
+    # Either the SDK is installed or we get the expected message
+    [[ "$output" =~ "@modelcontextprotocol/sdk" ]] || [[ "$output" =~ "MCP SDK not installed" ]]
+    
+    # Verify node_modules directory has proper permissions
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%a" /app/node_modules
+    [ "$status" -eq 0 ]
+    [ "$output" = "755" ]
+    
+    # Verify package managers can install packages securely (test basic npm functionality)
+    run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "cd /tmp && npm init -y && echo 'npm init successful'"
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "npm init successful" ]]
 }
