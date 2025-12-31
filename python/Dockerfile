@@ -23,7 +23,7 @@ RUN uv pip install --no-cache-dir --python /app/venv/bin/python mcp>=1.0.0 uvloo
 # Stage 2: Runtime stage
 FROM python:3.12-slim AS runtime
 
-# Install runtime dependencies and create user
+# Install runtime dependencies and security updates
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
@@ -31,23 +31,37 @@ RUN apt-get update && \
         git \
         dumb-init && \
     rm -rf /var/lib/apt/lists/* && \
-    apt-get clean
+    apt-get clean && \
+    rm -rf /tmp/* && \
+    rm -rf /var/tmp/*
+
+# Remove unnecessary packages to minimize attack surface
+RUN apt-get autoremove -y && \
+    apt-get autoclean
 
 # Create directories, set up user permissions, and install uv
-RUN mkdir -p /app /data && \
-    chown -R 1000:1000 /app /data && \
+RUN mkdir -p /app /data /home/mcp && \
+    groupadd -g 1000 mcp && \
+    useradd -u 1000 -g 1000 -d /home/mcp -s /bin/bash mcp && \
+    chown -R 1000:1000 /app /data /home/mcp && \
+    chmod 755 /app /data /home/mcp && \
     pip install --no-cache-dir uv
 
-# Copy virtual environment from builder stage
+# Copy virtual environment from builder stage with secure permissions
 COPY --from=builder --chown=1000:1000 /app/venv /app/venv
 
 # Add virtual environment to PATH
 ENV PATH="/app/venv/bin:$PATH"
 ENV VIRTUAL_ENV="/app/venv"
+ENV HOME="/home/mcp"
 
-# Copy entrypoint script
+# Copy entrypoint script with secure permissions
 COPY --chown=1000:1000 entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod 755 /usr/local/bin/entrypoint.sh && \
+    chown 1000:1000 /usr/local/bin/entrypoint.sh
+
+# Remove write permissions from system directories for security
+RUN chmod -R go-w /usr/local/bin/ /usr/bin/ /bin/ /sbin/ || true
 
 # Set working directory
 WORKDIR /app
@@ -58,6 +72,12 @@ USER 1000:1000
 # Set environment variables for unbuffered output
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+
+# Add security labels and metadata
+LABEL security.non-root="true" \
+      security.uid="1000" \
+      security.gid="1000" \
+      security.no-new-privileges="true"
 
 # Default entrypoint with dumb-init for proper signal handling
 ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/entrypoint.sh"]

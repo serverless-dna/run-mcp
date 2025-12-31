@@ -30,14 +30,22 @@ RUN apk update && \
     apk upgrade && \
     apk add --no-cache \
     dumb-init \
-    && rm -rf /var/cache/apk/*
+    && rm -rf /var/cache/apk/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/*
+
+# Remove unnecessary packages and files to minimize attack surface
+RUN apk del --no-cache \
+    wget \
+    curl || true
 
 # Use existing node user (already UID 1000 in node:lts-alpine)
 # No need to create new user - node user already exists with UID 1000
 
 # Set up directories with proper permissions
 RUN mkdir -p /app /data && \
-    chown -R node:node /app /data
+    chown -R node:node /app /data && \
+    chmod 755 /app /data
 
 # Copy built dependencies from builder stage
 COPY --from=builder --chown=node:node /app/node_modules /app/node_modules
@@ -47,9 +55,13 @@ COPY --from=builder --chown=node:node /app/node_modules /app/node_modules
 RUN npm install -g yarn@latest --force && \
     npm cache clean --force
 
-# Copy entrypoint script
+# Copy entrypoint script with secure permissions
 COPY --chown=node:node entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod 755 /usr/local/bin/entrypoint.sh && \
+    chown node:node /usr/local/bin/entrypoint.sh
+
+# Remove write permissions from system directories for security
+RUN chmod -R go-w /usr/local/bin/ /usr/bin/ /bin/ /sbin/ || true
 
 # Switch to non-root user
 USER node
@@ -62,10 +74,22 @@ ENV NODE_ENV=production \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     NPM_CONFIG_FUND=false \
     FORCE_COLOR=0 \
-    NODE_OPTIONS="--unhandled-rejections=strict"
+    NODE_OPTIONS="--unhandled-rejections=strict" \
+    HOME=/home/node
+
+# Create home directory for node user with proper permissions
+RUN mkdir -p /home/node && \
+    chown -R node:node /home/node && \
+    chmod 755 /home/node
 
 # Expose no ports (stdio transport only)
 # Volume mount points: /data for user data, /app for MCP server code
+
+# Add security labels and metadata
+LABEL security.non-root="true" \
+      security.uid="1000" \
+      security.gid="1000" \
+      security.no-new-privileges="true"
 
 # Use dumb-init for proper signal handling and entrypoint for MCP protocol
 ENTRYPOINT ["/usr/bin/dumb-init", "--", "/usr/local/bin/entrypoint.sh"]
