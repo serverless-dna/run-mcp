@@ -424,3 +424,79 @@ simulate-main: ## Simulate GitHub Actions main branch workflow
 		echo "$(YELLOW)Not on main branch, skipping registry push$(NC)"; \
 	fi
 	@echo "$(GREEN)✓ Main branch workflow simulation completed$(NC)"
+
+# run-mcp binary build targets
+GO_VERSION := 1.21
+BUILD_DIR := build
+BINARY_NAME := run-mcp
+
+# Build variables
+VERSION := $(shell git describe --tags --always --dirty)
+COMMIT := $(shell git rev-parse --short HEAD)
+BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(BUILD_DATE)
+
+build-run-mcp: ## Build run-mcp binary for current platform
+	@echo "$(BLUE)Building run-mcp binary...$(NC)"
+	@mkdir -p $(BUILD_DIR)
+	go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/run-mcp
+	@echo "$(GREEN)✓ Built $(BUILD_DIR)/$(BINARY_NAME)$(NC)"
+
+build-run-mcp-all: ## Build run-mcp binary for all platforms
+	@echo "$(BLUE)Building run-mcp binaries for all platforms...$(NC)"
+	@mkdir -p $(BUILD_DIR)
+	
+	# Windows AMD64
+	@echo "Building for Windows AMD64..."
+	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/run-mcp
+	
+	# macOS AMD64
+	@echo "Building for macOS AMD64..."
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/run-mcp
+	
+	# macOS ARM64
+	@echo "Building for macOS ARM64..."
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/run-mcp
+	
+	# Linux AMD64
+	@echo "Building for Linux AMD64..."
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/run-mcp
+	
+	# Linux ARM64
+	@echo "Building for Linux ARM64..."
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 ./cmd/run-mcp
+	
+	@echo "$(GREEN)✓ Built all platform binaries in $(BUILD_DIR)/$(NC)"
+	@ls -la $(BUILD_DIR)/$(BINARY_NAME)-*
+
+test-run-mcp: build-run-mcp ## Test run-mcp binary
+	@echo "$(BLUE)Testing run-mcp binary...$(NC)"
+	@$(BUILD_DIR)/$(BINARY_NAME) --version
+	@$(BUILD_DIR)/$(BINARY_NAME) --help >/dev/null
+	@$(BUILD_DIR)/$(BINARY_NAME) info
+	@$(BUILD_DIR)/$(BINARY_NAME) config
+	@echo "$(GREEN)✓ run-mcp tests passed$(NC)"
+
+install-run-mcp: build-run-mcp ## Install run-mcp binary to /usr/local/bin
+	@echo "$(BLUE)Installing run-mcp binary...$(NC)"
+	sudo cp $(BUILD_DIR)/$(BINARY_NAME) /usr/local/bin/
+	@echo "$(GREEN)✓ Installed run-mcp to /usr/local/bin/$(NC)"
+
+clean-run-mcp: ## Clean run-mcp build artifacts
+	@echo "$(BLUE)Cleaning run-mcp build artifacts...$(NC)"
+	rm -rf $(BUILD_DIR)
+	@echo "$(GREEN)✓ Cleaned build directory$(NC)"
+
+checksums: build-run-mcp-all ## Generate checksums for all binaries
+	@echo "$(BLUE)Generating checksums...$(NC)"
+	@cd $(BUILD_DIR) && for file in $(BINARY_NAME)-*; do \
+		if command -v sha256sum >/dev/null 2>&1; then \
+			sha256sum "$$file" > "$$file.sha256"; \
+		else \
+			shasum -a 256 "$$file" > "$$file.sha256"; \
+		fi; \
+	done
+	@echo "$(GREEN)✓ Generated checksums$(NC)"
+
+# Update .PHONY target
+.PHONY: help test test-scripts test-integration clean build build-nodejs build-python push push-nodejs push-python login check-tools setup-dev lint validate-dockerfiles check-changes build-run-mcp build-run-mcp-all test-run-mcp install-run-mcp clean-run-mcp checksums

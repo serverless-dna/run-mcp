@@ -1,0 +1,237 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# Build directory
+build/
+dist/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Log files
+*.log
+logs/
+
+# Docker build context (if any)
+.dockerignore.bak
+
+# Test artifacts
+coverage.out
+coverage.html
+test-results/
+*.cover
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# Container runtime test files
+/tmp/run-mcp-test/
+
+# Backup files
+*.bak
+*.backup
+
+# Archive files
+*.tar.gz
+*.zip
+*.tar
+*.gz
+
+# Go module cache (usually global, but just in case)
+pkg/
+bin/
+
+# Generated documentation
+docs/build/
+
+# Local configuration overrides
+config.local.*
+*.local.json
+*.local.yaml
+*.local.yml
+
+# Certificates and keys (security)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Database files (if any tests create them)
+*.db
+*.sqlite
+*.sqlite3
+
+# Node.js artifacts (if any)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python artifacts (if any)
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# Container image tarballs
+*.tar
+docker-images/
+
+# Kubernetes manifests with secrets
+*secret*.yaml
+*secret*.yml
+
+# Helm charts
+charts/*/charts/
+charts/*/requirements.lock
+
+# Local development overrides
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Performance profiling
+*.prof
+*.pprof
+
+# Memory dumps
+*.dump
+*.hprof
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Visual Studio Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Vim
+*.swp
+*.swo
+.netrwhist
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Local testing artifacts
+test-output/
+integration-test-results/
+
+# Benchmark results
+benchmark-results/
+*.bench
+
+# Security scanning results
+security-scan-results/
+*.sarif
+
+# Local scripts (often contain secrets)
+local-*.sh
+local-*.bat
+local-*.ps1
+
+# Terraform (if used for infrastructure)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Ansible (if used for configuration)
+*.retry
+.vault_pass
+
+# Local development certificates
+localhost.pem
+localhost-key.pem
+dev-cert.*
+
+# macOS
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
