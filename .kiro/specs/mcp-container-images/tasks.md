@@ -192,13 +192,13 @@ This implementation plan creates a system for building and distributing language
     - **Property 11: Build Logging Transparency**
     - **Validates: Requirements 2.4, 4.5, 5.3**
 
-- [ ] 9. Add version management and registry features
-  - [ ] 9.1 Implement version retention in registry
+- [x] 9. Add version management and registry features
+  - [x] 9.1 Implement version retention in registry
     - Configure multiple version maintenance
     - Set up proper tagging strategy
     - _Requirements: 3.5_
 
-  - [ ] 9.2 Write property tests for version management
+  - [x] 9.2 Write property tests for version management
     - **Property 8: Version Retention**
     - **Property 10: Build Skipping Logic**
     - **Validates: Requirements 3.5, 4.4**

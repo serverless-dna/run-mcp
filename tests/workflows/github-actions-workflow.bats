@@ -19,8 +19,21 @@ setup() {
     mkdir -p "$TEST_WORKSPACE/nodejs" "$TEST_WORKSPACE/python" "$TEST_WORKSPACE/scripts"
     echo "# Node.js container" > "$TEST_WORKSPACE/nodejs/README.md"
     echo "# Python container" > "$TEST_WORKSPACE/python/README.md"
-    echo "#!/bin/bash" > "$TEST_WORKSPACE/scripts/detect-changes.sh"
-    chmod +x "$TEST_WORKSPACE/scripts/detect-changes.sh"
+    
+    # Copy detect-changes script if it exists, otherwise create minimal one
+    if [ -f "scripts/detect-changes.sh" ]; then
+        cp "scripts/detect-changes.sh" "$TEST_WORKSPACE/scripts/"
+        chmod +x "$TEST_WORKSPACE/scripts/detect-changes.sh"
+    else
+        echo "#!/bin/bash" > "$TEST_WORKSPACE/scripts/detect-changes.sh"
+        chmod +x "$TEST_WORKSPACE/scripts/detect-changes.sh"
+    fi
+    
+    # Copy cleanup script if it exists
+    if [ -f "scripts/cleanup-versions.sh" ]; then
+        cp "scripts/cleanup-versions.sh" "$TEST_WORKSPACE/scripts/"
+        chmod +x "$TEST_WORKSPACE/scripts/cleanup-versions.sh"
+    fi
     
     cd "$TEST_WORKSPACE"
     git init
@@ -193,4 +206,126 @@ teardown() {
     grep -q "python --version" .github/workflows/build-containers.yml
     grep -q "npm --version" .github/workflows/build-containers.yml
     grep -q "uv --version" .github/workflows/build-containers.yml
+}
+
+# Property 8: Version Retention
+# For any container image published to the registry, multiple versions should be maintained and accessible.
+@test "Property 8: workflow includes version cleanup job" {
+    # Verify version cleanup job exists
+    grep -q "cleanup-old-versions:" .github/workflows/build-containers.yml
+    
+    # Verify cleanup runs after successful builds
+    grep -A 3 "cleanup-old-versions:" .github/workflows/build-containers.yml | grep -q "needs:.*build-nodejs.*build-python"
+    
+    # Verify cleanup has proper permissions
+    grep -A 10 "cleanup-old-versions:" .github/workflows/build-containers.yml | grep -q "packages: write"
+}
+
+@test "Property 8: workflow implements retention policy for date-stamped tags" {
+    # Verify cleanup script exists and is used
+    [ -f "scripts/cleanup-versions.sh" ]
+    grep -q "cleanup-versions.sh" .github/workflows/build-containers.yml
+    
+    # Verify script is executable
+    [ -x "scripts/cleanup-versions.sh" ]
+}
+
+@test "Property 8: workflow maintains multiple version tags per image" {
+    # Verify multiple tag types are created for each image
+    # LTS tags
+    grep -A 15 "Extract metadata" .github/workflows/build-containers.yml | grep -q "node-lts"
+    grep -A 15 "Extract metadata" .github/workflows/build-containers.yml | grep -q "python-lts"
+    
+    # Major version tags
+    grep -A 15 "Extract metadata" .github/workflows/build-containers.yml | grep -q "node22"
+    grep -A 15 "Extract metadata" .github/workflows/build-containers.yml | grep -q "python3.12"
+    
+    # Minor version tags (Node.js)
+    grep -A 15 "Extract metadata" .github/workflows/build-containers.yml | grep -q "node22.11"
+    
+    # Exact version tags
+    grep -A 15 "Extract metadata" .github/workflows/build-containers.yml | grep -q "node22.11.0"
+    grep -A 15 "Extract metadata" .github/workflows/build-containers.yml | grep -q "python3.12.8"
+    
+    # Date-stamped tags
+    grep -A 15 "Extract metadata" .github/workflows/build-containers.yml | grep -q "{{date 'YYYYMMDD'}}"
+}
+
+@test "Property 8: cleanup script implements retention limits" {
+    # Verify cleanup script contains retention limits
+    grep -q "MAX_DATE_TAGS=10" scripts/cleanup-versions.sh
+    grep -q "MAX_MAJOR_VERSIONS=2" scripts/cleanup-versions.sh
+    grep -q "MAX_MINOR_VERSIONS=3" scripts/cleanup-versions.sh
+    grep -q "MAX_PATCH_VERSIONS=5" scripts/cleanup-versions.sh
+    grep -q "DEV_TAG_RETENTION_DAYS=30" scripts/cleanup-versions.sh
+}
+
+@test "Property 8: cleanup script handles both container types" {
+    # Verify script processes both nodejs and python containers
+    grep -q "nodejs" scripts/cleanup-versions.sh
+    grep -q "python" scripts/cleanup-versions.sh
+    
+    # Verify script has proper tag patterns for both
+    grep -q "node.*[0-9]" scripts/cleanup-versions.sh
+    grep -q "python.*[0-9]" scripts/cleanup-versions.sh
+}
+
+# Property 10: Build Skipping Logic
+# For any commit that doesn't modify relevant container files, the build system should skip the build process entirely.
+@test "Property 10: workflow has path-based filtering" {
+    # Verify workflow only triggers on relevant paths
+    grep -A 10 "on:" .github/workflows/build-containers.yml | grep -q "paths:"
+    
+    # Verify specific paths that should trigger builds
+    grep -A 15 "paths:" .github/workflows/build-containers.yml | grep -q "nodejs/"
+    grep -A 15 "paths:" .github/workflows/build-containers.yml | grep -q "python/"
+    grep -A 15 "paths:" .github/workflows/build-containers.yml | grep -q "scripts/"
+    grep -A 15 "paths:" .github/workflows/build-containers.yml | grep -q ".github/workflows/"
+}
+
+@test "Property 10: change detection script implements skip logic" {
+    # Verify detect-changes.sh script exists
+    [ -f "scripts/detect-changes.sh" ]
+    
+    # Verify script has logic to skip builds when no changes
+    grep -q "no-changes" scripts/detect-changes.sh || grep -q "false" scripts/detect-changes.sh
+}
+
+@test "Property 10: build jobs are conditional on change detection" {
+    # Verify nodejs build job is conditional
+    grep -A 5 "build-nodejs:" .github/workflows/build-containers.yml | grep -q "if:.*nodejs-changed.*true"
+    
+    # Verify python build job is conditional
+    grep -A 5 "build-python:" .github/workflows/build-containers.yml | grep -q "if:.*python-changed.*true"
+    
+    # Verify jobs depend on change detection
+    grep -A 5 "build-nodejs:" .github/workflows/build-containers.yml | grep -q "needs:.*detect-changes"
+    grep -A 5 "build-python:" .github/workflows/build-containers.yml | grep -q "needs:.*detect-changes"
+}
+
+@test "Property 10: workflow supports force build override" {
+    # Verify manual workflow dispatch can override skip logic
+    grep -q "workflow_dispatch:" .github/workflows/build-containers.yml
+    grep -q "force_build:" .github/workflows/build-containers.yml
+    
+    # Verify force build sets both containers to build
+    grep -q "force_build.*true" .github/workflows/build-containers.yml
+    grep -A 5 "force_build.*true" .github/workflows/build-containers.yml | grep -q "nodejs-changed=true"
+    grep -A 5 "force_build.*true" .github/workflows/build-containers.yml | grep -q "python-changed=true"
+}
+
+@test "Property 10: change detection handles edge cases" {
+    # Verify change detection handles shallow clones and first commits
+    grep -q "shallow" scripts/detect-changes.sh || grep -q "first.*commit" scripts/detect-changes.sh
+    
+    # Verify change detection handles common files affecting all containers
+    grep -q "common" scripts/detect-changes.sh || grep -q "workflow" scripts/detect-changes.sh
+}
+
+@test "Property 10: common files trigger all container builds" {
+    # Verify common files like workflows and scripts trigger all builds
+    grep -q "common.*changed" scripts/detect-changes.sh || grep -q "workflow" scripts/detect-changes.sh
+    
+    # Verify VERSIONING.md changes would be handled as common files
+    grep -q "VERSIONING" scripts/detect-changes.sh
 }

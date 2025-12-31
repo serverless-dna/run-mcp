@@ -152,7 +152,7 @@ analyze_changes() {
     
     # Handle common files that affect all containers
     # Include workflows, scripts, root config files, and documentation
-    common_changed=$(echo "$changed_files" | grep -E "^(\.github/workflows/|scripts/|README\.md|CONTRIBUTING\.md|VERSIONING\.md|versions\.json)" || true)
+    common_changed=$(echo "$changed_files" | grep -E "^(\.github/workflows/|scripts/|README\.md|CONTRIBUTING\.md|VERSIONING\.md)" || true)
     
     # Log analysis results with detailed breakdown
     echo "📊 CHANGE ANALYSIS BREAKDOWN" >&2

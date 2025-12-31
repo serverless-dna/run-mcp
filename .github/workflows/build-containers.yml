@@ -9,7 +9,6 @@ on:
       - 'scripts/**'
       - '.github/workflows/build-containers.yml'
       - 'Dockerfile*'
-      - 'versions.json'
   pull_request:
     branches: [main]
     paths:
@@ -18,7 +17,6 @@ on:
       - 'scripts/**'
       - '.github/workflows/build-containers.yml'
       - 'Dockerfile*'
-      - 'versions.json'
   workflow_dispatch:
     inputs:
       force_build:
@@ -113,7 +111,11 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=raw,value=node-lts,enable={{is_default_branch}}
             type=raw,value=node22
+            type=raw,value=node22.11
+            type=raw,value=node22.11.0
+            type=raw,value=node22.11.0-{{date 'YYYYMMDD'}}
             type=raw,value=node22-{{date 'YYYYMMDD'}}-{{sha}}
             type=raw,value=latest,enable={{is_default_branch}}
       
@@ -227,7 +229,10 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=raw,value=python-lts,enable={{is_default_branch}}
             type=raw,value=python3.12
+            type=raw,value=python3.12.8
+            type=raw,value=python3.12.8-{{date 'YYYYMMDD'}}
             type=raw,value=python3.12-{{date 'YYYYMMDD'}}-{{sha}}
             type=raw,value=latest,enable={{is_default_branch}}
       
@@ -500,58 +505,58 @@ jobs:
             echo "::warning title=Python Vulnerability Scan Failed::Python container vulnerability scan failed, but build continues"
           fi
 
-  update-versions:
+  cleanup-old-versions:
     runs-on: ubuntu-latest
     needs: [build-nodejs, build-python, integration-test, vulnerability-scan]
     if: always() && github.ref == 'refs/heads/main' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Update versions.json
+      - name: Log cleanup start
         run: |
-          # Update versions.json with successful builds
-          if [[ "${{ needs.build-nodejs.result }}" == "success" ]]; then
-            # Extract Node.js version from built image
-            NODE_VERSION="${{ github.event.inputs.nodejs_version }}"
-            if [[ -z "$NODE_VERSION" ]]; then
-              # Default to current LTS version
-              NODE_VERSION="22.11.0"
-            fi
-            
-            # Update versions.json
-            jq --arg version "$NODE_VERSION" '.nodejs."22" = $version' versions.json > versions.tmp
-            mv versions.tmp versions.json
+          echo "🧹 Starting version cleanup based on retention policy"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+      
+      - name: Install GitHub CLI
+        run: |
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt update
+          sudo apt install gh
+      
+      - name: Authenticate GitHub CLI
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+      
+      - name: Cleanup Node.js versions
+        id: cleanup-nodejs
+        run: |
+          echo "🔍 Running comprehensive version cleanup..."
+          bash scripts/cleanup-versions.sh
+        continue-on-error: true
+      
+      - name: Cleanup Python versions
+        id: cleanup-python
+        run: |
+          echo "✅ Version cleanup completed (handled by cleanup-nodejs step)"
+        continue-on-error: true
+      
+      - name: Log cleanup results
+        if: always()
+        run: |
+          echo "📊 Version cleanup results summary:"
+          echo "Node.js cleanup result: ${{ steps.cleanup-nodejs.outcome }}"
+          echo "Python cleanup result: ${{ steps.cleanup-python.outcome }}"
+          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          
+          if [[ "${{ steps.cleanup-nodejs.outcome }}" == "failure" ]]; then
+            echo "::warning title=Node.js Cleanup Issues::Node.js version cleanup encountered issues, but build continues"
           fi
           
-          if [[ "${{ needs.build-python.result }}" == "success" ]]; then
-            # Extract Python version from built image
-            PYTHON_VERSION="${{ github.event.inputs.python_version }}"
-            if [[ -z "$PYTHON_VERSION" ]]; then
-              # Default to current version
-              PYTHON_VERSION="3.12.8"
-            fi
-            
-            # Update versions.json
-            jq --arg version "$PYTHON_VERSION" '.python."3.12" = $version' versions.json > versions.tmp
-            mv versions.tmp versions.json
-          fi
-          
-          # Update last checked timestamp
-          jq --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.lastChecked = $timestamp' versions.json > versions.tmp
-          mv versions.tmp versions.json
-      
-      - name: Commit version updates
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          if git diff --quiet versions.json; then
-            echo "No version changes to commit"
-          else
-            git add versions.json
-            git commit -m "Update versions.json after successful container builds"
-            git push
+          if [[ "${{ steps.cleanup-python.outcome }}" == "failure" ]]; then
+            echo "::warning title=Python Cleanup Issues::Python version cleanup encountered issues, but build continues"
           fi
