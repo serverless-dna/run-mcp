@@ -17,31 +17,13 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  check-versions:
+  check-and-build:
     runs-on: ubuntu-latest
-    outputs:
-      updates-detected: ${{ steps.check.outputs.updates-detected }}
-      nodejs-updates: ${{ steps.check.outputs.nodejs-updates }}
-      python-updates: ${{ steps.check.outputs.python-updates }}
-      check-errors: ${{ steps.check.outputs.check-errors }}
-      nodejs-22: ${{ steps.check.outputs.nodejs-22 }}
-      nodejs-20: ${{ steps.check.outputs.nodejs-20 }}
-      python-3.12: ${{ steps.check.outputs.python-3.12 }}
-      python-3.11: ${{ steps.check.outputs.python-3.11 }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Log version check start
-        run: |
-          echo "🔍 Starting upstream version check"
-          echo "Trigger: ${{ github.event_name }}"
-          echo "Force check: ${{ github.event.inputs.force_check || 'false' }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "Repository: ${{ github.repository }}"
-          echo "Branch: ${{ github.ref_name }}"
       
       - name: Install dependencies
         run: |
@@ -53,55 +35,26 @@ jobs:
           jq --version
           curl --version
       
-      - name: Show current versions
+      - name: Run version check and build script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          FORCE_CHECK: ${{ github.event.inputs.force_check == 'true' && 'true' || 'false' }}
         run: |
-          echo "📋 Current tracked versions:"
-          if [[ -f "versions.json" ]]; then
-            cat versions.json | jq '.'
-          else
-            echo "⚠️  versions.json not found - will be created during check"
-          fi
-      
-      - name: Check for upstream version updates
-        id: check
-        run: |
-          echo "🔍 Running upstream version check script..."
+          echo "🔍 Running combined version check and build trigger script..."
+          echo "Force check: $FORCE_CHECK"
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
           
-          # Handle force check logic
-          if [[ "${{ github.event.inputs.force_check }}" == "true" ]]; then
-            echo "🔄 Force check requested - bypassing recent check validation"
-          else
-            # Check if we've checked recently (within last 6 days)
-            if [[ -f "versions.json" ]]; then
-              LAST_CHECKED=$(jq -r '.lastChecked' versions.json)
-              if [[ "$LAST_CHECKED" != "null" && -n "$LAST_CHECKED" ]]; then
-                LAST_CHECKED_EPOCH=$(date -d "$LAST_CHECKED" +%s 2>/dev/null || echo "0")
-                CURRENT_EPOCH=$(date +%s)
-                HOURS_SINCE_CHECK=$(( (CURRENT_EPOCH - LAST_CHECKED_EPOCH) / 3600 ))
-                
-                if [[ $HOURS_SINCE_CHECK -lt 144 ]]; then  # 6 days = 144 hours
-                  echo "⏭️  Skipping check - last checked $HOURS_SINCE_CHECK hours ago (less than 144 hours)"
-                  echo "   Last check: $LAST_CHECKED"
-                  echo "   Use force_check=true to override this behavior"
-                  echo "updates-detected=false" >> $GITHUB_OUTPUT
-                  echo "check-errors=false" >> $GITHUB_OUTPUT
-                  echo "nodejs-updates=" >> $GITHUB_OUTPUT
-                  echo "python-updates=" >> $GITHUB_OUTPUT
-                  exit 0
-                fi
-              fi
-            fi
-          fi
-          
-          # Run the version check script
-          bash scripts/check-upstream-versions.sh
-        continue-on-error: false
+          # Make script executable and run it
+          chmod +x scripts/check-and-build-versions.sh
+          bash scripts/check-and-build-versions.sh
       
       - name: Commit updated versions.json
-        id: commit
-        if: steps.check.outputs.updates-detected == 'true'
+        if: always()
         run: |
-          echo "💾 Committing updated versions.json..."
+          echo "💾 Checking for versions.json updates..."
           
           # Configure git
           git config --local user.email "action@github.com"
@@ -110,7 +63,6 @@ jobs:
           # Check if versions.json has changes
           if git diff --quiet versions.json; then
             echo "⏭️  No changes to versions.json detected"
-            echo "committed=false" >> $GITHUB_OUTPUT
           else
             echo "📝 Changes detected in versions.json:"
             git diff versions.json
@@ -118,204 +70,19 @@ jobs:
             # Add and commit the changes
             git add versions.json
             git commit -m "chore: update upstream version tracking
-            
-            Updates detected:
-            - Node.js updates: ${{ steps.check.outputs.nodejs-updates }}
-            - Python updates: ${{ steps.check.outputs.python-updates }}
-            
-            Automated update by check-upstream workflow"
+
+            Automated version updates detected and builds triggered.
+            Updated by check-upstream workflow on $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
             
             # Push the changes
             git push
             
             echo "✅ Successfully committed and pushed version updates"
-            echo "committed=true" >> $GITHUB_OUTPUT
           fi
         continue-on-error: true
       
-      - name: Log version check results
-        if: always()
-        run: |
-          echo "📊 Version check results summary:"
-          echo "Updates detected: ${{ steps.check.outputs.updates-detected }}"
-          echo "Node.js updates: ${{ steps.check.outputs.nodejs-updates }}"
-          echo "Python updates: ${{ steps.check.outputs.python-updates }}"
-          echo "Check errors: ${{ steps.check.outputs.check-errors }}"
-          echo "Versions committed: ${{ steps.commit.outputs.committed || 'false' }}"
-          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          
-          # Log individual version updates if detected
-          if [[ "${{ steps.check.outputs.updates-detected }}" == "true" ]]; then
-            echo ""
-            echo "🆕 Detected version updates:"
-            
-            # Node.js updates
-            if [[ -n "${{ steps.check.outputs.nodejs-22 }}" ]]; then
-              echo "  Node.js 22: ${{ steps.check.outputs.nodejs-22 }}"
-            fi
-            if [[ -n "${{ steps.check.outputs.nodejs-20 }}" ]]; then
-              echo "  Node.js 20: ${{ steps.check.outputs.nodejs-20 }}"
-            fi
-            
-            # Python updates
-            if [[ -n "${{ steps.check.outputs.python-3.12 }}" ]]; then
-              echo "  Python 3.12: ${{ steps.check.outputs.python-3.12 }}"
-            fi
-            if [[ -n "${{ steps.check.outputs.python-3.11 }}" ]]; then
-              echo "  Python 3.11: ${{ steps.check.outputs.python-3.11 }}"
-            fi
-          fi
-
-  trigger-builds:
-    runs-on: ubuntu-latest
-    needs: check-versions
-    if: needs.check-versions.outputs.updates-detected == 'true'
-    steps:
-      - name: Log build trigger start
-        run: |
-          echo "🚀 Triggering container builds for detected updates"
-          echo "Node.js updates: ${{ needs.check-versions.outputs.nodejs-updates }}"
-          echo "Python updates: ${{ needs.check-versions.outputs.python-updates }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
-      - name: Trigger Node.js 22 build
-        if: contains(needs.check-versions.outputs.nodejs-updates, '22')
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'build-containers.yml',
-              ref: 'main',
-              inputs: {
-                force_build: 'true',
-                nodejs_version: '${{ needs.check-versions.outputs.nodejs-22 }}'
-              }
-            });
-            
-            console.log('✅ Triggered Node.js 22 build:', result.status);
-            console.log('   Version: ${{ needs.check-versions.outputs.nodejs-22 }}');
-      
-      - name: Trigger Node.js 20 build
-        if: contains(needs.check-versions.outputs.nodejs-updates, '20')
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'build-containers.yml',
-              ref: 'main',
-              inputs: {
-                force_build: 'true',
-                nodejs_version: '${{ needs.check-versions.outputs.nodejs-20 }}'
-              }
-            });
-            
-            console.log('✅ Triggered Node.js 20 build:', result.status);
-            console.log('   Version: ${{ needs.check-versions.outputs.nodejs-20 }}');
-      
-      - name: Trigger Python 3.12 build
-        if: contains(needs.check-versions.outputs.python-updates, '3.12')
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'build-containers.yml',
-              ref: 'main',
-              inputs: {
-                force_build: 'true',
-                python_version: '${{ needs.check-versions.outputs.python-3.12 }}'
-              }
-            });
-            
-            console.log('✅ Triggered Python 3.12 build:', result.status);
-            console.log('   Version: ${{ needs.check-versions.outputs.python-3.12 }}');
-      
-      - name: Trigger Python 3.11 build
-        if: contains(needs.check-versions.outputs.python-updates, '3.11')
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'build-containers.yml',
-              ref: 'main',
-              inputs: {
-                force_build: 'true',
-                python_version: '${{ needs.check-versions.outputs.python-3.11 }}'
-              }
-            });
-            
-            console.log('✅ Triggered Python 3.11 build:', result.status);
-            console.log('   Version: ${{ needs.check-versions.outputs.python-3.11 }}');
-      
-      - name: Log build trigger results
-        if: always()
-        run: |
-          echo "📊 Build trigger results summary:"
-          echo "Builds triggered for:"
-          
-          if [[ "${{ contains(needs.check-versions.outputs.nodejs-updates, '22') }}" == "true" ]]; then
-            echo "  ✅ Node.js 22: ${{ needs.check-versions.outputs.nodejs-22 }}"
-          fi
-          
-          if [[ "${{ contains(needs.check-versions.outputs.nodejs-updates, '20') }}" == "true" ]]; then
-            echo "  ✅ Node.js 20: ${{ needs.check-versions.outputs.nodejs-20 }}"
-          fi
-          
-          if [[ "${{ contains(needs.check-versions.outputs.python-updates, '3.12') }}" == "true" ]]; then
-            echo "  ✅ Python 3.12: ${{ needs.check-versions.outputs.python-3.12 }}"
-          fi
-          
-          if [[ "${{ contains(needs.check-versions.outputs.python-updates, '3.11') }}" == "true" ]]; then
-            echo "  ✅ Python 3.11: ${{ needs.check-versions.outputs.python-3.11 }}"
-          fi
-          
-          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo ""
-          echo "🔗 Monitor build progress in the Actions tab"
-
-  notify-results:
-    runs-on: ubuntu-latest
-    needs: [check-versions, trigger-builds]
-    if: always()
-    steps:
-      - name: Log final results
-        run: |
-          echo "🏁 Upstream version check workflow completed"
-          echo "=================================="
-          echo "Check job result: ${{ needs.check-versions.result }}"
-          echo "Trigger job result: ${{ needs.trigger-builds.result }}"
-          echo "Updates detected: ${{ needs.check-versions.outputs.updates-detected }}"
-          echo "Check errors: ${{ needs.check-versions.outputs.check-errors }}"
-          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "=================================="
-          
-          # Provide summary based on results
-          if [[ "${{ needs.check-versions.outputs.updates-detected }}" == "true" ]]; then
-            echo "✅ Updates were detected and container builds have been triggered"
-            echo "   Monitor the build-containers workflow for progress"
-          elif [[ "${{ needs.check-versions.outputs.check-errors }}" == "true" ]]; then
-            echo "⚠️  Version check completed with some errors"
-            echo "   Check the logs above for details"
-          else
-            echo "✅ All versions are current - no updates needed"
-          fi
-          
-          echo ""
-          echo "Next scheduled check: $(date -d 'next sunday' -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
-      - name: Create issue on check errors
-        if: needs.check-versions.outputs.check-errors == 'true'
+      - name: Create issue on errors
+        if: failure()
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -332,6 +99,17 @@ jobs:
               issue.title.includes('Upstream Version Check Errors')
             );
             
+            const errorBody = `## Version Check Errors - ${new Date().toISOString()}
+            
+            The upstream version check encountered errors during the scheduled run.
+            
+            **Details:**
+            - Workflow run: [${context.runId}](${context.payload.repository.html_url}/actions/runs/${context.runId})
+            - Timestamp: ${new Date().toISOString()}
+            - Force check: ${{ github.event.inputs.force_check || 'false' }}
+            
+            Please review the workflow logs for specific error details.`;
+            
             if (existingIssue) {
               console.log('Existing issue found:', existingIssue.number);
               
@@ -340,17 +118,7 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: existingIssue.number,
-                body: `## Version Check Errors - ${new Date().toISOString()}
-                
-                The upstream version check encountered errors during the scheduled run.
-                
-                **Details:**
-                - Workflow run: [${context.runId}](${context.payload.repository.html_url}/actions/runs/${context.runId})
-                - Timestamp: ${new Date().toISOString()}
-                - Node.js updates: ${{ needs.check-versions.outputs.nodejs-updates }}
-                - Python updates: ${{ needs.check-versions.outputs.python-updates }}
-                
-                Please review the workflow logs for specific error details.`
+                body: errorBody
               });
               
               console.log('Added comment to existing issue');
@@ -364,23 +132,21 @@ jobs:
                 
                 The automated upstream version check has encountered errors and requires attention.
                 
-                **Error Details:**
-                - Workflow run: [${context.runId}](${context.payload.repository.html_url}/actions/runs/${context.runId})
-                - Timestamp: ${new Date().toISOString()}
-                - Node.js updates: ${{ needs.check-versions.outputs.nodejs-updates }}
-                - Python updates: ${{ needs.check-versions.outputs.python-updates }}
+                ${errorBody}
                 
                 **Possible Causes:**
                 - API rate limiting or timeouts
                 - Network connectivity issues
                 - Changes to upstream API endpoints
                 - Invalid version data in versions.json
+                - GitHub API authentication issues
                 
                 **Action Required:**
                 1. Review the workflow logs for specific error messages
                 2. Verify upstream API endpoints are accessible
                 3. Check versions.json for data integrity
-                4. Consider running a manual version check
+                4. Verify GitHub token permissions
+                5. Consider running a manual version check
                 
                 This issue was automatically created by the check-upstream workflow.`,
                 labels: ['upstream-version-check', 'automated', 'bug']

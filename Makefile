@@ -295,6 +295,20 @@ check-changes: ## Check what containers would be built based on git changes
 		echo "$(YELLOW)→ Python container would be skipped$(NC)"; \
 	fi
 
+check-upstream: ## Check for upstream version updates and trigger builds
+	@echo "$(BLUE)Checking for upstream version updates...$(NC)"
+	@chmod +x scripts/check-and-build-versions.sh
+	@GITHUB_REPOSITORY="$(OWNER)/$(REPO_NAME)" \
+	 GITHUB_TOKEN="$(GITHUB_TOKEN)" \
+	 bash scripts/check-and-build-versions.sh
+
+check-upstream-force: ## Force check for upstream version updates
+	@echo "$(BLUE)Force checking for upstream version updates...$(NC)"
+	@chmod +x scripts/check-and-build-versions.sh
+	@GITHUB_REPOSITORY="$(OWNER)/$(REPO_NAME)" \
+	 GITHUB_TOKEN="$(GITHUB_TOKEN)" \
+	 bash scripts/check-and-build-versions.sh --force
+
 # Conditional build targets (based on change detection)
 build-changed: ## Build only containers that have changed
 	@echo "$(BLUE)Building only changed containers...$(NC)"
@@ -499,4 +513,4 @@ checksums: build-run-mcp-all ## Generate checksums for all binaries
 	@echo "$(GREEN)✓ Generated checksums$(NC)"
 
 # Update .PHONY target
-.PHONY: help test test-scripts test-integration clean build build-nodejs build-python push push-nodejs push-python login check-tools setup-dev lint validate-dockerfiles check-changes build-run-mcp build-run-mcp-all test-run-mcp install-run-mcp clean-run-mcp checksums
+.PHONY: help test test-scripts test-integration clean build build-nodejs build-python push push-nodejs push-python login check-tools setup-dev lint validate-dockerfiles check-changes check-upstream check-upstream-force build-run-mcp build-run-mcp-all test-run-mcp install-run-mcp clean-run-mcp checksums
