@@ -279,20 +279,14 @@ validate-dockerfiles: ## Validate Dockerfiles with hadolint
 	fi
 	@echo "$(GREEN)✓ Dockerfile validation completed$(NC)"
 
-check-changes: ## Check what containers would be built based on git changes
-	@echo "$(BLUE)Checking what would be built based on changes...$(NC)"
-	@GITHUB_OUTPUT=/tmp/makefile-changes bash scripts/detect-changes.sh
-	@echo "$(YELLOW)Build decisions:$(NC)"
-	@cat /tmp/makefile-changes
-	@if grep -q "nodejs-changed=true" /tmp/makefile-changes; then \
-		echo "$(GREEN)→ Node.js container would be built$(NC)"; \
+check-changes: ## Check if containers should be built based on git changes
+	@echo "$(BLUE)Checking if containers should be built...$(NC)"
+	@if git diff --quiet HEAD~1 HEAD -- nodejs/ python/ scripts/ .github/workflows/build-containers.yml Dockerfile* 2>/dev/null; then \
+		echo "$(YELLOW)→ No changes detected - containers would be skipped$(NC)"; \
 	else \
-		echo "$(YELLOW)→ Node.js container would be skipped$(NC)"; \
-	fi
-	@if grep -q "python-changed=true" /tmp/makefile-changes; then \
-		echo "$(GREEN)→ Python container would be built$(NC)"; \
-	else \
-		echo "$(YELLOW)→ Python container would be skipped$(NC)"; \
+		echo "$(GREEN)→ Changes detected - all containers would be built$(NC)"; \
+		echo "$(BLUE)Changed files:$(NC)"; \
+		git diff --name-only HEAD~1 HEAD -- nodejs/ python/ scripts/ .github/workflows/build-containers.yml Dockerfile* 2>/dev/null || echo "  (unable to determine specific files)"; \
 	fi
 
 check-upstream: ## Check for upstream version updates and trigger builds

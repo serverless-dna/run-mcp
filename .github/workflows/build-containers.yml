@@ -24,12 +24,21 @@ on:
         required: false
         default: 'false'
         type: boolean
+      build_all_versions:
+        description: 'Build all versions from versions.json (for Dockerfile changes)'
+        required: false
+        default: 'false'
+        type: boolean
       nodejs_version:
         description: 'Node.js version to build (optional)'
         required: false
         type: string
       python_version:
         description: 'Python version to build (optional)'
+        required: false
+        type: string
+      build_reason:
+        description: 'Reason for build (for logging)'
         required: false
         type: string
 
@@ -41,8 +50,7 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      nodejs-changed: ${{ steps.changes.outputs.nodejs-changed }}
-      python-changed: ${{ steps.changes.outputs.python-changed }}
+      should-build: ${{ steps.changes.outputs.should-build }}
       build-reason: ${{ steps.changes.outputs.build-reason }}
     steps:
       - name: Checkout code
@@ -50,32 +58,51 @@ jobs:
         with:
           fetch-depth: 0  # Need full history for git diff
       
-      - name: Detect changes
+      - name: Detect if we should build
         id: changes
         run: |
-          # Handle manual workflow dispatch
+          echo "🔍 Determining if containers should be built..."
+          
+          # Always build on manual workflow dispatch
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             if [[ "${{ github.event.inputs.force_build }}" == "true" ]]; then
-              echo "nodejs-changed=true" >> $GITHUB_OUTPUT
-              echo "python-changed=true" >> $GITHUB_OUTPUT
+              echo "should-build=true" >> $GITHUB_OUTPUT
               echo "build-reason=Manual force build requested" >> $GITHUB_OUTPUT
+              echo "✅ Manual force build - will rebuild all containers"
               exit 0
             fi
           fi
           
-          # Use the detect-changes.sh script
-          bash scripts/detect-changes.sh
+          # Check if any relevant files changed
+          echo "Checking for changes in container-related files..."
+          
+          # Use git diff to check for changes in relevant paths
+          if git diff --quiet HEAD~1 HEAD -- nodejs/ python/ scripts/ .github/workflows/build-containers.yml Dockerfile* 2>/dev/null; then
+            echo "should-build=false" >> $GITHUB_OUTPUT
+            echo "build-reason=No relevant changes detected" >> $GITHUB_OUTPUT
+            echo "⏭️  No changes detected - skipping build"
+          else
+            echo "should-build=true" >> $GITHUB_OUTPUT
+            echo "build-reason=Changes detected in container files" >> $GITHUB_OUTPUT
+            echo "✅ Changes detected - will rebuild all containers"
+            
+            # Log what changed
+            echo "Changed files:"
+            git diff --name-only HEAD~1 HEAD -- nodejs/ python/ scripts/ .github/workflows/build-containers.yml Dockerfile* 2>/dev/null || echo "  (unable to determine specific files)"
+          fi
       
-      - name: Log detected changes
+      - name: Log build decision
         run: |
+          echo "📊 Build Decision Summary:"
+          echo "Should build: ${{ steps.changes.outputs.should-build }}"
           echo "Build reason: ${{ steps.changes.outputs.build-reason }}"
-          echo "Node.js changed: ${{ steps.changes.outputs.nodejs-changed }}"
-          echo "Python changed: ${{ steps.changes.outputs.python-changed }}"
+          echo "Event: ${{ github.event_name }}"
+          echo "Branch: ${{ github.ref_name }}"
 
   build-nodejs:
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.nodejs-changed == 'true'
+    if: needs.detect-changes.outputs.should-build == 'true'
     outputs:
       nodejs-major: ${{ steps.nodejs-version.outputs.nodejs-major }}
       nodejs-version: ${{ steps.nodejs-version.outputs.nodejs-version }}
@@ -109,18 +136,22 @@ jobs:
       - name: Determine Node.js version
         id: nodejs-version
         run: |
-          # Use provided version or default to current LTS
+          # Use provided version or get from versions.json dynamically
           if [[ -n "${{ github.event.inputs.nodejs_version }}" ]]; then
             NODEJS_VERSION="${{ github.event.inputs.nodejs_version }}"
             echo "Using provided Node.js version: $NODEJS_VERSION"
           else
-            # Extract current version from versions.json or use default
+            # Get the latest Node.js version from versions.json
             if [[ -f "versions.json" ]]; then
-              NODEJS_VERSION=$(jq -r '.nodejs."22"' versions.json 2>/dev/null || echo "22.11.0")
+              # Get the highest major version available
+              LATEST_MAJOR=$(jq -r '.nodejs | keys | map(tonumber) | max' versions.json 2>/dev/null || echo "22")
+              NODEJS_VERSION=$(jq -r ".nodejs.\"$LATEST_MAJOR\"" versions.json 2>/dev/null || echo "22.11.0")
+              echo "Using latest Node.js version from versions.json: $NODEJS_VERSION (major: $LATEST_MAJOR)"
             else
+              # Fallback to default
               NODEJS_VERSION="22.11.0"
+              echo "Using fallback Node.js version: $NODEJS_VERSION"
             fi
-            echo "Using default Node.js version: $NODEJS_VERSION"
           fi
           
           # Parse version components
@@ -227,7 +258,7 @@ jobs:
   build-python:
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.python-changed == 'true'
+    if: needs.detect-changes.outputs.should-build == 'true'
     outputs:
       python-major-minor: ${{ steps.python-version.outputs.python-major-minor }}
       python-version: ${{ steps.python-version.outputs.python-version }}
@@ -261,18 +292,22 @@ jobs:
       - name: Determine Python version
         id: python-version
         run: |
-          # Use provided version or default to current LTS
+          # Use provided version or get from versions.json dynamically
           if [[ -n "${{ github.event.inputs.python_version }}" ]]; then
             PYTHON_VERSION="${{ github.event.inputs.python_version }}"
             echo "Using provided Python version: $PYTHON_VERSION"
           else
-            # Extract current version from versions.json or use default
+            # Get the latest Python version from versions.json
             if [[ -f "versions.json" ]]; then
-              PYTHON_VERSION=$(jq -r '.python."3.12"' versions.json 2>/dev/null || echo "3.12.8")
+              # Get the highest major.minor version available (e.g., "3.12" > "3.11")
+              LATEST_MAJOR_MINOR=$(jq -r '.python | keys | sort_by(split(".") | map(tonumber)) | last' versions.json 2>/dev/null || echo "3.12")
+              PYTHON_VERSION=$(jq -r ".python.\"$LATEST_MAJOR_MINOR\"" versions.json 2>/dev/null || echo "3.12.8")
+              echo "Using latest Python version from versions.json: $PYTHON_VERSION (major.minor: $LATEST_MAJOR_MINOR)"
             else
+              # Fallback to default
               PYTHON_VERSION="3.12.8"
+              echo "Using fallback Python version: $PYTHON_VERSION"
             fi
-            echo "Using default Python version: $PYTHON_VERSION"
           fi
           
           # Parse version components
@@ -379,8 +414,8 @@ jobs:
 
   integration-test:
     runs-on: ubuntu-latest
-    needs: [build-nodejs, build-python]
-    if: always() && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    needs: [detect-changes, build-nodejs, build-python]
+    if: needs.detect-changes.outputs.should-build == 'true' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -545,8 +580,8 @@ jobs:
 
   vulnerability-scan:
     runs-on: ubuntu-latest
-    needs: [build-nodejs, build-python]
-    if: always() && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    needs: [detect-changes, build-nodejs, build-python]
+    if: needs.detect-changes.outputs.should-build == 'true' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
     steps:
       - name: Log vulnerability scan start
         run: |
@@ -601,8 +636,8 @@ jobs:
 
   cleanup-old-versions:
     runs-on: ubuntu-latest
-    needs: [build-nodejs, build-python, integration-test, vulnerability-scan]
-    if: always() && github.ref == 'refs/heads/main' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    needs: [detect-changes, build-nodejs, build-python, integration-test, vulnerability-scan]
+    if: needs.detect-changes.outputs.should-build == 'true' && github.ref == 'refs/heads/main' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
     permissions:
       contents: read
       packages: write
@@ -657,8 +692,8 @@ jobs:
 
   update-versions:
     runs-on: ubuntu-latest
-    needs: [build-nodejs, build-python, integration-test]
-    if: always() && github.ref == 'refs/heads/main' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    needs: [detect-changes, build-nodejs, build-python, integration-test]
+    if: needs.detect-changes.outputs.should-build == 'true' && github.ref == 'refs/heads/main' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
     permissions:
       contents: write
     steps:
