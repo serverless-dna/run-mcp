@@ -214,33 +214,33 @@ This implementation plan creates a system for building and distributing language
     - **Property 14: Language-Specific Package Managers**
     - **Validates: Requirements 5.5, 6.2, 6.3, 7.2, 7.3**
 
-- [ ] 11. Implement upstream version detection
-  - [ ] 11.1 Create versions.json tracking file
+- [x] 11. Implement upstream version detection
+  - [x] 11.1 Create versions.json tracking file
     - Store current built versions for each runtime
     - Include last check timestamp
     - Add JSON schema validation for versions.json structure
     - _Requirements: 12.6_
 
-  - [ ] 11.2 Create check-upstream-versions.sh script
+  - [x] 11.2 Create check-upstream-versions.sh script
     - Query nodejs.org API for all tracked Node.js major versions (22, 20)
     - Query endoflife.date API for all tracked Python major versions (3.12, 3.11)
     - Compare against versions.json
     - Output detected updates for GitHub Actions
     - _Requirements: 12.1, 12.2, 12.5_
 
-  - [ ] 11.3 Create check-upstream.yml workflow
+  - [x] 11.3 Create check-upstream.yml workflow
     - Schedule weekly cron (Sunday 00:00 UTC)
     - Add workflow_dispatch for manual checks
     - Trigger build-containers.yml when updates detected
     - _Requirements: 12.1, 12.2, 12.3, 12.4_
 
-  - [ ] 11.4 Update build workflow to accept version parameters
+  - [x] 11.4 Update build workflow to accept version parameters
     - Accept target Node.js version as input
     - Accept target Python version as input
     - Update versions.json after successful build
     - _Requirements: 12.3, 12.4, 12.6_
 
-  - [ ] 11.5 Write property tests for upstream version detection
+  - [x] 11.5 Write property tests for upstream version detection
     - **Property 18: Upstream Version Detection**
     - **Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.6**
 

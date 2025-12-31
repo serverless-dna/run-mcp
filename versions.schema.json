@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MCP Container Versions",
+  "description": "Schema for tracking built container image versions",
+  "type": "object",
+  "properties": {
+    "nodejs": {
+      "type": "object",
+      "description": "Node.js runtime versions by major version",
+      "patternProperties": {
+        "^[0-9]+$": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Semantic version string (e.g., '22.11.0')"
+        }
+      },
+      "additionalProperties": false
+    },
+    "python": {
+      "type": "object",
+      "description": "Python runtime versions by major.minor version",
+      "patternProperties": {
+        "^[0-9]+\\.[0-9]+$": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+          "description": "Semantic version string (e.g., '3.12.8')"
+        }
+      },
+      "additionalProperties": false
+    },
+    "lastChecked": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp of last upstream version check"
+    }
+  },
+  "required": ["nodejs", "python", "lastChecked"],
+  "additionalProperties": false
+}

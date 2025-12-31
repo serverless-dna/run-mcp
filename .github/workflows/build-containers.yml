@@ -76,6 +76,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.nodejs-changed == 'true'
+    outputs:
+      nodejs-major: ${{ steps.nodejs-version.outputs.nodejs-major }}
+      nodejs-version: ${{ steps.nodejs-version.outputs.nodejs-version }}
     permissions:
       contents: read
       packages: write
@@ -103,6 +106,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
+      - name: Determine Node.js version
+        id: nodejs-version
+        run: |
+          # Use provided version or default to current LTS
+          if [[ -n "${{ github.event.inputs.nodejs_version }}" ]]; then
+            NODEJS_VERSION="${{ github.event.inputs.nodejs_version }}"
+            echo "Using provided Node.js version: $NODEJS_VERSION"
+          else
+            # Extract current version from versions.json or use default
+            if [[ -f "versions.json" ]]; then
+              NODEJS_VERSION=$(jq -r '.nodejs."22"' versions.json 2>/dev/null || echo "22.11.0")
+            else
+              NODEJS_VERSION="22.11.0"
+            fi
+            echo "Using default Node.js version: $NODEJS_VERSION"
+          fi
+          
+          # Parse version components
+          MAJOR=$(echo "$NODEJS_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$NODEJS_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$NODEJS_VERSION" | cut -d. -f3)
+          
+          echo "nodejs-version=$NODEJS_VERSION" >> $GITHUB_OUTPUT
+          echo "nodejs-major=$MAJOR" >> $GITHUB_OUTPUT
+          echo "nodejs-minor=$MINOR" >> $GITHUB_OUTPUT
+          echo "nodejs-patch=$PATCH" >> $GITHUB_OUTPUT
+          
+          echo "Node.js version components: $MAJOR.$MINOR.$PATCH"
+      
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -112,11 +144,11 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
             type=raw,value=node-lts,enable={{is_default_branch}}
-            type=raw,value=node22
-            type=raw,value=node22.11
-            type=raw,value=node22.11.0
-            type=raw,value=node22.11.0-{{date 'YYYYMMDD'}}
-            type=raw,value=node22-{{date 'YYYYMMDD'}}-{{sha}}
+            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-major }}
+            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-major }}.${{ steps.nodejs-version.outputs.nodejs-minor }}
+            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-version }}
+            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-version }}-{{date 'YYYYMMDD'}}
+            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-major }}-{{date 'YYYYMMDD'}}-{{sha}}
             type=raw,value=latest,enable={{is_default_branch}}
       
       - name: Lint Dockerfile
@@ -139,6 +171,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            NODE_VERSION=${{ steps.nodejs-version.outputs.nodejs-version }}
         continue-on-error: false
       
       - name: Validate image size
@@ -147,7 +181,7 @@ jobs:
           echo "🔍 Validating Node.js image size..."
           
           # Get image size for AMD64 (first platform)
-          IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 | \
+          IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node${{ steps.nodejs-version.outputs.nodejs-major }} | \
             jq -r '.manifests[] | select(.platform.architecture=="amd64") | .size')
           IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
           
@@ -194,6 +228,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.python-changed == 'true'
+    outputs:
+      python-major-minor: ${{ steps.python-version.outputs.python-major-minor }}
+      python-version: ${{ steps.python-version.outputs.python-version }}
     permissions:
       contents: read
       packages: write
@@ -221,6 +258,37 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       
+      - name: Determine Python version
+        id: python-version
+        run: |
+          # Use provided version or default to current LTS
+          if [[ -n "${{ github.event.inputs.python_version }}" ]]; then
+            PYTHON_VERSION="${{ github.event.inputs.python_version }}"
+            echo "Using provided Python version: $PYTHON_VERSION"
+          else
+            # Extract current version from versions.json or use default
+            if [[ -f "versions.json" ]]; then
+              PYTHON_VERSION=$(jq -r '.python."3.12"' versions.json 2>/dev/null || echo "3.12.8")
+            else
+              PYTHON_VERSION="3.12.8"
+            fi
+            echo "Using default Python version: $PYTHON_VERSION"
+          fi
+          
+          # Parse version components
+          MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$PYTHON_VERSION" | cut -d. -f3)
+          MAJOR_MINOR="$MAJOR.$MINOR"
+          
+          echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+          echo "python-major=$MAJOR" >> $GITHUB_OUTPUT
+          echo "python-minor=$MINOR" >> $GITHUB_OUTPUT
+          echo "python-patch=$PATCH" >> $GITHUB_OUTPUT
+          echo "python-major-minor=$MAJOR_MINOR" >> $GITHUB_OUTPUT
+          
+          echo "Python version components: $MAJOR.$MINOR.$PATCH"
+      
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -230,10 +298,10 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
             type=raw,value=python-lts,enable={{is_default_branch}}
-            type=raw,value=python3.12
-            type=raw,value=python3.12.8
-            type=raw,value=python3.12.8-{{date 'YYYYMMDD'}}
-            type=raw,value=python3.12-{{date 'YYYYMMDD'}}-{{sha}}
+            type=raw,value=python${{ steps.python-version.outputs.python-major-minor }}
+            type=raw,value=python${{ steps.python-version.outputs.python-version }}
+            type=raw,value=python${{ steps.python-version.outputs.python-version }}-{{date 'YYYYMMDD'}}
+            type=raw,value=python${{ steps.python-version.outputs.python-major-minor }}-{{date 'YYYYMMDD'}}-{{sha}}
             type=raw,value=latest,enable={{is_default_branch}}
       
       - name: Lint Dockerfile
@@ -256,6 +324,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            PYTHON_VERSION=${{ steps.python-version.outputs.python-version }}
         continue-on-error: false
       
       - name: Validate image size
@@ -264,7 +334,7 @@ jobs:
           echo "🔍 Validating Python image size..."
           
           # Get image size for AMD64 (first platform)
-          IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 | \
+          IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python${{ steps.python-version.outputs.python-major-minor }} | \
             jq -r '.manifests[] | select(.platform.architecture=="amd64") | .size')
           IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
           
@@ -328,29 +398,35 @@ jobs:
         run: |
           echo "🔍 Testing Node.js container startup and basic functionality..."
           
+          # Get the Node.js major version for testing
+          NODEJS_MAJOR=$(echo "${{ needs.build-nodejs.outputs.nodejs-major || '22' }}")
+          IMAGE_TAG="node${NODEJS_MAJOR}"
+          
+          echo "Testing Node.js container with tag: $IMAGE_TAG"
+          
           # Test container startup
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 node --version || {
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} node --version || {
             echo "❌ Node.js container failed to start or respond"
             echo "::error title=Node.js Container Test Failed::Node.js container failed to start or respond to basic commands"
             exit 1
           }
           
           # Test npm availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 npm --version || {
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} npm --version || {
             echo "❌ npm not available in Node.js container"
             echo "::error title=Node.js npm Test Failed::npm is not available in the Node.js container"
             exit 1
           }
           
           # Test yarn availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 yarn --version || {
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} yarn --version || {
             echo "❌ yarn not available in Node.js container"
             echo "::error title=Node.js yarn Test Failed::yarn is not available in the Node.js container"
             exit 1
           }
           
           # Test npx availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 npx --version || {
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} npx --version || {
             echo "❌ npx not available in Node.js container"
             echo "::error title=Node.js npx Test Failed::npx is not available in the Node.js container"
             exit 1
@@ -365,22 +441,28 @@ jobs:
         run: |
           echo "🔍 Testing Python container startup and basic functionality..."
           
+          # Get the Python major.minor version for testing
+          PYTHON_MAJOR_MINOR=$(echo "${{ needs.build-python.outputs.python-major-minor || '3.12' }}")
+          IMAGE_TAG="python${PYTHON_MAJOR_MINOR}"
+          
+          echo "Testing Python container with tag: $IMAGE_TAG"
+          
           # Test container startup
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 python --version || {
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:${IMAGE_TAG} python --version || {
             echo "❌ Python container failed to start or respond"
             echo "::error title=Python Container Test Failed::Python container failed to start or respond to basic commands"
             exit 1
           }
           
           # Test uv availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 uv --version || {
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:${IMAGE_TAG} uv --version || {
             echo "❌ uv not available in Python container"
             echo "::error title=Python uv Test Failed::uv is not available in the Python container"
             exit 1
           }
           
           # Test uvx availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12 uvx --version || {
+          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:${IMAGE_TAG} uvx --version || {
             echo "❌ uvx not available in Python container"
             echo "::error title=Python uvx Test Failed::uvx is not available in the Python container"
             exit 1
@@ -395,9 +477,15 @@ jobs:
         run: |
           echo "🔍 Testing stdio mode with Node.js container..."
           
+          # Get the Node.js major version for testing
+          NODEJS_MAJOR=$(echo "${{ needs.build-nodejs.outputs.nodejs-major || '22' }}")
+          IMAGE_TAG="node${NODEJS_MAJOR}"
+          
+          echo "Testing stdio mode with Node.js container tag: $IMAGE_TAG"
+          
           # Test that container properly handles stdin/stdout without TTY
           echo '{"jsonrpc": "2.0", "method": "test", "id": 1}' | \
-            timeout 5s docker run -i --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 \
+            timeout 5s docker run -i --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} \
             node -e "process.stdin.on('data', d => { console.log('received:', d.toString().trim()); process.exit(0); })" || {
             echo "❌ stdio mode test failed"
             echo "::error title=stdio Mode Test Failed::Container failed to handle stdin/stdout communication properly"
@@ -413,12 +501,18 @@ jobs:
         run: |
           echo "🔍 Testing volume mounting behavior..."
           
+          # Get the Node.js major version for testing
+          NODEJS_MAJOR=$(echo "${{ needs.build-nodejs.outputs.nodejs-major || '22' }}")
+          IMAGE_TAG="node${NODEJS_MAJOR}"
+          
+          echo "Testing volume mounting with Node.js container tag: $IMAGE_TAG"
+          
           # Create test data
           mkdir -p /tmp/test-data
           echo "test file content" > /tmp/test-data/test.txt
           
           # Test volume mount
-          RESULT=$(docker run --rm -v /tmp/test-data:/data ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22 \
+          RESULT=$(docker run --rm -v /tmp/test-data:/data ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} \
             node -e "console.log(require('fs').readFileSync('/data/test.txt', 'utf8').trim())")
           
           if [[ "$RESULT" != "test file content" ]]; then
@@ -466,7 +560,7 @@ jobs:
         if: needs.build-nodejs.result == 'success'
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node22
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node${{ needs.build-nodejs.outputs.nodejs-major || '22' }}
           format: 'sarif'
           output: 'nodejs-trivy-results.sarif'
         continue-on-error: true
@@ -476,7 +570,7 @@ jobs:
         if: needs.build-python.result == 'success'
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python3.12
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python${{ needs.build-python.outputs.python-major-minor || '3.12' }}
           format: 'sarif'
           output: 'python-trivy-results.sarif'
         continue-on-error: true
@@ -559,4 +653,175 @@ jobs:
           
           if [[ "${{ steps.cleanup-python.outcome }}" == "failure" ]]; then
             echo "::warning title=Python Cleanup Issues::Python version cleanup encountered issues, but build continues"
+          fi
+
+  update-versions:
+    runs-on: ubuntu-latest
+    needs: [build-nodejs, build-python, integration-test]
+    if: always() && github.ref == 'refs/heads/main' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Log version update start
+        run: |
+          echo "📝 Starting versions.json update"
+          echo "Node.js build result: ${{ needs.build-nodejs.result }}"
+          echo "Python build result: ${{ needs.build-python.result }}"
+          echo "Integration test result: ${{ needs.integration-test.result }}"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+      
+      - name: Install dependencies
+        run: |
+          echo "📦 Installing required dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y jq
+          jq --version
+      
+      - name: Update versions.json
+        id: update-versions
+        run: |
+          echo "🔄 Updating versions.json with successful build versions..."
+          
+          # Create versions.json if it doesn't exist
+          if [[ ! -f "versions.json" ]]; then
+            echo "Creating new versions.json file..."
+            cat > versions.json << 'EOF'
+          {
+            "nodejs": {},
+            "python": {},
+            "lastChecked": "2025-01-01T00:00:00Z"
+          }
+          EOF
+          fi
+          
+          # Show current versions
+          echo "Current versions.json:"
+          cat versions.json | jq '.'
+          
+          # Update Node.js version if build was successful
+          if [[ "${{ needs.build-nodejs.result }}" == "success" && -n "${{ needs.build-nodejs.outputs.nodejs-version }}" ]]; then
+            NODEJS_VERSION="${{ needs.build-nodejs.outputs.nodejs-version }}"
+            NODEJS_MAJOR=$(echo "$NODEJS_VERSION" | cut -d. -f1)
+            
+            echo "Updating Node.js $NODEJS_MAJOR to version $NODEJS_VERSION"
+            
+            # Update the versions.json file
+            jq --arg major "$NODEJS_MAJOR" --arg version "$NODEJS_VERSION" \
+              '.nodejs[$major] = $version' versions.json > versions.json.tmp
+            mv versions.json.tmp versions.json
+            
+            echo "nodejs-updated=true" >> $GITHUB_OUTPUT
+            echo "nodejs-version=$NODEJS_VERSION" >> $GITHUB_OUTPUT
+            echo "nodejs-major=$NODEJS_MAJOR" >> $GITHUB_OUTPUT
+          else
+            echo "nodejs-updated=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Update Python version if build was successful
+          if [[ "${{ needs.build-python.result }}" == "success" && -n "${{ needs.build-python.outputs.python-version }}" ]]; then
+            PYTHON_VERSION="${{ needs.build-python.outputs.python-version }}"
+            PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+            PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+            PYTHON_MAJOR_MINOR="$PYTHON_MAJOR.$PYTHON_MINOR"
+            
+            echo "Updating Python $PYTHON_MAJOR_MINOR to version $PYTHON_VERSION"
+            
+            # Update the versions.json file
+            jq --arg major_minor "$PYTHON_MAJOR_MINOR" --arg version "$PYTHON_VERSION" \
+              '.python[$major_minor] = $version' versions.json > versions.json.tmp
+            mv versions.json.tmp versions.json
+            
+            echo "python-updated=true" >> $GITHUB_OUTPUT
+            echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
+            echo "python-major-minor=$PYTHON_MAJOR_MINOR" >> $GITHUB_OUTPUT
+          else
+            echo "python-updated=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # Update lastChecked timestamp
+          TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          jq --arg timestamp "$TIMESTAMP" '.lastChecked = $timestamp' versions.json > versions.json.tmp
+          mv versions.json.tmp versions.json
+          
+          echo "Updated versions.json:"
+          cat versions.json | jq '.'
+          
+          echo "timestamp-updated=$TIMESTAMP" >> $GITHUB_OUTPUT
+        continue-on-error: false
+      
+      - name: Commit updated versions.json
+        id: commit-versions
+        run: |
+          echo "💾 Committing updated versions.json..."
+          
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Check if versions.json has changes
+          if git diff --quiet versions.json; then
+            echo "⏭️  No changes to versions.json detected"
+            echo "committed=false" >> $GITHUB_OUTPUT
+          else
+            echo "📝 Changes detected in versions.json:"
+            git diff versions.json
+            
+            # Create commit message
+            COMMIT_MSG="chore: update container image versions after successful builds"
+            
+            if [[ "${{ steps.update-versions.outputs.nodejs-updated }}" == "true" ]]; then
+              COMMIT_MSG="$COMMIT_MSG
+            
+            - Node.js ${{ steps.update-versions.outputs.nodejs-major }}: ${{ steps.update-versions.outputs.nodejs-version }}"
+            fi
+            
+            if [[ "${{ steps.update-versions.outputs.python-updated }}" == "true" ]]; then
+              COMMIT_MSG="$COMMIT_MSG
+            
+            - Python ${{ steps.update-versions.outputs.python-major-minor }}: ${{ steps.update-versions.outputs.python-version }}"
+            fi
+            
+            COMMIT_MSG="$COMMIT_MSG
+            
+            Automated update by build-containers workflow
+            Build: ${{ github.run_id }}
+            Commit: ${{ github.sha }}"
+            
+            # Add and commit the changes
+            git add versions.json
+            git commit -m "$COMMIT_MSG"
+            
+            # Push the changes
+            git push
+            
+            echo "✅ Successfully committed and pushed version updates"
+            echo "committed=true" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+      
+      - name: Log version update results
+        if: always()
+        run: |
+          echo "📊 Version update results summary:"
+          echo "Node.js updated: ${{ steps.update-versions.outputs.nodejs-updated }}"
+          echo "Python updated: ${{ steps.update-versions.outputs.python-updated }}"
+          echo "Versions committed: ${{ steps.commit-versions.outputs.committed || 'false' }}"
+          echo "Timestamp updated: ${{ steps.update-versions.outputs.timestamp-updated }}"
+          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          
+          if [[ "${{ steps.update-versions.outputs.nodejs-updated }}" == "true" ]]; then
+            echo "  ✅ Node.js ${{ steps.update-versions.outputs.nodejs-major }}: ${{ steps.update-versions.outputs.nodejs-version }}"
+          fi
+          
+          if [[ "${{ steps.update-versions.outputs.python-updated }}" == "true" ]]; then
+            echo "  ✅ Python ${{ steps.update-versions.outputs.python-major-minor }}: ${{ steps.update-versions.outputs.python-version }}"
+          fi
+          
+          if [[ "${{ steps.commit-versions.outcome }}" == "failure" ]]; then
+            echo "::warning title=Version Commit Failed::Failed to commit version updates, but build continues"
           fi
