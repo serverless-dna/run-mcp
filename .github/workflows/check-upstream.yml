@@ -41,45 +41,17 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           FORCE_CHECK: ${{ github.event.inputs.force_check == 'true' && 'true' || 'false' }}
         run: |
-          echo "🔍 Running combined version check and build trigger script..."
+          echo "🔍 Running upstream version check..."
           echo "Force check: $FORCE_CHECK"
           echo "Repository: $GITHUB_REPOSITORY"
           echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo ""
           
-          # Make script executable and run it
-          chmod +x scripts/check-and-build-versions.sh
-          bash scripts/check-and-build-versions.sh
-      
-      - name: Commit updated versions.json
-        if: always()
-        run: |
-          echo "💾 Checking for versions.json updates..."
-          
-          # Configure git
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # Check if versions.json has changes
-          if git diff --quiet versions.json; then
-            echo "⏭️  No changes to versions.json detected"
+          if [[ "$FORCE_CHECK" == "true" ]]; then
+            make check-upstream-force
           else
-            echo "📝 Changes detected in versions.json:"
-            git diff versions.json
-            
-            # Add and commit the changes
-            git add versions.json
-            git commit -m "chore: update upstream version tracking
-
-            Automated version updates detected and builds triggered.
-            Updated by check-upstream workflow on $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-            
-            # Push the changes
-            git push
-            
-            echo "✅ Successfully committed and pushed version updates"
+            make check-upstream
           fi
-        continue-on-error: true
       
       - name: Create issue on errors
         if: failure()
@@ -138,15 +110,13 @@ jobs:
                 - API rate limiting or timeouts
                 - Network connectivity issues
                 - Changes to upstream API endpoints
-                - Invalid version data in versions.json
                 - GitHub API authentication issues
                 
                 **Action Required:**
                 1. Review the workflow logs for specific error messages
                 2. Verify upstream API endpoints are accessible
-                3. Check versions.json for data integrity
-                4. Verify GitHub token permissions
-                5. Consider running a manual version check
+                3. Check GitHub token permissions
+                4. Consider running a manual version check
                 
                 This issue was automatically created by the check-upstream workflow.`,
                 labels: ['upstream-version-check', 'automated', 'bug']

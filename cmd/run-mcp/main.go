@@ -28,15 +28,19 @@ Examples:
   run-mcp uvx mcp-server-sqlite --db-path /data/db.sqlite
   run-mcp npx @modelcontextprotocol/server-filesystem /data
   run-mcp python uvx awslabs.aws-api-mcp-server@latest
-  run-mcp node npx @modelcontextprotocol/server-memory`,
+  run-mcp node npx @modelcontextprotocol/server-memory
+  run-mcp list-images
+  run-mcp config
+  run-mcp info`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
-		Args:    cobra.MinimumNArgs(1),
+		Args:    cobra.ArbitraryArgs, // Changed from MinimumNArgs(1) to allow subcommands
 		RunE:    runMCP,
 	}
 
 	// Add additional commands
 	rootCmd.AddCommand(createInfoCommand())
 	rootCmd.AddCommand(createConfigCommand())
+	rootCmd.AddCommand(createListImagesCommand())
 
 	rootCmd.Flags().BoolP("help", "h", false, "Help for run-mcp")
 	rootCmd.Flags().BoolP("version", "v", false, "Version information")
@@ -48,6 +52,11 @@ Examples:
 }
 
 func runMCP(cmd *cobra.Command, args []string) error {
+	// If no arguments provided, show help
+	if len(args) == 0 {
+		return cmd.Help()
+	}
+
 	config := loadConfig()
 
 	// Validate configuration
@@ -101,6 +110,17 @@ func createConfigCommand() *cobra.Command {
 		Long:  "Display current configuration settings and environment variables",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return showConfig()
+		},
+	}
+}
+
+func createListImagesCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list-images",
+		Short: "List available container images",
+		Long:  "List available container images for Node.js and Python from the registry",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return listImages()
 		},
 	}
 }
@@ -166,6 +186,112 @@ func showConfig() error {
 		for name, value := range envVars {
 			fmt.Printf("  %s=%s\n", name, value)
 		}
+	}
+	
+	return nil
+}
+
+func listImages() error {
+	fmt.Println("Available Container Images")
+	fmt.Println("=========================")
+	
+	// Detect container runtime
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		return fmt.Errorf("container runtime detection failed: %w", err)
+	}
+	
+	config := loadConfig()
+	
+	// Extract registry and repository from current images
+	nodejsRegistry, nodejsRepo := parseImageName(config.NodejsImage)
+	pythonRegistry, pythonRepo := parseImageName(config.PythonImage)
+	
+	fmt.Printf("Using container runtime: %s\n\n", containerRuntime)
+	
+	// List Node.js images
+	fmt.Println("Node.js Images:")
+	fmt.Printf("Repository: %s/%s\n", nodejsRegistry, nodejsRepo)
+	if err := listImageTags(containerRuntime, nodejsRegistry, nodejsRepo); err != nil {
+		fmt.Printf("  Error listing Node.js images: %v\n", err)
+		fmt.Println("  Common tags: latest, node18, node20, node22")
+	}
+	
+	fmt.Println()
+	
+	// List Python images  
+	fmt.Println("Python Images:")
+	fmt.Printf("Repository: %s/%s\n", pythonRegistry, pythonRepo)
+	if err := listImageTags(containerRuntime, pythonRegistry, pythonRepo); err != nil {
+		fmt.Printf("  Error listing Python images: %v\n", err)
+		fmt.Println("  Common tags: latest, python3.11, python3.12, python3.13")
+	}
+	
+	fmt.Println()
+	fmt.Println("Usage:")
+	fmt.Println("  run-mcp --image <full-image-name> <command>")
+	fmt.Printf("  export MCP_NODEJS_IMAGE=%s/%s:<tag>\n", nodejsRegistry, nodejsRepo)
+	fmt.Printf("  export MCP_PYTHON_IMAGE=%s/%s:<tag>\n", pythonRegistry, pythonRepo)
+	
+	return nil
+}
+
+// parseImageName extracts registry and repository from a full image name
+func parseImageName(imageName string) (registry, repo string) {
+	// Handle cases like:
+	// ghcr.io/owner/repo-nodejs:tag -> ghcr.io, owner/repo-nodejs
+	// owner/repo-nodejs:tag -> docker.io, owner/repo-nodejs
+	
+	parts := strings.Split(imageName, "/")
+	if len(parts) >= 3 && strings.Contains(parts[0], ".") {
+		// Has registry (contains dot)
+		registry = parts[0]
+		repo = strings.Join(parts[1:], "/")
+	} else {
+		// No explicit registry, assume docker.io
+		registry = "docker.io"
+		repo = imageName
+	}
+	
+	// Remove tag if present
+	if colonIndex := strings.LastIndex(repo, ":"); colonIndex != -1 {
+		repo = repo[:colonIndex]
+	}
+	
+	return registry, repo
+}
+
+// listImageTags attempts to list available tags for an image repository
+func listImageTags(containerRuntime, registry, repo string) error {
+	// Try to use container runtime to list local images first
+	localCmd := exec.Command(containerRuntime, "images", "--format", "table {{.Repository}}:{{.Tag}}", fmt.Sprintf("%s/%s", registry, repo))
+	if output, err := localCmd.Output(); err == nil && len(output) > 0 {
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		if len(lines) > 1 { // Skip header
+			fmt.Println("  Local images:")
+			for _, line := range lines[1:] {
+				if strings.TrimSpace(line) != "" {
+					fmt.Printf("    %s\n", strings.TrimSpace(line))
+				}
+			}
+			return nil
+		}
+	}
+	
+	// If no local images, show common tags based on registry
+	if registry == "ghcr.io" {
+		fmt.Println("  No local images found. Common tags available:")
+		if strings.Contains(repo, "nodejs") {
+			fmt.Println("    latest, node18, node20, node22")
+			fmt.Println("    node18.x.x, node20.x.x, node22.x.x (specific versions)")
+		} else if strings.Contains(repo, "python") {
+			fmt.Println("    latest, python3.11, python3.12, python3.13")
+			fmt.Println("    python3.11.x, python3.12.x, python3.13.x (specific versions)")
+		}
+		fmt.Printf("  Pull with: %s pull %s/%s:<tag>\n", containerRuntime, registry, repo)
+	} else {
+		return fmt.Errorf("unable to list remote tags for %s/%s", registry, repo)
 	}
 	
 	return nil

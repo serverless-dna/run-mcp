@@ -9,6 +9,7 @@ on:
       - 'scripts/**'
       - '.github/workflows/build-containers.yml'
       - 'Dockerfile*'
+      - 'Makefile'
   pull_request:
     branches: [main]
     paths:
@@ -17,26 +18,19 @@ on:
       - 'scripts/**'
       - '.github/workflows/build-containers.yml'
       - 'Dockerfile*'
+      - 'Makefile'
   workflow_dispatch:
     inputs:
+      build_matrix:
+        description: 'Build all supported versions (matrix build)'
+        required: false
+        default: 'false'
+        type: boolean
       force_build:
         description: 'Force build all containers'
         required: false
         default: 'false'
         type: boolean
-      build_all_versions:
-        description: 'Build all versions from versions.json (for Dockerfile changes)'
-        required: false
-        default: 'false'
-        type: boolean
-      nodejs_version:
-        description: 'Node.js version to build (optional)'
-        required: false
-        type: string
-      python_version:
-        description: 'Python version to build (optional)'
-        required: false
-        type: string
       build_reason:
         description: 'Reason for build (for logging)'
         required: false
@@ -47,816 +41,97 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  detect-changes:
+  ci:
     runs-on: ubuntu-latest
-    outputs:
-      should-build: ${{ steps.changes.outputs.should-build }}
-      build-reason: ${{ steps.changes.outputs.build-reason }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Need full history for git diff
-      
-      - name: Detect if we should build
-        id: changes
-        run: |
-          echo "🔍 Determining if containers should be built..."
-          
-          # Always build on manual workflow dispatch
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            if [[ "${{ github.event.inputs.force_build }}" == "true" ]]; then
-              echo "should-build=true" >> $GITHUB_OUTPUT
-              echo "build-reason=Manual force build requested" >> $GITHUB_OUTPUT
-              echo "✅ Manual force build - will rebuild all containers"
-              exit 0
-            fi
-          fi
-          
-          # Check if any relevant files changed
-          echo "Checking for changes in container-related files..."
-          
-          # Use git diff to check for changes in relevant paths
-          if git diff --quiet HEAD~1 HEAD -- nodejs/ python/ scripts/ .github/workflows/build-containers.yml Dockerfile* 2>/dev/null; then
-            echo "should-build=false" >> $GITHUB_OUTPUT
-            echo "build-reason=No relevant changes detected" >> $GITHUB_OUTPUT
-            echo "⏭️  No changes detected - skipping build"
-          else
-            echo "should-build=true" >> $GITHUB_OUTPUT
-            echo "build-reason=Changes detected in container files" >> $GITHUB_OUTPUT
-            echo "✅ Changes detected - will rebuild all containers"
-            
-            # Log what changed
-            echo "Changed files:"
-            git diff --name-only HEAD~1 HEAD -- nodejs/ python/ scripts/ .github/workflows/build-containers.yml Dockerfile* 2>/dev/null || echo "  (unable to determine specific files)"
-          fi
-      
-      - name: Log build decision
-        run: |
-          echo "📊 Build Decision Summary:"
-          echo "Should build: ${{ steps.changes.outputs.should-build }}"
-          echo "Build reason: ${{ steps.changes.outputs.build-reason }}"
-          echo "Event: ${{ github.event_name }}"
-          echo "Branch: ${{ github.ref_name }}"
+          fetch-depth: 0
 
-  build-nodejs:
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.should-build == 'true'
-    outputs:
-      nodejs-major: ${{ steps.nodejs-version.outputs.nodejs-major }}
-      nodejs-version: ${{ steps.nodejs-version.outputs.nodejs-version }}
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Log build start
-        run: |
-          echo "🚀 Starting Node.js container build"
-          echo "Build reason: ${{ needs.detect-changes.outputs.build-reason }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "Commit: ${{ github.sha }}"
-          echo "Branch: ${{ github.ref_name }}"
-      
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           platforms: linux/amd64,linux/arm64
-      
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Determine Node.js version
-        id: nodejs-version
-        run: |
-          # Use provided version or get from versions.json dynamically
-          if [[ -n "${{ github.event.inputs.nodejs_version }}" ]]; then
-            NODEJS_VERSION="${{ github.event.inputs.nodejs_version }}"
-            echo "Using provided Node.js version: $NODEJS_VERSION"
-          else
-            # Get the latest Node.js version from versions.json
-            if [[ -f "versions.json" ]]; then
-              # Get the highest major version available
-              LATEST_MAJOR=$(jq -r '.nodejs | keys | map(tonumber) | max' versions.json 2>/dev/null || echo "22")
-              NODEJS_VERSION=$(jq -r ".nodejs.\"$LATEST_MAJOR\"" versions.json 2>/dev/null || echo "22.11.0")
-              echo "Using latest Node.js version from versions.json: $NODEJS_VERSION (major: $LATEST_MAJOR)"
-            else
-              # Fallback to default
-              NODEJS_VERSION="22.11.0"
-              echo "Using fallback Node.js version: $NODEJS_VERSION"
-            fi
-          fi
-          
-          # Parse version components
-          MAJOR=$(echo "$NODEJS_VERSION" | cut -d. -f1)
-          MINOR=$(echo "$NODEJS_VERSION" | cut -d. -f2)
-          PATCH=$(echo "$NODEJS_VERSION" | cut -d. -f3)
-          
-          echo "nodejs-version=$NODEJS_VERSION" >> $GITHUB_OUTPUT
-          echo "nodejs-major=$MAJOR" >> $GITHUB_OUTPUT
-          echo "nodejs-minor=$MINOR" >> $GITHUB_OUTPUT
-          echo "nodejs-patch=$PATCH" >> $GITHUB_OUTPUT
-          
-          echo "Node.js version components: $MAJOR.$MINOR.$PATCH"
-      
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=raw,value=node-lts,enable={{is_default_branch}}
-            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-major }}
-            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-major }}.${{ steps.nodejs-version.outputs.nodejs-minor }}
-            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-version }}
-            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-version }}-{{date 'YYYYMMDD'}}
-            type=raw,value=node${{ steps.nodejs-version.outputs.nodejs-major }}-{{date 'YYYYMMDD'}}-{{sha}}
-            type=raw,value=latest,enable={{is_default_branch}}
-      
-      - name: Lint Dockerfile
-        id: lint-nodejs
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: nodejs/Dockerfile
-          config: nodejs/.hadolint.yaml
-        continue-on-error: false
-      
-      - name: Build and push Node.js image
-        id: build-nodejs
-        uses: docker/build-push-action@v5
-        with:
-          context: ./nodejs
-          file: ./nodejs/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            NODE_VERSION=${{ steps.nodejs-version.outputs.nodejs-version }}
-        continue-on-error: false
-      
-      - name: Validate image size
-        id: validate-nodejs-size
-        run: |
-          echo "🔍 Validating Node.js image size..."
-          
-          # Get image size for AMD64 (first platform)
-          IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node${{ steps.nodejs-version.outputs.nodejs-major }} | \
-            jq -r '.manifests[] | select(.platform.architecture=="amd64") | .size')
-          IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
-          
-          echo "Node.js image size: ${IMAGE_SIZE_MB}MB"
-          
-          if [[ $IMAGE_SIZE_MB -gt 200 ]]; then
-            echo "❌ Node.js image size (${IMAGE_SIZE_MB}MB) exceeds 200MB limit"
-            echo "::error title=Image Size Exceeded::Node.js image size (${IMAGE_SIZE_MB}MB) exceeds the 200MB limit"
-            exit 1
-          else
-            echo "✅ Node.js image size (${IMAGE_SIZE_MB}MB) is within 200MB limit"
-          fi
-        continue-on-error: false
-      
-      - name: Log build success
-        if: success()
-        run: |
-          echo "✅ Node.js container build completed successfully"
-          echo "Image tags: ${{ steps.meta.outputs.tags }}"
-          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
-      - name: Log build failure
-        if: failure()
-        run: |
-          echo "❌ Node.js container build failed"
-          echo "Failed step: ${{ job.status }}"
-          echo "Failure time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "::error title=Node.js Build Failed::The Node.js container build process failed. Check the logs above for details."
-          
-          # Provide specific failure context
-          if [[ "${{ steps.lint-nodejs.outcome }}" == "failure" ]]; then
-            echo "::error title=Dockerfile Lint Failed::The Node.js Dockerfile failed hadolint validation"
-          fi
-          
-          if [[ "${{ steps.build-nodejs.outcome }}" == "failure" ]]; then
-            echo "::error title=Docker Build Failed::The Node.js Docker build process failed"
-          fi
-          
-          if [[ "${{ steps.validate-nodejs-size.outcome }}" == "failure" ]]; then
-            echo "::error title=Image Size Validation Failed::The Node.js image exceeded the size limit"
-          fi
 
-  build-python:
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.should-build == 'true'
-    outputs:
-      python-major-minor: ${{ steps.python-version.outputs.python-major-minor }}
-      python-version: ${{ steps.python-version.outputs.python-version }}
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Log build start
-        run: |
-          echo "🚀 Starting Python container build"
-          echo "Build reason: ${{ needs.detect-changes.outputs.build-reason }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "Commit: ${{ github.sha }}"
-          echo "Branch: ${{ github.ref_name }}"
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
-      
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Determine Python version
-        id: python-version
-        run: |
-          # Use provided version or get from versions.json dynamically
-          if [[ -n "${{ github.event.inputs.python_version }}" ]]; then
-            PYTHON_VERSION="${{ github.event.inputs.python_version }}"
-            echo "Using provided Python version: $PYTHON_VERSION"
-          else
-            # Get the latest Python version from versions.json
-            if [[ -f "versions.json" ]]; then
-              # Get the highest major.minor version available (e.g., "3.12" > "3.11")
-              LATEST_MAJOR_MINOR=$(jq -r '.python | keys | sort_by(split(".") | map(tonumber)) | last' versions.json 2>/dev/null || echo "3.12")
-              PYTHON_VERSION=$(jq -r ".python.\"$LATEST_MAJOR_MINOR\"" versions.json 2>/dev/null || echo "3.12.8")
-              echo "Using latest Python version from versions.json: $PYTHON_VERSION (major.minor: $LATEST_MAJOR_MINOR)"
-            else
-              # Fallback to default
-              PYTHON_VERSION="3.12.8"
-              echo "Using fallback Python version: $PYTHON_VERSION"
-            fi
-          fi
-          
-          # Parse version components
-          MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
-          MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
-          PATCH=$(echo "$PYTHON_VERSION" | cut -d. -f3)
-          MAJOR_MINOR="$MAJOR.$MINOR"
-          
-          echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
-          echo "python-major=$MAJOR" >> $GITHUB_OUTPUT
-          echo "python-minor=$MINOR" >> $GITHUB_OUTPUT
-          echo "python-patch=$PATCH" >> $GITHUB_OUTPUT
-          echo "python-major-minor=$MAJOR_MINOR" >> $GITHUB_OUTPUT
-          
-          echo "Python version components: $MAJOR.$MINOR.$PATCH"
-      
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=raw,value=python-lts,enable={{is_default_branch}}
-            type=raw,value=python${{ steps.python-version.outputs.python-major-minor }}
-            type=raw,value=python${{ steps.python-version.outputs.python-version }}
-            type=raw,value=python${{ steps.python-version.outputs.python-version }}-{{date 'YYYYMMDD'}}
-            type=raw,value=python${{ steps.python-version.outputs.python-major-minor }}-{{date 'YYYYMMDD'}}-{{sha}}
-            type=raw,value=latest,enable={{is_default_branch}}
-      
-      - name: Lint Dockerfile
-        id: lint-python
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: python/Dockerfile
-          config: python/.hadolint.yaml
-        continue-on-error: false
-      
-      - name: Build and push Python image
-        id: build-python
-        uses: docker/build-push-action@v5
-        with:
-          context: ./python
-          file: ./python/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            PYTHON_VERSION=${{ steps.python-version.outputs.python-version }}
-        continue-on-error: false
-      
-      - name: Validate image size
-        id: validate-python-size
-        run: |
-          echo "🔍 Validating Python image size..."
-          
-          # Get image size for AMD64 (first platform)
-          IMAGE_SIZE=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python${{ steps.python-version.outputs.python-major-minor }} | \
-            jq -r '.manifests[] | select(.platform.architecture=="amd64") | .size')
-          IMAGE_SIZE_MB=$((IMAGE_SIZE / 1024 / 1024))
-          
-          echo "Python image size: ${IMAGE_SIZE_MB}MB"
-          
-          if [[ $IMAGE_SIZE_MB -gt 300 ]]; then
-            echo "❌ Python image size (${IMAGE_SIZE_MB}MB) exceeds 300MB limit"
-            echo "::error title=Image Size Exceeded::Python image size (${IMAGE_SIZE_MB}MB) exceeds the 300MB limit"
-            exit 1
-          else
-            echo "✅ Python image size (${IMAGE_SIZE_MB}MB) is within 300MB limit"
-          fi
-        continue-on-error: false
-      
-      - name: Log build success
-        if: success()
-        run: |
-          echo "✅ Python container build completed successfully"
-          echo "Image tags: ${{ steps.meta.outputs.tags }}"
-          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
-      - name: Log build failure
-        if: failure()
-        run: |
-          echo "❌ Python container build failed"
-          echo "Failed step: ${{ job.status }}"
-          echo "Failure time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo "::error title=Python Build Failed::The Python container build process failed. Check the logs above for details."
-          
-          # Provide specific failure context
-          if [[ "${{ steps.lint-python.outcome }}" == "failure" ]]; then
-            echo "::error title=Dockerfile Lint Failed::The Python Dockerfile failed hadolint validation"
-          fi
-          
-          if [[ "${{ steps.build-python.outcome }}" == "failure" ]]; then
-            echo "::error title=Docker Build Failed::The Python Docker build process failed"
-          fi
-          
-          if [[ "${{ steps.validate-python-size.outcome }}" == "failure" ]]; then
-            echo "::error title=Image Size Validation Failed::The Python image exceeded the size limit"
-          fi
-
-  integration-test:
-    runs-on: ubuntu-latest
-    needs: [detect-changes, build-nodejs, build-python]
-    if: needs.detect-changes.outputs.should-build == 'true' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Log integration test start
-        run: |
-          echo "🧪 Starting integration tests"
-          echo "Node.js build result: ${{ needs.build-nodejs.result }}"
-          echo "Python build result: ${{ needs.build-python.result }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
-      - name: Test Node.js container (if built)
-        id: test-nodejs
-        if: needs.build-nodejs.result == 'success'
-        run: |
-          echo "🔍 Testing Node.js container startup and basic functionality..."
-          
-          # Get the Node.js major version for testing
-          NODEJS_MAJOR=$(echo "${{ needs.build-nodejs.outputs.nodejs-major || '22' }}")
-          IMAGE_TAG="node${NODEJS_MAJOR}"
-          
-          echo "Testing Node.js container with tag: $IMAGE_TAG"
-          
-          # Test container startup
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} node --version || {
-            echo "❌ Node.js container failed to start or respond"
-            echo "::error title=Node.js Container Test Failed::Node.js container failed to start or respond to basic commands"
-            exit 1
-          }
-          
-          # Test npm availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} npm --version || {
-            echo "❌ npm not available in Node.js container"
-            echo "::error title=Node.js npm Test Failed::npm is not available in the Node.js container"
-            exit 1
-          }
-          
-          # Test yarn availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} yarn --version || {
-            echo "❌ yarn not available in Node.js container"
-            echo "::error title=Node.js yarn Test Failed::yarn is not available in the Node.js container"
-            exit 1
-          }
-          
-          # Test npx availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} npx --version || {
-            echo "❌ npx not available in Node.js container"
-            echo "::error title=Node.js npx Test Failed::npx is not available in the Node.js container"
-            exit 1
-          }
-          
-          echo "✅ Node.js container tests passed"
-        continue-on-error: true
-      
-      - name: Test Python container (if built)
-        id: test-python
-        if: needs.build-python.result == 'success'
-        run: |
-          echo "🔍 Testing Python container startup and basic functionality..."
-          
-          # Get the Python major.minor version for testing
-          PYTHON_MAJOR_MINOR=$(echo "${{ needs.build-python.outputs.python-major-minor || '3.12' }}")
-          IMAGE_TAG="python${PYTHON_MAJOR_MINOR}"
-          
-          echo "Testing Python container with tag: $IMAGE_TAG"
-          
-          # Test container startup
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:${IMAGE_TAG} python --version || {
-            echo "❌ Python container failed to start or respond"
-            echo "::error title=Python Container Test Failed::Python container failed to start or respond to basic commands"
-            exit 1
-          }
-          
-          # Test uv availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:${IMAGE_TAG} uv --version || {
-            echo "❌ uv not available in Python container"
-            echo "::error title=Python uv Test Failed::uv is not available in the Python container"
-            exit 1
-          }
-          
-          # Test uvx availability
-          timeout 10s docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:${IMAGE_TAG} uvx --version || {
-            echo "❌ uvx not available in Python container"
-            echo "::error title=Python uvx Test Failed::uvx is not available in the Python container"
-            exit 1
-          }
-          
-          echo "✅ Python container tests passed"
-        continue-on-error: true
-      
-      - name: Test stdio mode behavior
-        id: test-stdio
-        if: needs.build-nodejs.result == 'success'
-        run: |
-          echo "🔍 Testing stdio mode with Node.js container..."
-          
-          # Get the Node.js major version for testing
-          NODEJS_MAJOR=$(echo "${{ needs.build-nodejs.outputs.nodejs-major || '22' }}")
-          IMAGE_TAG="node${NODEJS_MAJOR}"
-          
-          echo "Testing stdio mode with Node.js container tag: $IMAGE_TAG"
-          
-          # Test that container properly handles stdin/stdout without TTY
-          echo '{"jsonrpc": "2.0", "method": "test", "id": 1}' | \
-            timeout 5s docker run -i --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} \
-            node -e "process.stdin.on('data', d => { console.log('received:', d.toString().trim()); process.exit(0); })" || {
-            echo "❌ stdio mode test failed"
-            echo "::error title=stdio Mode Test Failed::Container failed to handle stdin/stdout communication properly"
-            exit 1
-          }
-          
-          echo "✅ stdio mode tests passed"
-        continue-on-error: true
-      
-      - name: Test volume mounting
-        id: test-volumes
-        if: needs.build-nodejs.result == 'success'
-        run: |
-          echo "🔍 Testing volume mounting behavior..."
-          
-          # Get the Node.js major version for testing
-          NODEJS_MAJOR=$(echo "${{ needs.build-nodejs.outputs.nodejs-major || '22' }}")
-          IMAGE_TAG="node${NODEJS_MAJOR}"
-          
-          echo "Testing volume mounting with Node.js container tag: $IMAGE_TAG"
-          
-          # Create test data
-          mkdir -p /tmp/test-data
-          echo "test file content" > /tmp/test-data/test.txt
-          
-          # Test volume mount
-          RESULT=$(docker run --rm -v /tmp/test-data:/data ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:${IMAGE_TAG} \
-            node -e "console.log(require('fs').readFileSync('/data/test.txt', 'utf8').trim())")
-          
-          if [[ "$RESULT" != "test file content" ]]; then
-            echo "❌ Volume mounting test failed. Expected 'test file content', got: $RESULT"
-            echo "::error title=Volume Mount Test Failed::Container failed to properly mount and access volumes"
-            exit 1
-          fi
-          
-          echo "✅ Volume mounting tests passed"
-        continue-on-error: true
-      
-      - name: Log integration test results
-        if: always()
-        run: |
-          echo "📊 Integration test results summary:"
-          echo "Node.js container test: ${{ steps.test-nodejs.outcome }}"
-          echo "Python container test: ${{ steps.test-python.outcome }}"
-          echo "stdio mode test: ${{ steps.test-stdio.outcome }}"
-          echo "Volume mounting test: ${{ steps.test-volumes.outcome }}"
-          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          
-          # Check if any critical tests failed
-          if [[ "${{ steps.test-nodejs.outcome }}" == "failure" && "${{ needs.build-nodejs.result }}" == "success" ]]; then
-            echo "::error title=Node.js Integration Test Failed::Node.js container integration tests failed despite successful build"
-          fi
-          
-          if [[ "${{ steps.test-python.outcome }}" == "failure" && "${{ needs.build-python.result }}" == "success" ]]; then
-            echo "::error title=Python Integration Test Failed::Python container integration tests failed despite successful build"
-          fi
-
-  vulnerability-scan:
-    runs-on: ubuntu-latest
-    needs: [detect-changes, build-nodejs, build-python]
-    if: needs.detect-changes.outputs.should-build == 'true' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
-    steps:
-      - name: Log vulnerability scan start
-        run: |
-          echo "🔒 Starting vulnerability scans"
-          echo "Node.js build result: ${{ needs.build-nodejs.result }}"
-          echo "Python build result: ${{ needs.build-python.result }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
-      - name: Run Trivy vulnerability scanner on Node.js image
-        id: scan-nodejs
-        if: needs.build-nodejs.result == 'success'
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-nodejs:node${{ needs.build-nodejs.outputs.nodejs-major || '22' }}
-          format: 'sarif'
-          output: 'nodejs-trivy-results.sarif'
-        continue-on-error: true
-      
-      - name: Run Trivy vulnerability scanner on Python image
-        id: scan-python
-        if: needs.build-python.result == 'success'
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-python:python${{ needs.build-python.outputs.python-major-minor || '3.12' }}
-          format: 'sarif'
-          output: 'python-trivy-results.sarif'
-        continue-on-error: true
-      
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
-        if: always()
-        with:
-          sarif_file: '.'
-        continue-on-error: true
-      
-      - name: Log vulnerability scan results
-        if: always()
-        run: |
-          echo "📊 Vulnerability scan results summary:"
-          echo "Node.js scan result: ${{ steps.scan-nodejs.outcome }}"
-          echo "Python scan result: ${{ steps.scan-python.outcome }}"
-          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          
-          # Log warnings for failed scans (but don't fail the job)
-          if [[ "${{ steps.scan-nodejs.outcome }}" == "failure" && "${{ needs.build-nodejs.result }}" == "success" ]]; then
-            echo "::warning title=Node.js Vulnerability Scan Failed::Node.js container vulnerability scan failed, but build continues"
-          fi
-          
-          if [[ "${{ steps.scan-python.outcome }}" == "failure" && "${{ needs.build-python.result }}" == "success" ]]; then
-            echo "::warning title=Python Vulnerability Scan Failed::Python container vulnerability scan failed, but build continues"
-          fi
+      - name: Run CI checks
+        run: make ci
 
   cleanup-old-versions:
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-nodejs, build-python, integration-test, vulnerability-scan]
-    if: needs.detect-changes.outputs.should-build == 'true' && github.ref == 'refs/heads/main' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    needs: ci
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Log cleanup start
-        run: |
-          echo "🧹 Starting version cleanup based on retention policy"
-          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
+
       - name: Install GitHub CLI
         run: |
           curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
           echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
           sudo apt update
           sudo apt install gh
-      
-      - name: Authenticate GitHub CLI
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
-      
-      - name: Cleanup Node.js versions
-        id: cleanup-nodejs
-        run: |
-          echo "🔍 Running comprehensive version cleanup..."
-          bash scripts/cleanup-versions.sh
-        continue-on-error: true
-      
-      - name: Cleanup Python versions
-        id: cleanup-python
-        run: |
-          echo "✅ Version cleanup completed (handled by cleanup-nodejs step)"
-        continue-on-error: true
-      
-      - name: Log cleanup results
-        if: always()
-        run: |
-          echo "📊 Version cleanup results summary:"
-          echo "Node.js cleanup result: ${{ steps.cleanup-nodejs.outcome }}"
-          echo "Python cleanup result: ${{ steps.cleanup-python.outcome }}"
-          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          
-          if [[ "${{ steps.cleanup-nodejs.outcome }}" == "failure" ]]; then
-            echo "::warning title=Node.js Cleanup Issues::Node.js version cleanup encountered issues, but build continues"
-          fi
-          
-          if [[ "${{ steps.cleanup-python.outcome }}" == "failure" ]]; then
-            echo "::warning title=Python Cleanup Issues::Python version cleanup encountered issues, but build continues"
-          fi
 
-  update-versions:
+      - name: Authenticate GitHub CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Cleanup old versions before building new ones
+        run: make cleanup-versions
+        continue-on-error: true
+
+  build:
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-nodejs, build-python, integration-test]
-    if: needs.detect-changes.outputs.should-build == 'true' && github.ref == 'refs/heads/main' && (needs.build-nodejs.result == 'success' || needs.build-python.result == 'success')
+    needs: [ci, cleanup-old-versions]
     permissions:
-      contents: write
+      contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Log version update start
+          platforms: linux/amd64,linux/arm64
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push containers
         run: |
-          echo "📝 Starting versions.json update"
-          echo "Node.js build result: ${{ needs.build-nodejs.result }}"
-          echo "Python build result: ${{ needs.build-python.result }}"
-          echo "Integration test result: ${{ needs.integration-test.result }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-      
-      - name: Install dependencies
-        run: |
-          echo "📦 Installing required dependencies..."
-          sudo apt-get update
-          sudo apt-get install -y jq
-          jq --version
-      
-      - name: Update versions.json
-        id: update-versions
-        run: |
-          echo "🔄 Updating versions.json with successful build versions..."
-          
-          # Create versions.json if it doesn't exist
-          if [[ ! -f "versions.json" ]]; then
-            echo "Creating new versions.json file..."
-            cat > versions.json << 'EOF'
-          {
-            "nodejs": {},
-            "python": {},
-            "lastChecked": "2025-01-01T00:00:00Z"
-          }
-          EOF
-          fi
-          
-          # Show current versions
-          echo "Current versions.json:"
-          cat versions.json | jq '.'
-          
-          # Update Node.js version if build was successful
-          if [[ "${{ needs.build-nodejs.result }}" == "success" && -n "${{ needs.build-nodejs.outputs.nodejs-version }}" ]]; then
-            NODEJS_VERSION="${{ needs.build-nodejs.outputs.nodejs-version }}"
-            NODEJS_MAJOR=$(echo "$NODEJS_VERSION" | cut -d. -f1)
-            
-            echo "Updating Node.js $NODEJS_MAJOR to version $NODEJS_VERSION"
-            
-            # Update the versions.json file
-            jq --arg major "$NODEJS_MAJOR" --arg version "$NODEJS_VERSION" \
-              '.nodejs[$major] = $version' versions.json > versions.json.tmp
-            mv versions.json.tmp versions.json
-            
-            echo "nodejs-updated=true" >> $GITHUB_OUTPUT
-            echo "nodejs-version=$NODEJS_VERSION" >> $GITHUB_OUTPUT
-            echo "nodejs-major=$NODEJS_MAJOR" >> $GITHUB_OUTPUT
+          if [[ "${{ github.event.inputs.build_matrix }}" == "true" ]]; then
+            echo "Running complete container lifecycle with matrix builds"
+            make containers-matrix
           else
-            echo "nodejs-updated=false" >> $GITHUB_OUTPUT
+            echo "Running complete container lifecycle with latest versions"
+            make containers
           fi
-          
-          # Update Python version if build was successful
-          if [[ "${{ needs.build-python.result }}" == "success" && -n "${{ needs.build-python.outputs.python-version }}" ]]; then
-            PYTHON_VERSION="${{ needs.build-python.outputs.python-version }}"
-            PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
-            PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
-            PYTHON_MAJOR_MINOR="$PYTHON_MAJOR.$PYTHON_MINOR"
-            
-            echo "Updating Python $PYTHON_MAJOR_MINOR to version $PYTHON_VERSION"
-            
-            # Update the versions.json file
-            jq --arg major_minor "$PYTHON_MAJOR_MINOR" --arg version "$PYTHON_VERSION" \
-              '.python[$major_minor] = $version' versions.json > versions.json.tmp
-            mv versions.json.tmp versions.json
-            
-            echo "python-updated=true" >> $GITHUB_OUTPUT
-            echo "python-version=$PYTHON_VERSION" >> $GITHUB_OUTPUT
-            echo "python-major-minor=$PYTHON_MAJOR_MINOR" >> $GITHUB_OUTPUT
-          else
-            echo "python-updated=false" >> $GITHUB_OUTPUT
-          fi
-          
-          # Update lastChecked timestamp
-          TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          jq --arg timestamp "$TIMESTAMP" '.lastChecked = $timestamp' versions.json > versions.json.tmp
-          mv versions.json.tmp versions.json
-          
-          echo "Updated versions.json:"
-          cat versions.json | jq '.'
-          
-          echo "timestamp-updated=$TIMESTAMP" >> $GITHUB_OUTPUT
-        continue-on-error: false
-      
-      - name: Commit updated versions.json
-        id: commit-versions
-        run: |
-          echo "💾 Committing updated versions.json..."
-          
-          # Configure git
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # Check if versions.json has changes
-          if git diff --quiet versions.json; then
-            echo "⏭️  No changes to versions.json detected"
-            echo "committed=false" >> $GITHUB_OUTPUT
-          else
-            echo "📝 Changes detected in versions.json:"
-            git diff versions.json
-            
-            # Create commit message
-            COMMIT_MSG="chore: update container image versions after successful builds"
-            
-            if [[ "${{ steps.update-versions.outputs.nodejs-updated }}" == "true" ]]; then
-              COMMIT_MSG="$COMMIT_MSG
-            
-            - Node.js ${{ steps.update-versions.outputs.nodejs-major }}: ${{ steps.update-versions.outputs.nodejs-version }}"
-            fi
-            
-            if [[ "${{ steps.update-versions.outputs.python-updated }}" == "true" ]]; then
-              COMMIT_MSG="$COMMIT_MSG
-            
-            - Python ${{ steps.update-versions.outputs.python-major-minor }}: ${{ steps.update-versions.outputs.python-version }}"
-            fi
-            
-            COMMIT_MSG="$COMMIT_MSG
-            
-            Automated update by build-containers workflow
-            Build: ${{ github.run_id }}
-            Commit: ${{ github.sha }}"
-            
-            # Add and commit the changes
-            git add versions.json
-            git commit -m "$COMMIT_MSG"
-            
-            # Push the changes
-            git push
-            
-            echo "✅ Successfully committed and pushed version updates"
-            echo "committed=true" >> $GITHUB_OUTPUT
-          fi
-        continue-on-error: true
-      
-      - name: Log version update results
-        if: always()
-        run: |
-          echo "📊 Version update results summary:"
-          echo "Node.js updated: ${{ steps.update-versions.outputs.nodejs-updated }}"
-          echo "Python updated: ${{ steps.update-versions.outputs.python-updated }}"
-          echo "Versions committed: ${{ steps.commit-versions.outputs.committed || 'false' }}"
-          echo "Timestamp updated: ${{ steps.update-versions.outputs.timestamp-updated }}"
-          echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          
-          if [[ "${{ steps.update-versions.outputs.nodejs-updated }}" == "true" ]]; then
-            echo "  ✅ Node.js ${{ steps.update-versions.outputs.nodejs-major }}: ${{ steps.update-versions.outputs.nodejs-version }}"
-          fi
-          
-          if [[ "${{ steps.update-versions.outputs.python-updated }}" == "true" ]]; then
-            echo "  ✅ Python ${{ steps.update-versions.outputs.python-major-minor }}: ${{ steps.update-versions.outputs.python-version }}"
-          fi
-          
-          if [[ "${{ steps.commit-versions.outcome }}" == "failure" ]]; then
-            echo "::warning title=Version Commit Failed::Failed to commit version updates, but build continues"
-          fi
+
+  build-binary:
+    runs-on: ubuntu-latest
+    needs: ci
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build run-mcp binary
+        run: make build-run-mcp-all
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-mcp-binaries
+          path: build/run-mcp-*
+          retention-days: 30

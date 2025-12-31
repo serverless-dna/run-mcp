@@ -20,8 +20,8 @@ func loadConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
 	
 	config := &Config{
-		NodejsImage:      getEnvWithDefault("MCP_NODEJS_IMAGE", "ghcr.io/modelcontextprotocol/mcp-nodejs:node22"),
-		PythonImage:      getEnvWithDefault("MCP_PYTHON_IMAGE", "ghcr.io/modelcontextprotocol/mcp-python:python3.12"),
+		NodejsImage:      getEnvWithDefault("MCP_NODEJS_IMAGE", "ghcr.io/serverless-dna/run-mcp-nodejs:latest"),
+		PythonImage:      getEnvWithDefault("MCP_PYTHON_IMAGE", "ghcr.io/serverless-dna/run-mcp-python:latest"),
 		DataDir:          getEnvWithDefault("MCP_DATA_DIR", homeDir),
 		ContainerRuntime: os.Getenv("MCP_CONTAINER_RUNTIME"), // Optional override
 	}
@@ -155,8 +155,8 @@ func (c *Config) GetSupportedLanguages() []string {
 // GetDefaultImages returns the default images for each language
 func GetDefaultImages() map[string]string {
 	return map[string]string{
-		"nodejs": "ghcr.io/modelcontextprotocol/mcp-nodejs:node22",
-		"python": "ghcr.io/modelcontextprotocol/mcp-python:python3.12",
+		"nodejs": "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
+		"python": "ghcr.io/serverless-dna/run-mcp-python:latest",
 	}
 }
 
