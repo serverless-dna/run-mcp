@@ -43,9 +43,13 @@ DATE := $(shell date +%Y%m%d)
 NODEJS_IMAGE := $(REGISTRY)/$(OWNER)/$(REPO_NAME)-nodejs
 PYTHON_IMAGE := $(REGISTRY)/$(OWNER)/$(REPO_NAME)-python
 
-# Supported versions (can be overridden)
-NODEJS_VERSIONS := 18 20 22
-PYTHON_VERSIONS := 3.11 3.12 3.13
+# Dynamic version detection - get versions from upstream check script
+get_supported_versions = $(shell bash scripts/check-upstream-versions.sh 2>/dev/null | jq -r '.$(1).supported_versions[]' | tr '\n' ' ')
+get_latest_version = $(shell bash scripts/check-upstream-versions.sh 2>/dev/null | jq -r '.$(1).latest_versions["$(2)"]')
+
+# Supported versions (dynamically determined from upstream APIs)
+NODEJS_VERSIONS := $(call get_supported_versions,nodejs)
+PYTHON_VERSIONS := $(call get_supported_versions,python)
 
 # Colors for output
 RED := \033[0;31m
@@ -122,8 +126,8 @@ build-nodejs: ## Build Node.js container image locally (latest LTS)
 		exit 1; \
 	fi
 	@echo "Getting latest Node.js LTS version..."
-	@NODEJS_VERSION=$$(curl -s https://nodejs.org/dist/index.json | jq -r '[.[] | select(.lts != false)] | .[0].version' | tr -d 'v' || echo "22.11.0"); \
-	NODEJS_MAJOR=$$(echo "$$NODEJS_VERSION" | cut -d. -f1); \
+	@NODEJS_MAJOR=$$(bash scripts/check-upstream-versions.sh 2>/dev/null | jq -r '.nodejs.supported_versions[0]'); \
+	NODEJS_VERSION=$$(bash scripts/check-upstream-versions.sh 2>/dev/null | jq -r ".nodejs.latest_versions[\"$$NODEJS_MAJOR\"]"); \
 	echo "Building with Node.js $$NODEJS_VERSION (major: $$NODEJS_MAJOR)"; \
 	$(DOCKER_CMD) build \
 		--build-arg NODE_VERSION=$$NODEJS_VERSION \
@@ -139,7 +143,7 @@ build-nodejs-matrix: ## Build all supported Node.js versions
 	@echo "$(BLUE)Building all supported Node.js versions: $(NODEJS_VERSIONS)$(NC)"
 	@for major in $(NODEJS_VERSIONS); do \
 		echo "Getting latest Node.js $$major.x version..."; \
-		NODEJS_VERSION=$$(curl -s https://nodejs.org/dist/index.json | jq -r --arg maj "$$major" '[.[] | select(.version | startswith("v" + $$maj + "."))] | .[0].version' | tr -d 'v' || echo "$$major.0.0"); \
+		NODEJS_VERSION=$$(bash scripts/check-upstream-versions.sh 2>/dev/null | jq -r ".nodejs.latest_versions[\"$$major\"]"); \
 		echo "Building Node.js $$major with version $$NODEJS_VERSION"; \
 		$(DOCKER_CMD) build \
 			--build-arg NODE_VERSION=$$NODEJS_VERSION \
@@ -150,16 +154,16 @@ build-nodejs-matrix: ## Build all supported Node.js versions
 	done
 	@echo "$(GREEN)✓ All Node.js versions built$(NC)"
 
-build-python: ## Build Python container image locally (latest 3.12.x)
+build-python: ## Build Python container image locally (latest supported)
 	$(call check_docker)
 	@echo "$(BLUE)Building Python container image...$(NC)"
 	@if [ ! -f python/Dockerfile ]; then \
 		echo "$(RED)Error: python/Dockerfile not found$(NC)"; \
 		exit 1; \
 	fi
-	@echo "Getting latest Python 3.12.x version..."
-	@PYTHON_VERSION=$$(curl -s https://endoflife.date/api/python.json | jq -r '[.[] | select(.cycle == "3.12")] | .[0].latest' || echo "3.12.8"); \
-	PYTHON_MAJOR_MINOR=$$(echo "$$PYTHON_VERSION" | cut -d. -f1-2); \
+	@echo "Getting latest supported Python version..."
+	@PYTHON_MAJOR_MINOR=$$(bash scripts/check-upstream-versions.sh 2>/dev/null | jq -r '.python.supported_versions[0]'); \
+	PYTHON_VERSION=$$(bash scripts/check-upstream-versions.sh 2>/dev/null | jq -r ".python.latest_versions[\"$$PYTHON_MAJOR_MINOR\"]"); \
 	echo "Building with Python $$PYTHON_VERSION (major.minor: $$PYTHON_MAJOR_MINOR)"; \
 	$(DOCKER_CMD) build \
 		--build-arg PYTHON_VERSION=$$PYTHON_VERSION \
@@ -175,7 +179,7 @@ build-python-matrix: ## Build all supported Python versions
 	@echo "$(BLUE)Building all supported Python versions: $(PYTHON_VERSIONS)$(NC)"
 	@for version in $(PYTHON_VERSIONS); do \
 		echo "Getting latest Python $$version.x version..."; \
-		PYTHON_VERSION=$$(curl -s https://endoflife.date/api/python.json | jq -r --arg ver "$$version" '[.[] | select(.cycle == $$ver)] | .[0].latest' || echo "$$version.0"); \
+		PYTHON_VERSION=$$(bash scripts/check-upstream-versions.sh 2>/dev/null | jq -r ".python.latest_versions[\"$$version\"]"); \
 		echo "Building Python $$version with version $$PYTHON_VERSION"; \
 		$(DOCKER_CMD) build \
 			--build-arg PYTHON_VERSION=$$PYTHON_VERSION \

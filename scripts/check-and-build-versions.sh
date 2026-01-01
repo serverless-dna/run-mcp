@@ -7,11 +7,32 @@ set -euo pipefail
 #
 # Handles:
 # - Node.js and Python version checking
-# - Version comparison against versions.json
+# - Dynamic version comparison against container registry
 # - GitHub Actions workflow dispatch for builds
 # - All error handling and logging
 #
 # Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6
+
+# Supported versions (matching Makefile)
+NODEJS_VERSIONS="${NODEJS_VERSIONS:-18 20 22}"
+PYTHON_VERSIONS="${PYTHON_VERSIONS:-3.11 3.12 3.13}"
+
+# Container runtime detection (matching Makefile logic)
+DOCKER_CMD="${DOCKER_CMD:-$(
+    if command -v docker >/dev/null 2>&1; then
+        echo "docker"
+    elif command -v podman >/dev/null 2>&1; then
+        echo "podman"
+    elif command -v nerdctl >/dev/null 2>&1; then
+        echo "nerdctl"
+    elif command -v finch >/dev/null 2>&1; then
+        echo "finch"
+    elif command -v docker.exe >/dev/null 2>&1; then
+        echo "docker.exe"
+    else
+        echo ""
+    fi
+)}"
 
 # Initialize logging
 log() {
@@ -28,15 +49,18 @@ GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 FORCE_CHECK="${FORCE_CHECK:-false}"
 
+# Registry configuration (matching Makefile)
+REGISTRY="${REGISTRY:-ghcr.io}"
+OWNER="${OWNER:-$(git config --get remote.origin.url | sed 's/.*github.com[:/]\([^/]*\).*/\1/' 2>/dev/null || echo "")}"
+REPO_NAME="${REPO_NAME:-$(basename $(git rev-parse --show-toplevel 2>/dev/null) 2>/dev/null || echo "mcp-container-images")}"
+
+# Image names (matching Makefile)
+NODEJS_IMAGE="${NODEJS_IMAGE:-$REGISTRY/$OWNER/$REPO_NAME-nodejs}"
+PYTHON_IMAGE="${PYTHON_IMAGE:-$REGISTRY/$OWNER/$REPO_NAME-python}"
+
 # Validate environment
 validate_environment() {
     log "Validating environment..."
-    
-    # Check if versions.json exists
-    if [[ ! -f "versions.json" ]]; then
-        error "versions.json not found in current directory"
-        exit 1
-    fi
     
     # Check required tools
     for tool in jq curl; do
@@ -56,33 +80,65 @@ validate_environment() {
     log "Environment validation completed"
 }
 
-# Check if we should skip due to recent check
+# Check if we should skip due to recent check (simplified without versions.json)
 should_skip_check() {
     if [[ "$FORCE_CHECK" == "true" ]]; then
         log "Force check requested - bypassing recent check validation"
         return 1  # Don't skip
     fi
     
-    if [[ -f "versions.json" ]]; then
-        local last_checked
-        last_checked=$(jq -r '.lastChecked' versions.json)
+    # For now, always run checks since we don't have persistent state
+    # In the future, this could check container registry timestamps
+    return 1  # Don't skip
+}
+
+# Get current version for a runtime/major from container registry or fallback
+get_current_version() {
+    local runtime="$1"
+    local major="$2"
+    
+    # Try to get version from local container images first
+    local image_name
+    if [[ "$runtime" == "nodejs" ]]; then
+        image_name="$NODEJS_IMAGE"
+    else
+        image_name="$PYTHON_IMAGE"
+    fi
+    
+    # Check if we have container runtime available
+    if [[ -n "$DOCKER_CMD" ]]; then
+        # Try to get version from local image tags
+        local current_version
+        if [[ "$runtime" == "nodejs" ]]; then
+            current_version=$($DOCKER_CMD image ls --format "table {{.Tag}}" "$image_name" 2>/dev/null | \
+                grep "^node$major\." | head -1 | sed "s/^node//")
+        else
+            current_version=$($DOCKER_CMD image ls --format "table {{.Tag}}" "$image_name" 2>/dev/null | \
+                grep "^python$major\." | head -1 | sed "s/^python//")
+        fi
         
-        if [[ "$last_checked" != "null" && -n "$last_checked" ]]; then
-            local last_checked_epoch current_epoch hours_since_check
-            last_checked_epoch=$(date -d "$last_checked" +%s 2>/dev/null || echo "0")
-            current_epoch=$(date +%s)
-            hours_since_check=$(( (current_epoch - last_checked_epoch) / 3600 ))
-            
-            if [[ $hours_since_check -lt 144 ]]; then  # 6 days = 144 hours
-                log "⏭️  Skipping check - last checked $hours_since_check hours ago (less than 144 hours)"
-                log "   Last check: $last_checked"
-                log "   Use FORCE_CHECK=true to override this behavior"
-                return 0  # Skip
-            fi
+        if [[ -n "$current_version" && "$current_version" != "Tag" ]]; then
+            echo "$current_version"
+            return 0
         fi
     fi
     
-    return 1  # Don't skip
+    # Fallback to reasonable defaults if no local images found
+    if [[ "$runtime" == "nodejs" ]]; then
+        case "$major" in
+            18) echo "18.19.0" ;;
+            20) echo "20.11.0" ;;
+            22) echo "22.11.0" ;;
+            *) echo "$major.0.0" ;;
+        esac
+    else
+        case "$major" in
+            3.11) echo "3.11.8" ;;
+            3.12) echo "3.12.8" ;;
+            3.13) echo "3.13.1" ;;
+            *) echo "$major.0" ;;
+        esac
+    fi
 }
 
 # Check Node.js version for a specific major version
@@ -212,50 +268,6 @@ trigger_build() {
     fi
 }
 
-# Update versions.json with new version
-update_version_file() {
-    local runtime="$1"
-    local major="$2"
-    local new_version="$3"
-    
-    log "📝 Updating versions.json: $runtime $major -> $new_version"
-    
-    local temp_file
-    temp_file=$(mktemp)
-    
-    if jq --arg runtime "$runtime" --arg major "$major" --arg version "$new_version" \
-        '.[$runtime][$major] = $version' versions.json > "$temp_file"; then
-        mv "$temp_file" versions.json
-        log "✅ Updated $runtime $major to $new_version in versions.json"
-        return 0
-    else
-        error "Failed to update versions.json"
-        rm -f "$temp_file"
-        return 1
-    fi
-}
-
-# Update last checked timestamp
-update_last_checked() {
-    log "Updating last checked timestamp..."
-    
-    local timestamp
-    timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-    
-    local temp_file
-    temp_file=$(mktemp)
-    
-    if jq --arg timestamp "$timestamp" '.lastChecked = $timestamp' versions.json > "$temp_file"; then
-        mv "$temp_file" versions.json
-        log "Updated lastChecked to: $timestamp"
-        return 0
-    else
-        error "Failed to update lastChecked timestamp"
-        rm -f "$temp_file"
-        return 1
-    fi
-}
-
 # Main execution
 main() {
     echo "🔍 MCP CONTAINER VERSION CHECK AND BUILD" >&2
@@ -264,9 +276,9 @@ main() {
     log "Execution environment:"
     log "  Script: $0"
     log "  Working directory: $(pwd)"
-    log "  Versions file: versions.json"
     log "  GitHub Repository: ${GITHUB_REPOSITORY:-'not set'}"
     log "  Force check: $FORCE_CHECK"
+    log "  Container Runtime: ${DOCKER_CMD:-'not available'}"
     log "  Current time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
     echo "" >&2
     
@@ -279,18 +291,12 @@ main() {
         exit 0
     fi
     
-    # Show current versions
-    log "Current tracked versions:"
-    jq -r '.nodejs | to_entries[] | "  Node.js \(.key): \(.value)"' versions.json | while IFS= read -r line; do
-        log "$line"
-    done
-    jq -r '.python | to_entries[] | "  Python \(.key): \(.value)"' versions.json | while IFS= read -r line; do
-        log "$line"
-    done
-    
-    local last_checked
-    last_checked=$(jq -r '.lastChecked' versions.json)
-    log "  Last checked: $last_checked"
+    # Show current configuration
+    log "Configuration:"
+    log "  Node.js versions: $NODEJS_VERSIONS"
+    log "  Python versions: $PYTHON_VERSIONS"
+    log "  Node.js image: $NODEJS_IMAGE"
+    log "  Python image: $PYTHON_IMAGE"
     echo "" >&2
     
     local updates_detected=false
@@ -300,62 +306,41 @@ main() {
     echo "🔍 CHECKING VERSIONS" >&2
     echo "===================" >&2
     
-    # Check all tracked Node.js versions
+    # Check all supported Node.js versions
     log "Checking Node.js versions..."
-    while IFS= read -r major; do
-        if [[ -n "$major" ]]; then
-            local current new_version
-            current=$(jq -r ".nodejs.\"$major\"" versions.json)
+    for major in $NODEJS_VERSIONS; do
+        local current new_version
+        current=$(get_current_version "nodejs" "$major")
+        
+        log "Current Node.js $major: $current"
+        
+        if new_version=$(check_nodejs "$major" "$current"); then
+            updates_detected=true
             
-            if [[ "$current" == "null" || -z "$current" ]]; then
-                error "No current version found for Node.js $major in versions.json"
-                ((check_errors++))
-                continue
-            fi
-            
-            if new_version=$(check_nodejs "$major" "$current"); then
-                updates_detected=true
-                
-                # Update versions.json
-                if update_version_file "nodejs" "$major" "$new_version"; then
-                    # Trigger build
-                    if trigger_build "nodejs" "$major" "$new_version"; then
-                        ((builds_triggered++))
-                    fi
-                fi
+            # Trigger build
+            if trigger_build "nodejs" "$major" "$new_version"; then
+                ((builds_triggered++))
             fi
         fi
-    done < <(jq -r '.nodejs | keys[]' versions.json)
+    done
     
-    # Check all tracked Python versions
+    # Check all supported Python versions
     log "Checking Python versions..."
-    while IFS= read -r major; do
-        if [[ -n "$major" ]]; then
-            local current new_version
-            current=$(jq -r ".python.\"$major\"" versions.json)
+    for major in $PYTHON_VERSIONS; do
+        local current new_version
+        current=$(get_current_version "python" "$major")
+        
+        log "Current Python $major: $current"
+        
+        if new_version=$(check_python "$major" "$current"); then
+            updates_detected=true
             
-            if [[ "$current" == "null" || -z "$current" ]]; then
-                error "No current version found for Python $major in versions.json"
-                ((check_errors++))
-                continue
-            fi
-            
-            if new_version=$(check_python "$major" "$current"); then
-                updates_detected=true
-                
-                # Update versions.json
-                if update_version_file "python" "$major" "$new_version"; then
-                    # Trigger build
-                    if trigger_build "python" "$major" "$new_version"; then
-                        ((builds_triggered++))
-                    fi
-                fi
+            # Trigger build
+            if trigger_build "python" "$major" "$new_version"; then
+                ((builds_triggered++))
             fi
         fi
-    done < <(jq -r '.python | keys[]' versions.json)
-    
-    # Update last checked timestamp
-    update_last_checked
+    done
     
     # Summary
     echo "📊 FINAL SUMMARY" >&2
@@ -405,6 +390,8 @@ while [[ $# -gt 0 ]]; do
             echo "  GITHUB_REPOSITORY  GitHub repository (owner/repo)"
             echo "  GITHUB_TOKEN       GitHub token for API access"
             echo "  FORCE_CHECK        Set to 'true' to force check"
+            echo "  NODEJS_VERSIONS    Space-separated Node.js major versions (default: 18 20 22)"
+            echo "  PYTHON_VERSIONS    Space-separated Python major.minor versions (default: 3.11 3.12 3.13)"
             exit 0
             ;;
         *)

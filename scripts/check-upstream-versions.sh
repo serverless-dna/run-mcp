@@ -1,18 +1,32 @@
 #!/bin/bash
 set -euo pipefail
 
-# Upstream version detection script for MCP container images
-# This script checks for new upstream runtime versions and sets GitHub Actions outputs
-# for triggering container rebuilds when updates are detected.
-#
-# Handles:
-# - Node.js version checking via nodejs.org API
-# - Python version checking via endoflife.date API
-# - Version comparison against versions.json
-# - GitHub Actions output generation
-# - API failures and network issues
-#
-# Requirements: 12.1, 12.2, 12.5
+# Dynamic upstream version detection script for MCP container images
+# Follows the rule: Support Current LTS + Previous LTS only
+# No hardcoded version lists - determines supported versions dynamically
+
+# Container runtime detection
+DOCKER_CMD="${DOCKER_CMD:-$(
+    if command -v docker >/dev/null 2>&1; then
+        echo "docker"
+    elif command -v podman >/dev/null 2>&1; then
+        echo "podman"
+    elif command -v nerdctl >/dev/null 2>&1; then
+        echo "nerdctl"
+    elif command -v finch >/dev/null 2>&1; then
+        echo "finch"
+    else
+        echo ""
+    fi
+)}"
+
+# Registry configuration (matching Makefile)
+REGISTRY="${REGISTRY:-ghcr.io}"
+OWNER="${OWNER:-$(git config --get remote.origin.url | sed 's/.*github.com[:/]\([^/]*\).*/\1/' 2>/dev/null || echo "")}"
+REPO_NAME="${REPO_NAME:-$(basename $(git rev-parse --show-toplevel 2>/dev/null) 2>/dev/null || echo "mcp-container-images")}"
+
+NODEJS_IMAGE="${NODEJS_IMAGE:-$REGISTRY/$OWNER/$REPO_NAME-nodejs}"
+PYTHON_IMAGE="${PYTHON_IMAGE:-$REGISTRY/$OWNER/$REPO_NAME-python}"
 
 # Initialize logging
 log() {
@@ -23,336 +37,403 @@ error() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $*" >&2
 }
 
-# Validate environment
-validate_environment() {
-    log "Validating environment..."
-    
-    # Check if versions.json exists
-    if [[ ! -f "versions.json" ]]; then
-        error "versions.json not found in current directory"
-        exit 1
-    fi
-    
-    # Check if jq is available
-    if ! command -v jq >/dev/null 2>&1; then
-        error "jq is required but not installed"
-        exit 1
-    fi
-    
-    # Check if curl is available
-    if ! command -v curl >/dev/null 2>&1; then
-        error "curl is required but not installed"
-        exit 1
-    fi
-    
-    # Check if GITHUB_OUTPUT is set (for GitHub Actions)
-    if [[ -z "${GITHUB_OUTPUT:-}" ]]; then
-        log "WARNING: GITHUB_OUTPUT not set, outputs will be printed to stdout"
-        GITHUB_OUTPUT="/dev/stdout"
-    fi
-    
-    log "Environment validation completed"
-}
-
 # Set GitHub Actions output safely
 set_output() {
     local key="$1"
     local value="$2"
     
-    log "Setting output: $key=$value"
-    echo "$key=$value" >> "$GITHUB_OUTPUT"
+    if [[ -n "${GITHUB_OUTPUT:-}" && "$GITHUB_OUTPUT" != "/dev/stdout" ]]; then
+        echo "$key=$value" >> "$GITHUB_OUTPUT"
+    else
+        # When not in GitHub Actions, send to stderr to keep stdout clean for JSON
+        echo "$key=$value" >&2
+    fi
 }
 
-# Check Node.js version for a specific major version
-check_nodejs() {
-    local major="$1"
-    local current="$2"
+# Get what we've published to the registry for a runtime/major version
+get_built_version() {
+    local image="$1"
+    local major="$2"
+    local runtime="$3"
     
-    log "Checking Node.js $major version (current: $current)"
-    
-    # Query nodejs.org API with retry logic
-    local latest=""
-    local retry_count=0
-    local max_retries=3
-    
-    while [[ $retry_count -lt $max_retries ]]; do
-        if latest=$(curl -s --max-time 30 https://nodejs.org/dist/index.json 2>/dev/null | \
-            jq -r --arg maj "$major" '[.[] | select(.version | startswith("v" + $maj + "."))] | .[0].version' 2>/dev/null | tr -d 'v'); then
-            
-            # Validate the response
-            if [[ -n "$latest" && "$latest" != "null" && "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                log "Successfully retrieved Node.js $major latest version: $latest"
-                break
-            else
-                log "Invalid response for Node.js $major: '$latest'"
-                latest=""
-            fi
+    # Extract owner and repo from image name
+    if [[ "$image" =~ ^ghcr\.io/([^/]+)/([^:]+) ]]; then
+        local owner="${BASH_REMATCH[1]}"
+        local repo="${BASH_REMATCH[2]}"
+        
+        # Try GitHub API first (works for public packages)
+        local github_api_url="https://api.github.com/users/${owner}/packages/container/${repo}/versions"
+        
+        # Get published versions from GitHub API
+        local published_versions
+        published_versions=$(curl -s --max-time 10 "$github_api_url" 2>/dev/null | jq -r '.[].metadata.container.tags[]?' 2>/dev/null)
+        
+        # If API call fails or returns empty, assume nothing is published yet
+        if [[ -z "$published_versions" || "$published_versions" == "null" ]]; then
+            log "No published versions found for $repo (package may not exist yet)"
+            echo ""
+            return
         fi
         
-        retry_count=$((retry_count + 1))
-        if [[ $retry_count -lt $max_retries ]]; then
-            log "Retrying Node.js $major version check (attempt $((retry_count + 1))/$max_retries)..."
-            sleep 2
+        # Look for specific version tags in published versions
+        local built_version=""
+        if [[ "$runtime" == "nodejs" ]]; then
+            # Look for node22.x.x pattern in published tags
+            built_version=$(echo "$published_versions" | grep -E "^node${major}\.[0-9]+\.[0-9]+$" | head -1 | sed "s/^node//")
+        elif [[ "$runtime" == "python" ]]; then
+            # Look for python3.12.x pattern in published tags
+            built_version=$(echo "$published_versions" | grep -E "^python${major}\.[0-9]+$" | head -1 | sed "s/^python//")
         fi
-    done
+        
+        echo "$built_version"
+    else
+        echo ""
+    fi
+}
+
+# Get supported Node.js versions (Current LTS + Previous LTS)
+get_supported_nodejs_versions() {
+    log "Determining supported Node.js versions (Current + Previous 2 LTS)..."
     
-    if [[ -z "$latest" ]]; then
-        error "Failed to retrieve Node.js $major version after $max_retries attempts"
-        set_output "nodejs-$major-update" "false"
-        set_output "nodejs-$major-error" "api-failure"
+    # Get all Node.js versions with LTS info
+    local nodejs_data
+    nodejs_data=$(curl -s --max-time 30 https://nodejs.org/dist/index.json 2>/dev/null)
+    
+    if [[ -z "$nodejs_data" ]]; then
+        error "Failed to fetch Node.js version data"
         return 1
     fi
     
-    # Compare versions
-    if [[ "$latest" != "$current" ]]; then
-        log "🆕 New Node.js $major version detected: $current -> $latest"
-        set_output "nodejs-$major" "$latest"
-        set_output "nodejs-$major-update" "true"
-        set_output "nodejs-$major-current" "$current"
-        return 0
-    else
-        log "✅ Node.js $major version $current is current"
-        set_output "nodejs-$major-update" "false"
-        return 0
-    fi
-}
-
-# Check Python version for a specific major.minor version
-check_python() {
-    local major="$1"
-    local current="$2"
+    # Get unique LTS major versions, sorted numerically descending, take first 3
+    local lts_versions
+    lts_versions=$(echo "$nodejs_data" | jq -r '[.[] | select(.lts != false) | .version] | map(ltrimstr("v") | split(".")[0] | tonumber) | unique | sort | reverse | .[0:3] | map(tostring) | .[]' | tr '\n' ' ')
     
-    log "Checking Python $major version (current: $current)"
-    
-    # Query endoflife.date API with retry logic
-    local latest=""
-    local retry_count=0
-    local max_retries=3
-    
-    while [[ $retry_count -lt $max_retries ]]; do
-        if latest=$(curl -s --max-time 30 https://endoflife.date/api/python.json 2>/dev/null | \
-            jq -r --arg maj "$major" '[.[] | select(.cycle == $maj)] | .[0].latest' 2>/dev/null); then
-            
-            # Validate the response
-            if [[ -n "$latest" && "$latest" != "null" && "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                log "Successfully retrieved Python $major latest version: $latest"
-                break
-            else
-                log "Invalid response for Python $major: '$latest'"
-                latest=""
-            fi
-        fi
-        
-        retry_count=$((retry_count + 1))
-        if [[ $retry_count -lt $max_retries ]]; then
-            log "Retrying Python $major version check (attempt $((retry_count + 1))/$max_retries)..."
-            sleep 2
-        fi
-    done
-    
-    if [[ -z "$latest" ]]; then
-        error "Failed to retrieve Python $major version after $max_retries attempts"
-        set_output "python-$major-update" "false"
-        set_output "python-$major-error" "api-failure"
+    if [[ -z "$lts_versions" ]]; then
+        error "Could not determine LTS versions"
         return 1
     fi
     
-    # Compare versions
-    if [[ "$latest" != "$current" ]]; then
-        log "🆕 New Python $major version detected: $current -> $latest"
-        set_output "python-$major" "$latest"
-        set_output "python-$major-update" "true"
-        set_output "python-$major-current" "$current"
-        return 0
-    else
-        log "✅ Python $major version $current is current"
-        set_output "python-$major-update" "false"
-        return 0
-    fi
+    log "Node.js LTS versions: $lts_versions"
+    echo "$lts_versions"
 }
 
-# Check all tracked versions
-check_all_versions() {
-    log "Starting upstream version checks..."
+# Get supported Python versions (Current + Previous maintained)
+get_supported_python_versions() {
+    log "Determining supported Python versions (Current + Previous 2 maintained)..."
     
-    local updates_detected=false
-    local nodejs_updates=""
-    local python_updates=""
-    local check_errors=false
+    # Get Python version data from endoflife.date
+    local python_data
+    python_data=$(curl -s --max-time 30 https://endoflife.date/api/python.json 2>/dev/null)
     
-    echo "🔍 UPSTREAM VERSION CHECK" >&2
-    echo "========================" >&2
+    if [[ -z "$python_data" ]]; then
+        error "Failed to fetch Python version data"
+        return 1
+    fi
     
-    # Check all tracked Node.js versions
+    # Get versions that are released (release date is in the past) and have a valid latest version
+    local supported_versions=""
+    local count=0
+    
+    while IFS= read -r version_info; do
+        if [[ $count -ge 3 ]]; then  # Changed from 2 to 3 for Python
+            break
+        fi
+        
+        local cycle release_date latest
+        cycle=$(echo "$version_info" | jq -r '.cycle')
+        release_date=$(echo "$version_info" | jq -r '.releaseDate')
+        latest=$(echo "$version_info" | jq -r '.latest')
+        
+        # Check if release date is in the past and latest version exists
+        if [[ -n "$latest" && "$latest" != "null" && "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            # Verify we can actually get this version from the API
+            local test_latest
+            test_latest=$(get_python_latest "$cycle")
+            
+            if [[ -n "$test_latest" && "$test_latest" != "" ]]; then
+                log "Found valid Python version: $cycle (latest: $latest)"
+                supported_versions="${supported_versions}$cycle "
+                ((count++))
+            else
+                log "Skipping Python $cycle - cannot retrieve latest version"
+            fi
+        else
+            log "Skipping Python $cycle - invalid or missing latest version"
+        fi
+    done < <(echo "$python_data" | jq -c '.[]')
+    
+    if [[ -z "$supported_versions" ]]; then
+        error "Could not determine supported Python versions"
+        return 1
+    fi
+    
+    log "Python supported versions: $supported_versions"
+    echo "$supported_versions"
+}
+
+# Get latest upstream version for Node.js major version
+get_nodejs_latest() {
+    local major="$1"
+    
+    curl -s --max-time 30 https://nodejs.org/dist/index.json 2>/dev/null | \
+        jq -r --arg maj "$major" '[.[] | select(.version | startswith("v" + $maj + "."))] | .[0].version' 2>/dev/null | \
+        tr -d 'v' || echo ""
+}
+
+# Get latest upstream version for Python major.minor version
+get_python_latest() {
+    local major="$1"
+    
+    curl -s --max-time 30 https://endoflife.date/api/python.json 2>/dev/null | \
+        jq -r --arg maj "$major" '[.[] | select(.cycle == $maj)] | .[0].latest' 2>/dev/null || echo ""
+}
+
+# Check what Node.js versions we need to build
+check_nodejs_versions() {
+    local updates_needed=""
+    
     log "Checking Node.js versions..."
-    while IFS= read -r major; do
-        if [[ -n "$major" ]]; then
-            local current
-            current=$(jq -r ".nodejs.\"$major\"" versions.json)
-            
-            if [[ "$current" == "null" || -z "$current" ]]; then
-                error "No current version found for Node.js $major in versions.json"
-                check_errors=true
-                continue
-            fi
-            
-            log "Current Node.js $major: $current"
-            if check_nodejs "$major" "$current"; then
-                # Check if update was detected
-                local update_detected
-                update_detected=$(grep "nodejs-$major-update=true" "$GITHUB_OUTPUT" 2>/dev/null || echo "")
-                if [[ -n "$update_detected" ]]; then
-                    updates_detected=true
-                    nodejs_updates="${nodejs_updates}$major,"
-                fi
-            else
-                check_errors=true
-            fi
-        fi
-    done < <(jq -r '.nodejs | keys[]' versions.json)
     
-    # Check all tracked Python versions
-    log "Checking Python versions..."
-    while IFS= read -r major; do
-        if [[ -n "$major" ]]; then
-            local current
-            current=$(jq -r ".python.\"$major\"" versions.json)
-            
-            if [[ "$current" == "null" || -z "$current" ]]; then
-                error "No current version found for Python $major in versions.json"
-                check_errors=true
-                continue
-            fi
-            
-            log "Current Python $major: $current"
-            if check_python "$major" "$current"; then
-                # Check if update was detected
-                local update_detected
-                update_detected=$(grep "python-$major-update=true" "$GITHUB_OUTPUT" 2>/dev/null || echo "")
-                if [[ -n "$update_detected" ]]; then
-                    updates_detected=true
-                    python_updates="${python_updates}$major,"
-                fi
-            else
-                check_errors=true
-            fi
-        fi
-    done < <(jq -r '.python | keys[]' versions.json)
+    # Get supported versions dynamically
+    local supported_versions
+    supported_versions=$(get_supported_nodejs_versions)
     
-    # Remove trailing commas
-    nodejs_updates="${nodejs_updates%,}"
-    python_updates="${python_updates%,}"
-    
-    # Set summary outputs
-    set_output "updates-detected" "$updates_detected"
-    set_output "nodejs-updates" "$nodejs_updates"
-    set_output "python-updates" "$python_updates"
-    set_output "check-errors" "$check_errors"
-    
-    # Log summary
-    echo "📊 VERSION CHECK SUMMARY" >&2
-    echo "=======================" >&2
-    
-    if [[ "$updates_detected" == "true" ]]; then
-        log "🆕 Updates detected!"
-        if [[ -n "$nodejs_updates" ]]; then
-            log "  Node.js updates: $nodejs_updates"
-        fi
-        if [[ -n "$python_updates" ]]; then
-            log "  Python updates: $python_updates"
-        fi
-        log "  Action: Container rebuild will be triggered"
-    else
-        log "✅ All versions are current"
-        log "  Action: No rebuilds needed"
-    fi
-    
-    if [[ "$check_errors" == "true" ]]; then
-        log "⚠️  Some version checks failed (see errors above)"
-        log "  Action: Manual investigation may be required"
-    fi
-    
-    echo "=======================" >&2
-    
-    return 0
-}
-
-# Update last checked timestamp
-update_last_checked() {
-    log "Updating last checked timestamp..."
-    
-    local timestamp
-    timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-    
-    # Create temporary file with updated timestamp
-    local temp_file
-    temp_file=$(mktemp)
-    
-    if jq --arg timestamp "$timestamp" '.lastChecked = $timestamp' versions.json > "$temp_file"; then
-        mv "$temp_file" versions.json
-        log "Updated lastChecked to: $timestamp"
-        set_output "last-checked" "$timestamp"
-    else
-        error "Failed to update lastChecked timestamp"
-        rm -f "$temp_file"
+    if [[ -z "$supported_versions" ]]; then
+        error "Could not determine supported Node.js versions"
         return 1
     fi
+    
+    for major in $supported_versions; do
+        local built_version latest_version
+        
+        built_version=$(get_built_version "$NODEJS_IMAGE" "$major" "nodejs")
+        latest_version=$(get_nodejs_latest "$major")
+        
+        if [[ -z "$latest_version" ]]; then
+            log "⚠️  Could not get latest Node.js $major version"
+            continue
+        fi
+        
+        if [[ -z "$built_version" ]]; then
+            log "📦 Node.js $major: Not built locally, latest is $latest_version"
+            updates_needed="${updates_needed}$major,"
+            set_output "nodejs-$major" "$latest_version"
+            set_output "nodejs-$major-status" "not-built"
+        elif [[ "$built_version" != "$latest_version" ]]; then
+            log "🆕 Node.js $major: Built $built_version, latest is $latest_version"
+            updates_needed="${updates_needed}$major,"
+            set_output "nodejs-$major" "$latest_version"
+            set_output "nodejs-$major-current" "$built_version"
+            set_output "nodejs-$major-status" "outdated"
+        else
+            log "✅ Node.js $major: Built $built_version is current"
+            set_output "nodejs-$major-status" "current"
+        fi
+    done
+    
+    # Remove trailing comma
+    updates_needed="${updates_needed%,}"
+    echo "$updates_needed"
+}
+
+# Check what Python versions we need to build
+check_python_versions() {
+    local updates_needed=""
+    
+    log "Checking Python versions..."
+    
+    # Get supported versions dynamically
+    local supported_versions
+    supported_versions=$(get_supported_python_versions)
+    
+    if [[ -z "$supported_versions" ]]; then
+        error "Could not determine supported Python versions"
+        return 1
+    fi
+    
+    for major in $supported_versions; do
+        local built_version latest_version
+        
+        built_version=$(get_built_version "$PYTHON_IMAGE" "$major" "python")
+        latest_version=$(get_python_latest "$major")
+        
+        if [[ -z "$latest_version" ]]; then
+            log "⚠️  Could not get latest Python $major version"
+            continue
+        fi
+        
+        if [[ -z "$built_version" ]]; then
+            log "📦 Python $major: Not built locally, latest is $latest_version"
+            updates_needed="${updates_needed}$major,"
+            set_output "python-$major" "$latest_version"
+            set_output "python-$major-status" "not-built"
+        elif [[ "$built_version" != "$latest_version" ]]; then
+            log "🆕 Python $major: Built $built_version, latest is $latest_version"
+            updates_needed="${updates_needed}$major,"
+            set_output "python-$major" "$latest_version"
+            set_output "python-$major-current" "$built_version"
+            set_output "python-$major-status" "outdated"
+        else
+            log "✅ Python $major: Built $built_version is current"
+            set_output "python-$major-status" "current"
+        fi
+    done
+    
+    # Remove trailing comma
+    updates_needed="${updates_needed%,}"
+    echo "$updates_needed"
 }
 
 # Main execution
 main() {
-    echo "🔍 MCP CONTAINER UPSTREAM VERSION CHECK" >&2
-    echo "======================================" >&2
-    log "Starting upstream version detection for MCP container images..."
-    log "Execution environment:"
-    log "  Script: $0"
-    log "  Working directory: $(pwd)"
-    log "  Versions file: versions.json"
-    log "  GitHub Actions: ${GITHUB_ACTIONS:-'false'}"
-    log "  GitHub Output: ${GITHUB_OUTPUT:-'not set'}"
-    log "  Current time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    echo "🔍 MCP CONTAINER VERSION CHECK" >&2
+    echo "=============================" >&2
+    log "Dynamically checking versions based on LTS support policy..."
+    log "Rule: Support Current + Previous 2 LTS versions"
+    log "Container runtime: ${DOCKER_CMD:-'none available'}"
+    log "Node.js image: $NODEJS_IMAGE"
+    log "Python image: $PYTHON_IMAGE"
     echo "" >&2
     
-    # Validate environment first
-    validate_environment
+    # Check versions
+    local nodejs_updates python_updates
     
-    # Show current versions
-    log "Current tracked versions:"
-    jq -r '.nodejs | to_entries[] | "  Node.js \(.key): \(.value)"' versions.json | while IFS= read -r line; do
-        log "$line"
-    done
-    jq -r '.python | to_entries[] | "  Python \(.key): \(.value)"' versions.json | while IFS= read -r line; do
-        log "$line"
-    done
+    nodejs_updates=$(check_nodejs_versions)
+    python_updates=$(check_python_versions)
     
-    local last_checked
-    last_checked=$(jq -r '.lastChecked' versions.json)
-    log "  Last checked: $last_checked"
-    echo "" >&2
+    # Get all supported versions (not just updates)
+    local nodejs_supported python_supported
+    nodejs_supported=$(get_supported_nodejs_versions)
+    python_supported=$(get_supported_python_versions)
     
-    # Check all versions
-    if check_all_versions; then
-        log "Version checks completed"
+    # Set summary outputs for GitHub Actions
+    if [[ -n "$nodejs_updates" || -n "$python_updates" ]]; then
+        set_output "updates-detected" "true"
+        log "📋 SUMMARY: Updates needed"
     else
-        error "Some version checks failed"
+        set_output "updates-detected" "false"
+        log "📋 SUMMARY: All supported versions current"
     fi
     
-    # Update last checked timestamp
-    if update_last_checked; then
-        log "Timestamp update completed"
+    set_output "nodejs-updates" "$nodejs_updates"
+    set_output "python-updates" "$python_updates"
+    
+    # Create JSON output for Makefile consumption
+    local nodejs_versions_json python_versions_json
+    local nodejs_updates_json python_updates_json
+    local nodejs_latest_json python_latest_json
+    
+    # Build Node.js arrays and objects
+    if [[ -n "$nodejs_supported" ]]; then
+        nodejs_versions_json=$(echo "$nodejs_supported" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -s .)
     else
-        error "Failed to update timestamp"
+        nodejs_versions_json='[]'
     fi
     
-    echo "======================================" >&2
-    log "✅ Upstream version check completed"
-    log "Final outputs:"
-    log "  updates-detected: $(grep 'updates-detected=' "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo 'not set')"
-    log "  nodejs-updates: $(grep 'nodejs-updates=' "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo 'not set')"
-    log "  python-updates: $(grep 'python-updates=' "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo 'not set')"
-    log "  check-errors: $(grep 'check-errors=' "$GITHUB_OUTPUT" | cut -d'=' -f2 || echo 'not set')"
-    log "Execution completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    if [[ -n "$nodejs_updates" ]]; then
+        nodejs_updates_json=$(echo "$nodejs_updates" | tr ',' '\n' | grep -v '^$' | jq -R . | jq -s .)
+    else
+        nodejs_updates_json='[]'
+    fi
+    
+    nodejs_latest_json="{"
+    local first=true
+    for version in $nodejs_supported; do
+        if [[ "$first" == "false" ]]; then
+            nodejs_latest_json="$nodejs_latest_json,"
+        fi
+        latest=$(get_nodejs_latest "$version")
+        nodejs_latest_json="$nodejs_latest_json\"$version\":\"$latest\""
+        first=false
+    done
+    nodejs_latest_json="$nodejs_latest_json}"
+    
+    # Build Python arrays and objects
+    if [[ -n "$python_supported" ]]; then
+        python_versions_json=$(echo "$python_supported" | tr ' ' '\n' | grep -v '^$' | jq -R . | jq -s .)
+    else
+        python_versions_json='[]'
+    fi
+    
+    if [[ -n "$python_updates" ]]; then
+        python_updates_json=$(echo "$python_updates" | tr ',' '\n' | grep -v '^$' | jq -R . | jq -s .)
+    else
+        python_updates_json='[]'
+    fi
+    
+    python_latest_json="{"
+    first=true
+    for version in $python_supported; do
+        if [[ "$first" == "false" ]]; then
+            python_latest_json="$python_latest_json,"
+        fi
+        latest=$(get_python_latest "$version")
+        python_latest_json="$python_latest_json\"$version\":\"$latest\""
+        first=false
+    done
+    python_latest_json="$python_latest_json}"
+    
+    # Create final JSON
+    local updates_detected
+    if [[ -n "$nodejs_updates" || -n "$python_updates" ]]; then
+        updates_detected="true"
+    else
+        updates_detected="false"
+    fi
+    
+    local total_supported
+    total_supported=$(($(echo "$nodejs_supported" | wc -w) + $(echo "$python_supported" | wc -w)))
+    
+    local json_output
+    json_output=$(jq -n \
+        --argjson nodejs_versions "$nodejs_versions_json" \
+        --argjson nodejs_updates "$nodejs_updates_json" \
+        --argjson nodejs_latest "$nodejs_latest_json" \
+        --argjson python_versions "$python_versions_json" \
+        --argjson python_updates "$python_updates_json" \
+        --argjson python_latest "$python_latest_json" \
+        --arg updates_detected "$updates_detected" \
+        --arg total_supported "$total_supported" \
+        '{
+            nodejs: {
+                supported_versions: $nodejs_versions,
+                versions_to_build: $nodejs_updates,
+                latest_versions: $nodejs_latest
+            },
+            python: {
+                supported_versions: $python_versions,
+                versions_to_build: $python_updates,
+                latest_versions: $python_latest
+            },
+            summary: {
+                updates_detected: ($updates_detected == "true"),
+                total_supported: ($total_supported | tonumber)
+            }
+        }')
+    
+    # Output JSON to stdout for Makefile consumption
+    echo "$json_output"
+    
+    # Show summary to stderr
+    echo "📋 BUILD SUMMARY" >&2
+    echo "===============" >&2
+    
+    if [[ -n "$nodejs_updates" ]]; then
+        log "Node.js versions to build: $nodejs_updates"
+    else
+        log "Node.js: All supported versions current"
+    fi
+    
+    if [[ -n "$python_updates" ]]; then
+        log "Python versions to build: $python_updates"
+    else
+        log "Python: All supported versions current"
+    fi
+    
+    echo "=============================" >&2
+    log "✅ Version check completed"
 }
 
 # Execute main function
 main "$@"
+exit 0
