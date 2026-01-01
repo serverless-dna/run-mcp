@@ -106,7 +106,7 @@ jobs:
 
       - name: Build and push containers
         run: |
-          if [[ "${{ github.event.inputs.build_matrix }}" == "true" ]]; then
+          if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.event.inputs.build_matrix }}" == "true" ]]; then
             echo "Running complete container lifecycle with matrix builds"
             make containers-matrix
           else
