@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -448,6 +449,95 @@ func TestConfiguration(t *testing.T) {
 	}
 }
 
+// Property 1: Volume Creation Consistency
+// For any MCP server command and supported container runtime, when run-mcp starts a container, 
+// a named container volume should be created following the deterministic naming pattern 
+// mcp-home-{sanitized-command}-{sanitized-first-arg}
+func TestProperty1_VolumeCreationConsistency(t *testing.T) {
+	// **Feature: container-home-isolation, Property 1: Volume Creation Consistency**
+	// **Validates: Requirements 1.1, 2.1, 2.2, 2.3**
+	
+	testCases := []struct {
+		name     string
+		args     []string
+		expected string
+	}{
+		{
+			name:     "simple command",
+			args:     []string{"uvx", "server"},
+			expected: "mcp-home-uvx-server",
+		},
+		{
+			name:     "command with package name",
+			args:     []string{"npx", "@modelcontextprotocol/server-filesystem"},
+			expected: "mcp-home-npx-modelcontextprotocol-server-filesystem",
+		},
+		{
+			name:     "command with version",
+			args:     []string{"uvx", "awslabs.aws-api-mcp-server@latest"},
+			expected: "mcp-home-uvx-awslabs-aws-api-mcp-server-latest",
+		},
+		{
+			name:     "command with flags (should stop at flags)",
+			args:     []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			expected: "mcp-home-uvx-mcp-server-sqlite",
+		},
+		{
+			name:     "single command",
+			args:     []string{"python"},
+			expected: "mcp-home-python",
+		},
+		{
+			name:     "empty args",
+			args:     []string{},
+			expected: "mcp-home-default",
+		},
+		{
+			name:     "command with special characters",
+			args:     []string{"uvx", "server@1.0.0"},
+			expected: "mcp-home-uvx-server-1-0-0",
+		},
+		{
+			name:     "windows path normalization",
+			args:     []string{"uvx", "server\\with\\backslashes"},
+			expected: "mcp-home-uvx-server-with-backslashes",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := sanitizeVolumeName(tc.args)
+			if result != tc.expected {
+				t.Errorf("sanitizeVolumeName(%v) = %s, expected %s", tc.args, result, tc.expected)
+			}
+			
+			// Verify the result follows the expected pattern
+			if !strings.HasPrefix(result, "mcp-home-") {
+				t.Errorf("Volume name %s does not start with 'mcp-home-'", result)
+			}
+			
+			// Verify no invalid characters remain
+			validPattern := regexp.MustCompile(`^[a-z0-9-]+$`)
+			if !validPattern.MatchString(result) {
+				t.Errorf("Volume name %s contains invalid characters", result)
+			}
+			
+			// Verify length constraint
+			if len(result) > 64 {
+				t.Errorf("Volume name %s exceeds 64 character limit (length: %d)", result, len(result))
+			}
+		})
+	}
+	
+	// Test deterministic behavior - same input should always produce same output
+	testArgs := []string{"uvx", "awslabs.aws-api-mcp-server@latest"}
+	result1 := sanitizeVolumeName(testArgs)
+	result2 := sanitizeVolumeName(testArgs)
+	if result1 != result2 {
+		t.Errorf("sanitizeVolumeName is not deterministic: %s != %s", result1, result2)
+	}
+}
+
 // Benchmark tests for performance
 func BenchmarkRuntimeDetection(b *testing.B) {
 	detector := NewRuntimeDetector()
@@ -463,10 +553,167 @@ func BenchmarkLanguageDetection(b *testing.B) {
 		detector.DetectFromArgs(args)
 	}
 }
-
 func BenchmarkEnvFiltering(b *testing.B) {
 	filter := NewEnvFilter()
 	for i := 0; i < b.N; i++ {
 		filter.GetFilteredEnvArgs()
+	}
+}
+
+// Unit tests for volume name edge cases
+// Requirements: 2.7, 2.8
+func TestVolumeNameEdgeCases(t *testing.T) {
+	testCases := []struct {
+		name        string
+		args        []string
+		expected    string
+		description string
+	}{
+		{
+			name:        "empty command",
+			args:        []string{""},
+			expected:    "mcp-home-default",
+			description: "Empty string should result in default name",
+		},
+		{
+			name:        "whitespace only",
+			args:        []string{"   ", "\t"},
+			expected:    "mcp-home-default",
+			description: "Whitespace-only args should result in default name",
+		},
+		{
+			name:        "special characters",
+			args:        []string{"uvx", "server@1.0.0#latest!"},
+			expected:    "mcp-home-uvx-server-1-0-0-latest",
+			description: "Special characters should be replaced with dashes",
+		},
+		{
+			name:        "consecutive special characters",
+			args:        []string{"uvx", "server!!!@@@###"},
+			expected:    "mcp-home-uvx-server",
+			description: "Consecutive special characters should be collapsed to single dash",
+		},
+		{
+			name:        "leading and trailing special chars",
+			args:        []string{"@@@uvx@@@", "!!!server!!!"},
+			expected:    "mcp-home-uvx-server",
+			description: "Leading and trailing special characters should be trimmed",
+		},
+		{
+			name:        "windows paths",
+			args:        []string{"uvx", "C:\\Program Files\\server\\app.exe"},
+			expected:    "mcp-home-uvx-c-program-files-server-app-exe",
+			description: "Windows paths should be normalized",
+		},
+		{
+			name:        "mixed path separators",
+			args:        []string{"uvx", "path\\with/mixed\\separators"},
+			expected:    "mcp-home-uvx-path-with-mixed-separators",
+			description: "Mixed path separators should be normalized",
+		},
+		{
+			name:        "unicode characters",
+			args:        []string{"uvx", "sérver-ñame"},
+			expected:    "mcp-home-uvx-s-rver-ame",
+			description: "Unicode characters should be handled",
+		},
+		{
+			name:        "numbers and letters",
+			args:        []string{"uvx", "server123"},
+			expected:    "mcp-home-uvx-server123",
+			description: "Numbers should be preserved",
+		},
+		{
+			name:        "only flags",
+			args:        []string{"--help", "--version"},
+			expected:    "mcp-home-default",
+			description: "Only flags should result in default name",
+		},
+		{
+			name:        "command then flags",
+			args:        []string{"uvx", "--help"},
+			expected:    "mcp-home-uvx",
+			description: "Should stop processing at first flag",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := sanitizeVolumeName(tc.args)
+			if result != tc.expected {
+				t.Errorf("sanitizeVolumeName(%v) = %s, expected %s (%s)", 
+					tc.args, result, tc.expected, tc.description)
+			}
+		})
+	}
+}
+
+// Test truncation behavior with various input lengths
+// Requirements: 2.8
+func TestVolumeNameTruncation(t *testing.T) {
+	testCases := []struct {
+		name        string
+		args        []string
+		description string
+	}{
+		{
+			name: "exactly 64 characters",
+			args: []string{"uvx", "this-is-a-very-long-server-name-that-should-be-exactly-sixtyfour"},
+			description: "Name exactly at limit should not be truncated",
+		},
+		{
+			name: "over 64 characters",
+			args: []string{"uvx", "this-is-a-very-long-server-name-that-exceeds-the-sixtyfour-character-limit"},
+			description: "Name over limit should be truncated with hash",
+		},
+		{
+			name: "extremely long name",
+			args: []string{"uvx", strings.Repeat("very-long-name-", 20)},
+			description: "Extremely long names should be truncated properly",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := sanitizeVolumeName(tc.args)
+			
+			// All results should be 64 characters or less
+			if len(result) > 64 {
+				t.Errorf("Volume name length %d exceeds 64 character limit: %s", len(result), result)
+			}
+			
+			// Should still start with mcp-home-
+			if !strings.HasPrefix(result, "mcp-home-") {
+				t.Errorf("Truncated name should still start with 'mcp-home-': %s", result)
+			}
+			
+			// If truncated, should end with 8-character hash
+			originalName := "mcp-home-" + strings.Join(tc.args, "-")
+			if len(originalName) > 64 {
+				// Should be truncated to 56 chars + "-" + 8 char hash = 65 total, but we want 64
+				// So it should be 55 chars + "-" + 8 char hash = 64 total
+				if len(result) != 64 {
+					t.Errorf("Truncated name should be exactly 64 characters, got %d: %s", len(result), result)
+				}
+				
+				// Should contain a hash at the end
+				parts := strings.Split(result, "-")
+				lastPart := parts[len(parts)-1]
+				if len(lastPart) != 8 {
+					t.Errorf("Expected 8-character hash suffix, got %d characters: %s", len(lastPart), lastPart)
+				}
+				
+				// Hash should be hexadecimal
+				if matched, _ := regexp.MatchString("^[a-f0-9]{8}$", lastPart); !matched {
+					t.Errorf("Hash suffix should be 8 hexadecimal characters: %s", lastPart)
+				}
+			}
+			
+			// Test deterministic truncation - same input should produce same hash
+			result2 := sanitizeVolumeName(tc.args)
+			if result != result2 {
+				t.Errorf("Truncation should be deterministic: %s != %s", result, result2)
+			}
+		})
 	}
 }

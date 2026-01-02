@@ -1,9 +1,11 @@
 package main
 
 import (
+	"crypto/md5"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -16,6 +18,56 @@ type VolumeManager struct {
 // NewVolumeManager creates a new volume manager
 func NewVolumeManager(config *Config) *VolumeManager {
 	return &VolumeManager{config: config}
+}
+
+// sanitizeVolumeName creates a sanitized volume name from command arguments
+// Following the pattern: mcp-home-{sanitized-command}-{sanitized-first-arg}
+// Requirements: 2.1, 2.2, 2.3, 2.7, 2.8
+func sanitizeVolumeName(args []string) string {
+	if len(args) == 0 {
+		return "mcp-home-default"
+	}
+	
+	var parts []string
+	
+	// Extract up to 2 parts (command + first non-flag argument)
+	for i, arg := range args {
+		// Only use first two args (command + server identifier)
+		if i >= 2 {
+			break
+		}
+		// Stop at flags
+		if strings.HasPrefix(arg, "-") {
+			break
+		}
+		
+		// Normalize path separators before processing (Requirement 2.7)
+		normalizedArg := strings.ReplaceAll(arg, "\\", "/")
+		
+		// Sanitize: lowercase, replace non-alphanumeric with dash
+		sanitized := strings.ToLower(normalizedArg)
+		sanitized = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(sanitized, "-")
+		sanitized = strings.Trim(sanitized, "-")
+		
+		if sanitized != "" {
+			parts = append(parts, sanitized)
+		}
+	}
+	
+	if len(parts) == 0 {
+		return "mcp-home-default"
+	}
+	
+	name := "mcp-home-" + strings.Join(parts, "-")
+	
+	// Truncate if exceeds 64 characters (Requirement 2.8)
+	if len(name) > 64 {
+		// Keep first 55 characters plus "-" plus 8-character hash suffix = 64 total
+		hash := fmt.Sprintf("%08x", md5.Sum([]byte(name)))[:8]
+		name = name[:55] + "-" + hash
+	}
+	
+	return name
 }
 
 // GetVolumeMounts returns volume mount arguments for the container

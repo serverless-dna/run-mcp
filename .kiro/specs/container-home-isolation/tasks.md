@@ -18,17 +18,17 @@ This implementation plan converts the container home isolation design into incre
   - Test that `/home/mcp` directory exists and is writable
   - _Requirements: 1.5_
 
-- [ ] 2. Implement volume name sanitization with truncation
+- [x] 2. Implement volume name sanitization with truncation
   - Create `sanitizeVolumeName()` function in `cmd/run-mcp/volumes.go`
   - Implement command argument parsing and sanitization logic
   - Add truncation with hash suffix for names exceeding 64 characters
   - _Requirements: 2.1, 2.2, 2.3, 2.7, 2.8_
 
-- [ ] 2.1 Write property test for volume name sanitization
+- [x] 2.1 Write property test for volume name sanitization
   - **Property 1: Volume Creation Consistency**
   - **Validates: Requirements 1.1, 2.1, 2.2, 2.3**
 
-- [ ] 2.2 Write unit tests for volume name edge cases
+- [x] 2.2 Write unit tests for volume name edge cases
   - Test empty commands, special characters, Windows paths
   - Test truncation behavior with various input lengths
   - _Requirements: 2.7, 2.8_
