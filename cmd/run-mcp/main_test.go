@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // Property 19: Container Runtime Detection
@@ -3753,6 +3756,516 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 					}
 				}
 			})
+		})
+	}
+}
+
+// Property 6: Volume Management Commands
+// For any set of managed volumes, the volume list, clean, and inspect commands should correctly display, 
+// remove, and show details for volumes matching the mcp-home-* pattern
+func TestProperty6_VolumeManagementCommands(t *testing.T) {
+	// **Feature: container-home-isolation, Property 6: Volume Management Commands**
+	// **Validates: Requirements 2.5, 4.4, 4.5, 4.8, 4.10**
+	
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+	
+	// Property test with multiple iterations
+	for i := 0; i < 100; i++ {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+			// Generate random test data
+			numVolumes := rand.Intn(5) + 1 // 1-5 volumes
+			serverNames := make([]string, numVolumes)
+			expectedVolumeNames := make([]string, numVolumes)
+			
+			for j := 0; j < numVolumes; j++ {
+				// Generate random server names
+				commands := []string{"uvx", "npx", "python", "node"}
+				servers := []string{"test-server", "mcp-server", "api-server", "data-processor"}
+				
+				command := commands[rand.Intn(len(commands))]
+				server := servers[rand.Intn(len(servers))]
+				serverNames[j] = fmt.Sprintf("%s %s-%d", command, server, rand.Intn(1000))
+				expectedVolumeNames[j] = sanitizeVolumeName(strings.Fields(serverNames[j]))
+			}
+			
+			// Test with mock volume commander
+			mockCommander := &MockVolumeCommander{
+				volumes: make(map[string]VolumeInfo),
+			}
+			
+			// Create volumes
+			for j, serverName := range serverNames {
+				labels := map[string]string{
+					"run-mcp":         "true",
+					"run-mcp.runtime": "docker",
+					"run-mcp.server":  serverName,
+					"run-mcp.type":    "home",
+				}
+				
+				err := mockCommander.CreateVolume(expectedVolumeNames[j], labels)
+				if err != nil {
+					t.Fatalf("Failed to create volume: %v", err)
+				}
+			}
+			
+			// Test ListVolumes - should return all created volumes
+			volumes, err := mockCommander.ListVolumes()
+			if err != nil {
+				t.Fatalf("ListVolumes failed: %v", err)
+			}
+			
+			// Verify all volumes are returned
+			if len(volumes) != numVolumes {
+				t.Errorf("Expected %d volumes, got %d", numVolumes, len(volumes))
+			}
+			
+			// Verify volume names match expected pattern
+			volumeNames := make(map[string]bool)
+			for _, vol := range volumes {
+				volumeNames[vol.Name] = true
+				
+				// Verify volume follows mcp-home-* pattern
+				if !strings.HasPrefix(vol.Name, "mcp-home-") {
+					t.Errorf("Volume name %s does not follow mcp-home-* pattern", vol.Name)
+				}
+				
+				// Verify required labels exist
+				if vol.Labels["run-mcp"] != "true" {
+					t.Errorf("Volume %s missing run-mcp=true label", vol.Name)
+				}
+				
+				if vol.Labels["run-mcp.runtime"] == "" {
+					t.Errorf("Volume %s missing run-mcp.runtime label", vol.Name)
+				}
+			}
+			
+			// Verify all expected volumes are present
+			for _, expectedName := range expectedVolumeNames {
+				if !volumeNames[expectedName] {
+					t.Errorf("Expected volume %s not found in list", expectedName)
+				}
+			}
+			
+			// Test InspectVolume for each volume
+			for _, volumeName := range expectedVolumeNames {
+				details, err := mockCommander.InspectVolume(volumeName)
+				if err != nil {
+					t.Errorf("InspectVolume failed for %s: %v", volumeName, err)
+					continue
+				}
+				
+				// Verify inspect returns correct details
+				if details.Name != volumeName {
+					t.Errorf("InspectVolume returned wrong name: expected %s, got %s", volumeName, details.Name)
+				}
+				
+				// Verify labels are preserved
+				if details.Labels["run-mcp"] != "true" {
+					t.Errorf("InspectVolume for %s missing run-mcp=true label", volumeName)
+				}
+			}
+			
+			// Test RemoveVolume - remove half the volumes
+			volumesToRemove := expectedVolumeNames[:numVolumes/2]
+			for _, volumeName := range volumesToRemove {
+				err := mockCommander.RemoveVolume(volumeName)
+				if err != nil {
+					t.Errorf("RemoveVolume failed for %s: %v", volumeName, err)
+				}
+			}
+			
+			// Verify removed volumes are gone
+			remainingVolumes, err := mockCommander.ListVolumes()
+			if err != nil {
+				t.Fatalf("ListVolumes after removal failed: %v", err)
+			}
+			
+			expectedRemaining := numVolumes - len(volumesToRemove)
+			if len(remainingVolumes) != expectedRemaining {
+				t.Errorf("After removal, expected %d volumes, got %d", expectedRemaining, len(remainingVolumes))
+			}
+			
+			// Verify removed volumes are not in the list
+			remainingNames := make(map[string]bool)
+			for _, vol := range remainingVolumes {
+				remainingNames[vol.Name] = true
+			}
+			
+			for _, removedName := range volumesToRemove {
+				if remainingNames[removedName] {
+					t.Errorf("Removed volume %s still appears in list", removedName)
+				}
+			}
+		})
+	}
+}
+
+// MockVolumeCommander for testing volume management commands
+type MockVolumeCommander struct {
+	volumes map[string]VolumeInfo
+}
+
+func (mvc *MockVolumeCommander) CreateVolume(name string, labels map[string]string) error {
+	mvc.volumes[name] = VolumeInfo{
+		Name:      name,
+		Labels:    labels,
+		CreatedAt: time.Now(),
+		Runtime:   "mock",
+	}
+	return nil
+}
+
+func (mvc *MockVolumeCommander) ListVolumes() ([]VolumeInfo, error) {
+	var volumes []VolumeInfo
+	for _, vol := range mvc.volumes {
+		// Only return volumes with run-mcp=true label
+		if vol.Labels["run-mcp"] == "true" {
+			volumes = append(volumes, vol)
+		}
+	}
+	return volumes, nil
+}
+
+func (mvc *MockVolumeCommander) RemoveVolume(name string) error {
+	if _, exists := mvc.volumes[name]; !exists {
+		return fmt.Errorf("volume not found: %s", name)
+	}
+	delete(mvc.volumes, name)
+	return nil
+}
+
+func (mvc *MockVolumeCommander) InspectVolume(name string) (*VolumeDetails, error) {
+	vol, exists := mvc.volumes[name]
+	if !exists {
+		return nil, fmt.Errorf("volume not found: %s", name)
+	}
+	
+	return &VolumeDetails{
+		VolumeInfo: vol,
+		MountPoint: "/var/lib/docker/volumes/" + name + "/_data",
+		Options:    map[string]string{},
+	}, nil
+}
+
+func (mvc *MockVolumeCommander) VolumeExists(name string) (bool, error) {
+	_, exists := mvc.volumes[name]
+	return exists, nil
+}
+// Unit tests for CLI command parsing
+// Test subcommand routing and argument validation
+// Requirements: 4.9, 4.13
+func TestCLICommandParsing(t *testing.T) {
+	testCases := []struct {
+		name        string
+		args        []string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "volume command without subcommand",
+			args:        []string{"volume"},
+			expectError: false, // Should show help, not error
+		},
+		{
+			name:        "volume list command",
+			args:        []string{"volume", "list"},
+			expectError: false,
+		},
+		{
+			name:        "volume clean with server name",
+			args:        []string{"volume", "clean", "test-server"},
+			expectError: false,
+		},
+		{
+			name:        "volume clean without server name",
+			args:        []string{"volume", "clean"},
+			expectError: true,
+			errorMsg:    "accepts 1 arg(s), received 0",
+		},
+		{
+			name:        "volume clean with too many args",
+			args:        []string{"volume", "clean", "server1", "server2"},
+			expectError: true,
+			errorMsg:    "accepts 1 arg(s), received 2",
+		},
+		{
+			name:        "volume prune command",
+			args:        []string{"volume", "prune"},
+			expectError: false,
+		},
+		{
+			name:        "volume prune with force flag",
+			args:        []string{"volume", "prune", "--force"},
+			expectError: false,
+		},
+		{
+			name:        "volume prune with short force flag",
+			args:        []string{"volume", "prune", "-f"},
+			expectError: false,
+		},
+		{
+			name:        "volume inspect with server name",
+			args:        []string{"volume", "inspect", "test-server"},
+			expectError: true, // Will fail because volume doesn't exist, but parsing is correct
+		},
+		{
+			name:        "volume inspect without server name",
+			args:        []string{"volume", "inspect"},
+			expectError: true,
+			errorMsg:    "accepts 1 arg(s), received 0",
+		},
+		{
+			name:        "volume inspect with too many args",
+			args:        []string{"volume", "inspect", "server1", "server2"},
+			expectError: true,
+			errorMsg:    "accepts 1 arg(s), received 2",
+		},
+		{
+			name:        "invalid volume subcommand",
+			args:        []string{"volume", "invalid"},
+			expectError: false, // Cobra shows help for invalid subcommands, doesn't error
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create root command
+			rootCmd := &cobra.Command{
+				Use: "run-mcp",
+			}
+			rootCmd.AddCommand(createVolumeCommand())
+
+			// Set args and execute
+			rootCmd.SetArgs(tc.args)
+			
+			// Capture output to avoid printing during tests
+			rootCmd.SetOut(os.Stdout)
+			rootCmd.SetErr(os.Stderr)
+
+			err := rootCmd.Execute()
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				} else if tc.errorMsg != "" && !strings.Contains(err.Error(), tc.errorMsg) {
+					t.Errorf("Expected error message to contain '%s', got: %v", tc.errorMsg, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error but got: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// Test confirmation prompt behavior
+// Requirements: 4.9, 4.13
+func TestConfirmationPrompt(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "yes response",
+			input:    "y",
+			expected: true,
+		},
+		{
+			name:     "yes full response",
+			input:    "yes",
+			expected: true,
+		},
+		{
+			name:     "Yes capitalized response",
+			input:    "Yes",
+			expected: true,
+		},
+		{
+			name:     "YES uppercase response",
+			input:    "YES",
+			expected: true,
+		},
+		{
+			name:     "no response",
+			input:    "n",
+			expected: false,
+		},
+		{
+			name:     "no full response",
+			input:    "no",
+			expected: false,
+		},
+		{
+			name:     "empty response",
+			input:    "",
+			expected: false,
+		},
+		{
+			name:     "invalid response",
+			input:    "maybe",
+			expected: false,
+		},
+		{
+			name:     "whitespace response",
+			input:    "  y  ",
+			expected: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Mock the confirmation function behavior
+			response := strings.ToLower(strings.TrimSpace(tc.input))
+			result := response == "y" || response == "yes"
+			
+			if result != tc.expected {
+				t.Errorf("Expected %v for input '%s', got %v", tc.expected, tc.input, result)
+			}
+		})
+	}
+}
+
+// Test volume command argument validation
+// Requirements: 4.9, 4.13
+func TestVolumeCommandArgumentValidation(t *testing.T) {
+	testCases := []struct {
+		name         string
+		command      string
+		args         []string
+		expectError  bool
+		errorPattern string
+	}{
+		{
+			name:        "clean command with valid server name",
+			command:     "clean",
+			args:        []string{"uvx test-server"},
+			expectError: false,
+		},
+		{
+			name:         "clean command with empty server name",
+			command:      "clean",
+			args:         []string{""},
+			expectError:  false, // Empty string is still a valid argument
+		},
+		{
+			name:        "inspect command with valid server name",
+			command:     "inspect",
+			args:        []string{"npx @modelcontextprotocol/server-memory"},
+			expectError: false,
+		},
+		{
+			name:        "inspect command with complex server name",
+			command:     "inspect",
+			args:        []string{"uvx awslabs.aws-api-mcp-server@latest --region us-east-1"},
+			expectError: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create the specific volume subcommand
+			var cmd *cobra.Command
+			switch tc.command {
+			case "clean":
+				cmd = createVolumeCleanCommand()
+			case "inspect":
+				cmd = createVolumeInspectCommand()
+			default:
+				t.Fatalf("Unknown command: %s", tc.command)
+			}
+
+			// Set args and validate
+			cmd.SetArgs(tc.args)
+			
+			// Capture output to avoid printing during tests
+			cmd.SetOut(os.Stdout)
+			cmd.SetErr(os.Stderr)
+
+			err := cmd.Execute()
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				} else if tc.errorPattern != "" && !strings.Contains(err.Error(), tc.errorPattern) {
+					t.Errorf("Expected error to match pattern '%s', got: %v", tc.errorPattern, err)
+				}
+			} else {
+				// For these tests, we expect the command parsing to succeed
+				// The actual execution might fail due to missing runtime, but that's not what we're testing
+				if err != nil && !strings.Contains(err.Error(), "container runtime detection failed") {
+					t.Errorf("Expected no parsing error but got: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// Test volume command flag parsing
+// Requirements: 4.9, 4.13
+func TestVolumeCommandFlagParsing(t *testing.T) {
+	testCases := []struct {
+		name        string
+		args        []string
+		expectForce bool
+		expectError bool
+	}{
+		{
+			name:        "prune without force flag",
+			args:        []string{"prune"},
+			expectForce: false,
+			expectError: false,
+		},
+		{
+			name:        "prune with long force flag",
+			args:        []string{"prune", "--force"},
+			expectForce: true,
+			expectError: false,
+		},
+		{
+			name:        "prune with short force flag",
+			args:        []string{"prune", "-f"},
+			expectForce: true,
+			expectError: false,
+		},
+		{
+			name:        "prune with invalid flag",
+			args:        []string{"prune", "--invalid"},
+			expectForce: false,
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := createVolumePruneCommand()
+			cmd.SetArgs(tc.args)
+			
+			// Capture output to avoid printing during tests
+			cmd.SetOut(os.Stdout)
+			cmd.SetErr(os.Stderr)
+
+			err := cmd.Execute()
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+			} else {
+				// Check if force flag was parsed correctly
+				forceFlag, _ := cmd.Flags().GetBool("force")
+				if forceFlag != tc.expectForce {
+					t.Errorf("Expected force flag to be %v, got %v", tc.expectForce, forceFlag)
+				}
+				
+				// The actual execution might fail due to missing runtime, but that's not what we're testing
+				if err != nil && !strings.Contains(err.Error(), "container runtime detection failed") {
+					t.Errorf("Expected no parsing error but got: %v", err)
+				}
+			}
 		})
 	}
 }

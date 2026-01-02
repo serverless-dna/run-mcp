@@ -46,6 +46,7 @@ Examples:
 	rootCmd.AddCommand(createInfoCommand())
 	rootCmd.AddCommand(createConfigCommand())
 	rootCmd.AddCommand(createListImagesCommand())
+	rootCmd.AddCommand(createVolumeCommand())
 
 	rootCmd.Flags().BoolP("help", "h", false, "Help for run-mcp")
 	rootCmd.Flags().BoolP("version", "v", false, "Version information")
@@ -414,4 +415,296 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 	}
 
 	return exec.Command(containerRuntime, containerArgs...), volumeName, nil
+}
+// createVolumeCommand creates the volume management command with subcommands
+// Requirements: 4.4, 4.5, 4.6, 4.8, 4.9, 4.13, 2.10
+func createVolumeCommand() *cobra.Command {
+	volumeCmd := &cobra.Command{
+		Use:   "volume",
+		Short: "Manage container volumes",
+		Long:  "Manage container volumes used by MCP servers for persistent home directories",
+	}
+
+	// Add subcommands
+	volumeCmd.AddCommand(createVolumeListCommand())
+	volumeCmd.AddCommand(createVolumeCleanCommand())
+	volumeCmd.AddCommand(createVolumePruneCommand())
+	volumeCmd.AddCommand(createVolumeInspectCommand())
+
+	return volumeCmd
+}
+
+// createVolumeListCommand creates the volume list subcommand
+// Requirements: 4.4, 4.5, 2.10
+func createVolumeListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List all managed volumes",
+		Long:  "List all container volumes managed by run-mcp with creation date and size information",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return listVolumes()
+		},
+	}
+}
+
+// createVolumeCleanCommand creates the volume clean subcommand
+// Requirements: 4.5, 4.9
+func createVolumeCleanCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "clean <server-name>",
+		Short: "Remove a specific volume",
+		Long:  "Remove the container volume for a specific MCP server",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cleanVolume(args[0])
+		},
+	}
+}
+
+// createVolumePruneCommand creates the volume prune subcommand
+// Requirements: 4.6, 4.9, 4.13
+func createVolumePruneCommand() *cobra.Command {
+	var force bool
+	
+	pruneCmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Remove all managed volumes",
+		Long:  "Remove all container volumes managed by run-mcp with user confirmation",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return pruneVolumes(force)
+		},
+	}
+	
+	pruneCmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompt")
+	
+	return pruneCmd
+}
+
+// createVolumeInspectCommand creates the volume inspect subcommand
+// Requirements: 4.8, 4.13
+func createVolumeInspectCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "inspect <server-name>",
+		Short: "Show volume details",
+		Long:  "Show detailed information about a specific volume including mount point and contents",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return inspectVolume(args[0])
+		},
+	}
+}
+
+// listVolumes lists all managed volumes
+// Requirements: 4.4, 4.5, 2.10
+func listVolumes() error {
+	// Detect container runtime
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		return fmt.Errorf("container runtime detection failed: %w", err)
+	}
+	
+	// Create volume commander
+	commander := NewVolumeCommander(containerRuntime)
+	
+	// List volumes
+	volumes, err := commander.ListVolumes()
+	if err != nil {
+		return fmt.Errorf("failed to list volumes: %w", err)
+	}
+	
+	if len(volumes) == 0 {
+		fmt.Println("No managed volumes found.")
+		return nil
+	}
+	
+	fmt.Printf("Managed Volumes (Runtime: %s)\n", containerRuntime)
+	fmt.Println("================================")
+	
+	for _, vol := range volumes {
+		fmt.Printf("Name: %s\n", vol.Name)
+		if serverName, exists := vol.Labels["run-mcp.server"]; exists {
+			fmt.Printf("  Server: %s\n", serverName)
+		}
+		fmt.Printf("  Created: %s\n", vol.CreatedAt.Format("2006-01-02 15:04:05"))
+		if vol.Size != "" {
+			fmt.Printf("  Size: %s\n", vol.Size)
+		}
+		fmt.Printf("  Runtime: %s\n", vol.Runtime)
+		fmt.Println()
+	}
+	
+	return nil
+}
+
+// cleanVolume removes a specific volume
+// Requirements: 4.5, 4.9
+func cleanVolume(serverName string) error {
+	// Detect container runtime
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		return fmt.Errorf("container runtime detection failed: %w", err)
+	}
+	
+	// Create volume commander
+	commander := NewVolumeCommander(containerRuntime)
+	
+	// Generate volume name from server name
+	volumeName := sanitizeVolumeName(strings.Fields(serverName))
+	
+	// Check if volume exists
+	exists, err := commander.VolumeExists(volumeName)
+	if err != nil {
+		return fmt.Errorf("failed to check if volume exists: %w", err)
+	}
+	
+	if !exists {
+		fmt.Printf("Volume for server '%s' not found (expected volume name: %s)\n", serverName, volumeName)
+		return nil
+	}
+	
+	// Confirm deletion
+	if !promptConfirmation(fmt.Sprintf("Are you sure you want to remove volume '%s'? This will permanently delete all data", volumeName)) {
+		fmt.Println("Operation cancelled.")
+		return nil
+	}
+	
+	// Remove volume
+	if err := commander.RemoveVolume(volumeName); err != nil {
+		return fmt.Errorf("failed to remove volume %s: %w", volumeName, err)
+	}
+	
+	fmt.Printf("Volume '%s' removed successfully.\n", volumeName)
+	return nil
+}
+
+// pruneVolumes removes all managed volumes
+// Requirements: 4.6, 4.9, 4.13
+func pruneVolumes(force bool) error {
+	// Detect container runtime
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		return fmt.Errorf("container runtime detection failed: %w", err)
+	}
+	
+	// Create volume commander
+	commander := NewVolumeCommander(containerRuntime)
+	
+	// List volumes
+	volumes, err := commander.ListVolumes()
+	if err != nil {
+		return fmt.Errorf("failed to list volumes: %w", err)
+	}
+	
+	if len(volumes) == 0 {
+		fmt.Println("No managed volumes found to prune.")
+		return nil
+	}
+	
+	// Show what will be removed
+	fmt.Printf("The following %d volume(s) will be removed:\n", len(volumes))
+	for _, vol := range volumes {
+		fmt.Printf("  - %s", vol.Name)
+		if serverName, exists := vol.Labels["run-mcp.server"]; exists {
+			fmt.Printf(" (server: %s)", serverName)
+		}
+		fmt.Println()
+	}
+	fmt.Println()
+	
+	// Confirm deletion unless force flag is used
+	if !force {
+		if !promptConfirmation("Are you sure you want to remove ALL managed volumes? This will permanently delete all data") {
+			fmt.Println("Operation cancelled.")
+			return nil
+		}
+	}
+	
+	// Remove all volumes
+	var errors []string
+	for _, vol := range volumes {
+		if err := commander.RemoveVolume(vol.Name); err != nil {
+			errors = append(errors, fmt.Sprintf("failed to remove volume %s: %v", vol.Name, err))
+		} else {
+			fmt.Printf("Removed volume: %s\n", vol.Name)
+		}
+	}
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("some volumes could not be removed:\n%s", strings.Join(errors, "\n"))
+	}
+	
+	fmt.Printf("Successfully removed %d volume(s).\n", len(volumes))
+	return nil
+}
+
+// inspectVolume shows detailed information about a volume
+// Requirements: 4.8, 4.13
+func inspectVolume(serverName string) error {
+	// Detect container runtime
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		return fmt.Errorf("container runtime detection failed: %w", err)
+	}
+	
+	// Create volume commander
+	commander := NewVolumeCommander(containerRuntime)
+	
+	// Generate volume name from server name
+	volumeName := sanitizeVolumeName(strings.Fields(serverName))
+	
+	// Inspect volume
+	details, err := commander.InspectVolume(volumeName)
+	if err != nil {
+		return fmt.Errorf("failed to inspect volume %s: %w", volumeName, err)
+	}
+	
+	fmt.Printf("Volume Details: %s\n", details.Name)
+	fmt.Println("========================")
+	
+	if serverName, exists := details.Labels["run-mcp.server"]; exists {
+		fmt.Printf("Server: %s\n", serverName)
+	}
+	
+	fmt.Printf("Created: %s\n", details.CreatedAt.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Runtime: %s\n", details.Runtime)
+	
+	if details.Size != "" {
+		fmt.Printf("Size: %s\n", details.Size)
+	}
+	
+	if details.MountPoint != "" {
+		fmt.Printf("Mount Point: %s\n", details.MountPoint)
+	}
+	
+	// Show labels
+	if len(details.Labels) > 0 {
+		fmt.Println("\nLabels:")
+		for key, value := range details.Labels {
+			fmt.Printf("  %s=%s\n", key, value)
+		}
+	}
+	
+	// Show options if available
+	if len(details.Options) > 0 {
+		fmt.Println("\nOptions:")
+		for key, value := range details.Options {
+			fmt.Printf("  %s=%s\n", key, value)
+		}
+	}
+	
+	return nil
+}
+
+// promptConfirmation prompts the user for confirmation
+// Requirements: 4.9, 4.13
+func promptConfirmation(message string) bool {
+	fmt.Printf("%s [y/N]: ", message)
+	var response string
+	fmt.Scanln(&response)
+	response = strings.ToLower(strings.TrimSpace(response))
+	return response == "y" || response == "yes"
 }

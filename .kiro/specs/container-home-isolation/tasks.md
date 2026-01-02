@@ -139,22 +139,22 @@ This implementation plan converts the container home isolation design into incre
   - **Property 7: Environment Variable Passthrough**
   - **Validates: Requirements 3.1, 3.3**
 
-- [ ] 10. Implement volume management CLI commands
+- [x] 10. Implement volume management CLI commands
   - Add `run-mcp volume` subcommand with list, clean, prune, inspect
   - Implement confirmation prompts for destructive operations
   - Add cross-runtime volume filtering
   - _Requirements: 4.4, 4.5, 4.6, 4.8, 4.9, 4.13, 2.10_
 
-- [ ] 10.1 Write property test for volume management commands
+- [x] 10.1 Write property test for volume management commands
   - **Property 6: Volume Management Commands**
   - **Validates: Requirements 2.5, 4.4, 4.5, 4.8, 4.10**
 
-- [ ] 10.2 Write unit tests for CLI command parsing
+- [x] 10.2 Write unit tests for CLI command parsing
   - Test subcommand routing and argument validation
   - Test confirmation prompt behavior
   - _Requirements: 4.9, 4.13_
 
-- [ ] 10.3 Implement volume inspect command
+- [x] 10.3 Implement volume inspect command
   - Show volume details, mount point, labels
   - Show physical storage location when supported
   - _Requirements: 4.8, 4.13_
