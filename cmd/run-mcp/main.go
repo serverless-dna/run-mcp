@@ -16,6 +16,8 @@ var (
 )
 
 func main() {
+	var ephemeralMode bool
+	
 	rootCmd := &cobra.Command{
 		Use:   "run-mcp [flags] command [args...]",
 		Short: "Run MCP servers in containers with automatic runtime detection",
@@ -29,12 +31,15 @@ Examples:
   run-mcp npx @modelcontextprotocol/server-filesystem /data
   run-mcp python uvx awslabs.aws-api-mcp-server@latest
   run-mcp node npx @modelcontextprotocol/server-memory
+  run-mcp --ephemeral uvx mcp-server-sqlite --db-path /data/db.sqlite
   run-mcp list-images
   run-mcp config
   run-mcp info`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 		Args:    cobra.ArbitraryArgs, // Changed from MinimumNArgs(1) to allow subcommands
-		RunE:    runMCP,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runMCP(cmd, args, ephemeralMode)
+		},
 	}
 
 	// Add additional commands
@@ -44,6 +49,7 @@ Examples:
 
 	rootCmd.Flags().BoolP("help", "h", false, "Help for run-mcp")
 	rootCmd.Flags().BoolP("version", "v", false, "Version information")
+	rootCmd.Flags().BoolVar(&ephemeralMode, "ephemeral", false, "Use ephemeral volumes that are removed when container stops")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -51,13 +57,14 @@ Examples:
 	}
 }
 
-func runMCP(cmd *cobra.Command, args []string) error {
+func runMCP(cmd *cobra.Command, args []string, ephemeralMode bool) error {
 	// If no arguments provided, show help
 	if len(args) == 0 {
 		return cmd.Help()
 	}
 
 	config := loadConfig()
+	config.EphemeralMode = ephemeralMode
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -79,9 +86,19 @@ func runMCP(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build and execute container command
-	containerCmd, err := buildContainerCommand(config, containerRuntime, language, args)
+	containerCmd, volumeName, err := buildContainerCommand(config, containerRuntime, language, args)
 	if err != nil {
 		return fmt.Errorf("failed to build container command: %w", err)
+	}
+	
+	// Set up cleanup for ephemeral volumes
+	if ephemeralMode && volumeName != "" {
+		defer func() {
+			volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+			if cleanupErr := volumeManager.CleanupEphemeralVolume(volumeName); cleanupErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup ephemeral volume %s: %v\n", volumeName, cleanupErr)
+			}
+		}()
 	}
 	
 	// Execute with stdio passthrough
@@ -298,11 +315,11 @@ func listImageTags(containerRuntime, registry, repo string) error {
 }
 
 // buildContainerCommand constructs the container execution command
-func buildContainerCommand(config *Config, containerRuntime, language string, args []string) (*exec.Cmd, error) {
+func buildContainerCommand(config *Config, containerRuntime, language string, args []string) (*exec.Cmd, string, error) {
 	// Get the appropriate image for the language
 	image, err := config.GetImageForLanguage(language)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Build container command arguments
@@ -312,9 +329,29 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 	envFilter := NewEnvFilter()
 	containerArgs = append(containerArgs, envFilter.GetFilteredEnvArgs()...)
 	
-	// Add volume mounts
-	volumeManager := NewVolumeManager(config)
-	containerArgs = append(containerArgs, volumeManager.GetVolumeMounts()...)
+	// Add volume mounts (including home volume)
+	volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+	volumeMounts := volumeManager.GetVolumeMounts()
+	containerArgs = append(containerArgs, volumeMounts...)
+	
+	// Create and add home volume mount
+	var volumeName string
+	serverName := strings.Join(args, " ")
+	
+	if config.EphemeralMode {
+		volumeName, err = volumeManager.CreateEphemeralVolume(serverName, containerRuntime)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create ephemeral volume: %w", err)
+		}
+	} else {
+		volumeName, err = volumeManager.CreateHomeVolume(serverName, containerRuntime)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create home volume: %w", err)
+		}
+	}
+	
+	// Add home volume mount
+	containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", volumeName))
 	
 	// Add image
 	containerArgs = append(containerArgs, image)
@@ -329,8 +366,8 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 	// Handle lima nerdctl special case
 	if strings.HasPrefix(containerRuntime, "lima") {
 		parts := strings.Fields(containerRuntime)
-		return exec.Command(parts[0], append(parts[1:], containerArgs...)...), nil
+		return exec.Command(parts[0], append(parts[1:], containerArgs...)...), volumeName, nil
 	}
 
-	return exec.Command(containerRuntime, containerArgs...), nil
+	return exec.Command(containerRuntime, containerArgs...), volumeName, nil
 }

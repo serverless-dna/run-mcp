@@ -696,6 +696,74 @@ func (vm *VolumeManager) CreateHomeVolume(serverName, runtime string) (string, e
 	return volumeName, nil
 }
 
+// CreateEphemeralVolume creates a temporary volume that will be cleaned up on container exit
+// Requirements: 6.3, 6.4, 6.5
+func (vm *VolumeManager) CreateEphemeralVolume(serverName, runtime string) (string, error) {
+	if vm.commander == nil {
+		vm.commander = NewVolumeCommander(runtime)
+		vm.runtime = runtime
+	}
+	
+	volumeName := vm.CreateEphemeralVolumeName(serverName)
+	
+	// Create ephemeral volume with runtime-specific labels
+	labels := map[string]string{
+		"run-mcp":           "true",
+		"run-mcp.ephemeral": "true",
+		"run-mcp.runtime":   runtime,
+		"run-mcp.server":    serverName,
+		"run-mcp.type":      "ephemeral",
+	}
+	
+	if err := vm.commander.CreateVolume(volumeName, labels); err != nil {
+		return "", fmt.Errorf("failed to create ephemeral volume %s: %w", volumeName, err)
+	}
+	
+	return volumeName, nil
+}
+
+// CreateEphemeralVolumeName generates a unique ephemeral volume name with timestamp
+// Requirements: 6.4, 6.5
+func (vm *VolumeManager) CreateEphemeralVolumeName(serverName string) string {
+	sanitizedName := sanitizeVolumeName(strings.Fields(serverName))
+	// Remove the "mcp-home-" prefix and replace with "mcp-ephemeral-"
+	if strings.HasPrefix(sanitizedName, "mcp-home-") {
+		sanitizedName = strings.TrimPrefix(sanitizedName, "mcp-home-")
+	}
+	
+	// Use nanosecond timestamp for better uniqueness
+	timestamp := time.Now().UnixNano()
+	name := fmt.Sprintf("mcp-ephemeral-%s-%d", sanitizedName, timestamp)
+	
+	// Apply same truncation logic for consistency
+	if len(name) > 64 {
+		// Keep first 47 characters plus "-" plus 8-character hash suffix plus "-" plus timestamp = 64 total
+		hash := fmt.Sprintf("%08x", md5.Sum([]byte(name)))[:8]
+		baseLength := 64 - len(fmt.Sprintf("-%s-%d", hash, timestamp))
+		if baseLength < 1 {
+			baseLength = 1
+		}
+		name = name[:baseLength] + "-" + hash + fmt.Sprintf("-%d", timestamp)
+	}
+	
+	return name
+}
+
+// CleanupEphemeralVolume removes an ephemeral volume
+// Requirements: 6.3, 6.4, 6.5
+func (vm *VolumeManager) CleanupEphemeralVolume(volumeName string) error {
+	if vm.commander == nil {
+		return fmt.Errorf("volume commander not initialized")
+	}
+	
+	// Verify this is actually an ephemeral volume before removing
+	if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
+		return fmt.Errorf("volume %s is not an ephemeral volume", volumeName)
+	}
+	
+	return vm.commander.RemoveVolume(volumeName)
+}
+
 // sanitizeVolumeName creates a sanitized volume name from command arguments
 // Following the pattern: mcp-home-{sanitized-command}-{sanitized-first-arg}
 // Requirements: 2.1, 2.2, 2.3, 2.7, 2.8

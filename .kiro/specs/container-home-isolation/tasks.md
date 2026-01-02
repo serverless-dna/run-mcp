@@ -59,17 +59,17 @@ This implementation plan converts the container home isolation design into incre
   - Test concurrent access handling
   - _Requirements: 1.1, 1.6_
 
-- [ ] 5. Implement ephemeral volume support
+- [x] 5. Implement ephemeral volume support
   - Add `CreateEphemeralVolume()` method with timestamp-based naming
   - Implement `--ephemeral` flag parsing in CLI
   - Add ephemeral volume cleanup on container exit
   - _Requirements: 6.3, 6.4, 6.5_
 
-- [ ] 5.1 Write property test for ephemeral volume cleanup
+- [x] 5.1 Write property test for ephemeral volume cleanup
   - **Property 13: Ephemeral Volume Cleanup**
   - **Validates: Requirements 6.3, 6.4, 6.5**
 
-- [ ] 5.2 Write unit tests for ephemeral volume naming
+- [x] 5.2 Write unit tests for ephemeral volume naming
   - Test unique timestamp-based naming
   - Test cleanup behavior
   - _Requirements: 6.4, 6.5_

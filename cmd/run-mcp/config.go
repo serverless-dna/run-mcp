@@ -13,6 +13,7 @@ type Config struct {
 	PythonImage      string
 	DataDir          string
 	ContainerRuntime string
+	EphemeralMode    bool // New field for ephemeral volume support
 }
 
 // loadConfig loads configuration from environment variables with defaults

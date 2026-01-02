@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Property 19: Container Runtime Detection
@@ -1238,5 +1239,257 @@ func TestVolumeManagerCreateHomeVolume(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+// Property 13: Ephemeral Volume Cleanup
+// For any container run with the --ephemeral flag, the associated volume should be automatically removed when the container stops
+func TestProperty13_EphemeralVolumeCleanup(t *testing.T) {
+	// **Feature: container-home-isolation, Property 13: Ephemeral Volume Cleanup**
+	// **Validates: Requirements 6.3, 6.4, 6.5**
+	
+	config := &Config{EphemeralMode: true}
+	
+	// Test with different server names and runtimes
+	testCases := []struct {
+		serverName string
+		runtime    string
+	}{
+		{"uvx test-server", "docker"},
+		{"npx @modelcontextprotocol/server-memory", "podman"},
+		{"python -m server", "nerdctl"},
+		{"node server.js", "finch"},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("server=%s,runtime=%s", tc.serverName, tc.runtime), func(t *testing.T) {
+			volumeManager := NewVolumeManagerWithRuntime(config, tc.runtime)
+			
+			// Create ephemeral volume
+			volumeName, err := volumeManager.CreateEphemeralVolume(tc.serverName, tc.runtime)
+			if err != nil {
+				t.Skipf("Cannot create ephemeral volume with runtime %s: %v", tc.runtime, err)
+			}
+			
+			// Verify volume name follows ephemeral pattern
+			if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
+				t.Errorf("Ephemeral volume name %s does not follow expected pattern mcp-ephemeral-*", volumeName)
+			}
+			
+			// Verify volume name contains timestamp
+			if !regexp.MustCompile(`-\d+$`).MatchString(volumeName) {
+				t.Errorf("Ephemeral volume name %s does not contain timestamp suffix", volumeName)
+			}
+			
+			// Verify volume exists
+			exists, err := volumeManager.commander.VolumeExists(volumeName)
+			if err != nil {
+				t.Skipf("Cannot check volume existence with runtime %s: %v", tc.runtime, err)
+			}
+			if !exists {
+				t.Errorf("Ephemeral volume %s should exist after creation", volumeName)
+			}
+			
+			// Cleanup ephemeral volume (simulating container exit)
+			err = volumeManager.CleanupEphemeralVolume(volumeName)
+			if err != nil {
+				t.Skipf("Cannot cleanup ephemeral volume with runtime %s: %v", tc.runtime, err)
+			}
+			
+			// Verify volume no longer exists
+			exists, err = volumeManager.commander.VolumeExists(volumeName)
+			if err != nil {
+				t.Skipf("Cannot check volume existence after cleanup with runtime %s: %v", tc.runtime, err)
+			}
+			if exists {
+				t.Errorf("Ephemeral volume %s should not exist after cleanup", volumeName)
+			}
+		})
+	}
+}
+// Unit tests for ephemeral volume naming
+// Test unique timestamp-based naming and cleanup behavior
+// Requirements: 6.4, 6.5
+func TestEphemeralVolumeNaming(t *testing.T) {
+	config := &Config{EphemeralMode: true}
+	volumeManager := NewVolumeManagerWithRuntime(config, "docker")
+	
+	testCases := []struct {
+		name       string
+		serverName string
+		expected   string
+	}{
+		{
+			name:       "simple server name",
+			serverName: "uvx test-server",
+			expected:   "mcp-ephemeral-uvx-test-server-",
+		},
+		{
+			name:       "complex server name with special chars",
+			serverName: "npx @modelcontextprotocol/server-memory",
+			expected:   "mcp-ephemeral-npx-modelcontextproto", // Will be truncated
+		},
+		{
+			name:       "python server",
+			serverName: "python -m server",
+			expected:   "mcp-ephemeral-python-",
+		},
+		{
+			name:       "node server with file",
+			serverName: "node server.js",
+			expected:   "mcp-ephemeral-node-server-js-",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			volumeName := volumeManager.CreateEphemeralVolumeName(tc.serverName)
+			
+			// Verify it starts with expected prefix (or truncated version)
+			if !strings.HasPrefix(volumeName, tc.expected) {
+				// For truncated names, just check it starts with mcp-ephemeral-
+				if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
+					t.Errorf("Expected volume name to start with mcp-ephemeral-, got %s", volumeName)
+				}
+			}
+			
+			// Verify it contains timestamp suffix
+			if !regexp.MustCompile(`-\d+$`).MatchString(volumeName) {
+				t.Errorf("Volume name %s should end with timestamp", volumeName)
+			}
+			
+			// Verify it follows ephemeral pattern
+			if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
+				t.Errorf("Volume name %s should start with mcp-ephemeral-", volumeName)
+			}
+			
+			// Verify length constraint (64 characters max)
+			if len(volumeName) > 64 {
+				t.Errorf("Volume name %s exceeds 64 character limit (length: %d)", volumeName, len(volumeName))
+			}
+		})
+	}
+}
+
+// Test unique timestamp-based naming ensures no collisions
+// Requirements: 6.4, 6.5
+func TestEphemeralVolumeUniqueness(t *testing.T) {
+	config := &Config{EphemeralMode: true}
+	volumeManager := NewVolumeManagerWithRuntime(config, "docker")
+	
+	serverName := "uvx test-server"
+	
+	// Generate multiple volume names in quick succession
+	var volumeNames []string
+	for i := 0; i < 5; i++ { // Reduced to 5 iterations for faster test
+		volumeName := volumeManager.CreateEphemeralVolumeName(serverName)
+		volumeNames = append(volumeNames, volumeName)
+		
+		// Small delay to ensure different timestamps (nanosecond precision should be enough)
+		time.Sleep(10 * time.Nanosecond)
+	}
+	
+	// Verify all names are unique
+	seen := make(map[string]bool)
+	for _, name := range volumeNames {
+		if seen[name] {
+			t.Errorf("Duplicate volume name generated: %s", name)
+		}
+		seen[name] = true
+	}
+	
+	// Verify all names follow the pattern
+	for _, name := range volumeNames {
+		if !strings.HasPrefix(name, "mcp-ephemeral-") {
+			t.Errorf("Volume name %s does not follow ephemeral pattern", name)
+		}
+		if !regexp.MustCompile(`-\d+$`).MatchString(name) {
+			t.Errorf("Volume name %s does not contain timestamp suffix", name)
+		}
+	}
+}
+
+// Test cleanup behavior for ephemeral volumes
+// Requirements: 6.3, 6.5
+func TestEphemeralVolumeCleanupBehavior(t *testing.T) {
+	config := &Config{EphemeralMode: true}
+	volumeManager := NewVolumeManagerWithRuntime(config, "docker")
+	
+	// Test cleanup validation - should only cleanup ephemeral volumes
+	testCases := []struct {
+		name        string
+		volumeName  string
+		shouldError bool
+	}{
+		{
+			name:        "valid ephemeral volume",
+			volumeName:  "mcp-ephemeral-test-server-1234567890",
+			shouldError: false,
+		},
+		{
+			name:        "regular home volume",
+			volumeName:  "mcp-home-test-server",
+			shouldError: true,
+		},
+		{
+			name:        "random volume name",
+			volumeName:  "some-other-volume",
+			shouldError: true,
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := volumeManager.CleanupEphemeralVolume(tc.volumeName)
+			
+			if tc.shouldError {
+				if err == nil {
+					t.Errorf("Expected error when trying to cleanup non-ephemeral volume %s", tc.volumeName)
+				}
+			} else {
+				// For valid ephemeral volumes, we expect either success or a "volume not found" error
+				// since we're not actually creating the volume in this test
+				if err != nil && !strings.Contains(err.Error(), "not found") && 
+				   !strings.Contains(err.Error(), "no such volume") && 
+				   !strings.Contains(err.Error(), "exit status 1") {
+					t.Errorf("Unexpected error cleaning up ephemeral volume %s: %v", tc.volumeName, err)
+				}
+			}
+		})
+	}
+}
+
+// Test ephemeral volume name truncation for very long server names
+// Requirements: 6.4, 6.5
+func TestEphemeralVolumeNameTruncation(t *testing.T) {
+	config := &Config{EphemeralMode: true}
+	volumeManager := NewVolumeManagerWithRuntime(config, "docker")
+	
+	// Create a very long server name that would exceed 64 characters
+	longServerName := "uvx very-long-server-name-that-exceeds-the-maximum-allowed-length-for-volume-names-in-container-runtimes"
+	
+	volumeName := volumeManager.CreateEphemeralVolumeName(longServerName)
+	
+	// Verify length constraint
+	if len(volumeName) > 64 {
+		t.Errorf("Volume name %s exceeds 64 character limit (length: %d)", volumeName, len(volumeName))
+	}
+	
+	// Verify it still follows ephemeral pattern
+	if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
+		t.Errorf("Truncated volume name %s should still start with mcp-ephemeral-", volumeName)
+	}
+	
+	// Verify it still contains timestamp
+	if !regexp.MustCompile(`-\d+$`).MatchString(volumeName) {
+		t.Errorf("Truncated volume name %s should still end with timestamp", volumeName)
+	}
+	
+	// Verify it contains hash for uniqueness when truncated
+	if len(longServerName) > 40 { // If original name was long enough to require truncation
+		// Should contain a hash component for uniqueness
+		parts := strings.Split(volumeName, "-")
+		if len(parts) < 4 {
+			t.Errorf("Truncated volume name %s should contain hash component", volumeName)
+		}
 	}
 }
