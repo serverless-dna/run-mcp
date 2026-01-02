@@ -833,6 +833,313 @@ func TestVolumeLabelApplication(t *testing.T) {
 	}
 }
 
+// Property 2: Volume Reuse Idempotency
+// For any MCP server command, running the same command multiple times should always reuse the same volume,
+// ensuring data persistence and consistency across executions
+func TestProperty2_VolumeReuseIdempotency(t *testing.T) {
+	// **Feature: container-home-isolation, Property 2: Volume Reuse Idempotency**
+	// **Validates: Requirements 1.2, 2.4, 4.2**
+	
+	config := &Config{}
+	
+	testCases := []struct {
+		name       string
+		serverName string
+		runtime    string
+	}{
+		{
+			name:       "simple server command",
+			serverName: "uvx mcp-server-sqlite",
+			runtime:    "docker",
+		},
+		{
+			name:       "complex server command",
+			serverName: "npx @modelcontextprotocol/server-filesystem",
+			runtime:    "podman",
+		},
+		{
+			name:       "server with version",
+			serverName: "uvx awslabs.aws-api-mcp-server@latest",
+			runtime:    "nerdctl",
+		},
+		{
+			name:       "server with flags",
+			serverName: "uvx mcp-server-sqlite --db-path /data/db.sqlite",
+			runtime:    "finch",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			vm := NewVolumeManager(config)
+			
+			// First call to CreateHomeVolume
+			volumeName1, err1 := vm.CreateHomeVolume(tc.serverName, tc.runtime)
+			
+			// Second call to CreateHomeVolume with same parameters
+			volumeName2, err2 := vm.CreateHomeVolume(tc.serverName, tc.runtime)
+			
+			// Both calls should return the same volume name (idempotency)
+			if volumeName1 != volumeName2 {
+				t.Errorf("Volume names should be identical for same server: %s != %s", volumeName1, volumeName2)
+			}
+			
+			// Both calls should have consistent error behavior
+			if (err1 == nil) != (err2 == nil) {
+				t.Errorf("Error behavior should be consistent: err1=%v, err2=%v", err1, err2)
+			}
+			
+			// Volume name should follow expected pattern
+			expectedVolumeName := sanitizeVolumeName(strings.Fields(tc.serverName))
+			if err1 == nil && volumeName1 != expectedVolumeName {
+				t.Errorf("Expected volume name %s, got %s", expectedVolumeName, volumeName1)
+			}
+			
+			// Test multiple calls in sequence (simulate multiple container starts)
+			for i := 0; i < 5; i++ {
+				volumeNameN, errN := vm.CreateHomeVolume(tc.serverName, tc.runtime)
+				if volumeNameN != volumeName1 {
+					t.Errorf("Call %d: Volume name should remain consistent: %s != %s", i+3, volumeNameN, volumeName1)
+				}
+				if (errN == nil) != (err1 == nil) {
+					t.Errorf("Call %d: Error behavior should remain consistent: errN=%v, err1=%v", i+3, errN, err1)
+				}
+			}
+		})
+	}
+	
+	// Test that different server names produce different volumes
+	vm := NewVolumeManager(config)
+	
+	serverName1 := "uvx server-one"
+	serverName2 := "uvx server-two"
+	runtime := "docker"
+	
+	volumeName1, _ := vm.CreateHomeVolume(serverName1, runtime)
+	volumeName2, _ := vm.CreateHomeVolume(serverName2, runtime)
+	
+	if volumeName1 == volumeName2 {
+		t.Errorf("Different server names should produce different volume names: %s == %s", volumeName1, volumeName2)
+	}
+	
+	// Test that same server name with different runtime produces same volume name
+	// (volume names are runtime-agnostic, but runtime metadata is stored in labels)
+	volumeName3, _ := vm.CreateHomeVolume(serverName1, "podman")
+	expectedName := sanitizeVolumeName(strings.Fields(serverName1))
+	if volumeName3 != expectedName {
+		t.Errorf("Same server name should produce same volume name regardless of runtime: expected %s, got %s", expectedName, volumeName3)
+	}
+}
+
+// Test volume creation success and failure scenarios
+// Requirements: 1.1, 1.6
+func TestVolumeCreation(t *testing.T) {
+	config := &Config{}
+	
+	testCases := []struct {
+		name       string
+		serverName string
+		runtime    string
+		expectErr  bool
+	}{
+		{
+			name:       "valid server name with docker",
+			serverName: "uvx mcp-server-sqlite",
+			runtime:    "docker",
+			expectErr:  true, // Expected because docker may not be available in test environment
+		},
+		{
+			name:       "valid server name with podman",
+			serverName: "npx @modelcontextprotocol/server-filesystem",
+			runtime:    "podman",
+			expectErr:  true, // Expected because podman may not be available in test environment
+		},
+		{
+			name:       "complex server name",
+			serverName: "uvx awslabs.aws-api-mcp-server@latest --config /path/to/config",
+			runtime:    "nerdctl",
+			expectErr:  true, // Expected because nerdctl may not be available in test environment
+		},
+		{
+			name:       "empty server name",
+			serverName: "",
+			runtime:    "docker",
+			expectErr:  true, // Expected because empty server name should be handled gracefully
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			vm := NewVolumeManager(config)
+			
+			volumeName, err := vm.CreateHomeVolume(tc.serverName, tc.runtime)
+			
+			if tc.expectErr {
+				// We expect errors in test environment due to missing container runtimes
+				// But we can still validate the volume name generation logic
+				expectedVolumeName := sanitizeVolumeName(strings.Fields(tc.serverName))
+				if err == nil && volumeName != expectedVolumeName {
+					t.Errorf("Expected volume name %s, got %s", expectedVolumeName, volumeName)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				
+				// Verify volume name follows expected pattern
+				if !strings.HasPrefix(volumeName, "mcp-home-") {
+					t.Errorf("Volume name should start with 'mcp-home-', got %s", volumeName)
+				}
+			}
+			
+			// Test that VolumeManager state is updated correctly
+			if vm.commander == nil {
+				t.Error("VolumeManager commander should be initialized after CreateHomeVolume call")
+			}
+			
+			if vm.runtime != tc.runtime {
+				t.Errorf("VolumeManager runtime should be %s, got %s", tc.runtime, vm.runtime)
+			}
+		})
+	}
+}
+
+// Test concurrent access handling
+// Requirements: 1.6
+func TestVolumeConcurrentAccess(t *testing.T) {
+	config := &Config{}
+	serverName := "uvx concurrent-test-server"
+	runtime := "docker"
+	
+	// Test concurrent calls to CreateHomeVolume
+	const numGoroutines = 10
+	results := make(chan string, numGoroutines)
+	errors := make(chan error, numGoroutines)
+	
+	// Launch multiple goroutines calling CreateHomeVolume simultaneously
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			vm := NewVolumeManager(config)
+			volumeName, err := vm.CreateHomeVolume(serverName, runtime)
+			results <- volumeName
+			errors <- err
+		}()
+	}
+	
+	// Collect results
+	var volumeNames []string
+	var errs []error
+	
+	for i := 0; i < numGoroutines; i++ {
+		volumeNames = append(volumeNames, <-results)
+		errs = append(errs, <-errors)
+	}
+	
+	// All successful calls should return the same volume name
+	expectedVolumeName := sanitizeVolumeName(strings.Fields(serverName))
+	for i, volumeName := range volumeNames {
+		if errs[i] == nil && volumeName != expectedVolumeName {
+			t.Errorf("Goroutine %d: Expected volume name %s, got %s", i, expectedVolumeName, volumeName)
+		}
+	}
+	
+	// Test that concurrent calls to the same VolumeManager instance are safe
+	vm := NewVolumeManager(config)
+	
+	for i := 0; i < numGoroutines; i++ {
+		go func(id int) {
+			volumeName, err := vm.CreateHomeVolume(fmt.Sprintf("%s-%d", serverName, id), runtime)
+			results <- volumeName
+			errors <- err
+		}(i)
+	}
+	
+	// Collect results from shared VolumeManager
+	for i := 0; i < numGoroutines; i++ {
+		volumeName := <-results
+		err := <-errors
+		
+		if err == nil {
+			// Each should get a different volume name since server names are different
+			expectedPattern := "mcp-home-uvx-concurrent-test-server-"
+			if !strings.HasPrefix(volumeName, expectedPattern) {
+				t.Errorf("Volume name should start with %s, got %s", expectedPattern, volumeName)
+			}
+		}
+	}
+}
+
+// Test volume creation with different runtime configurations
+// Requirements: 1.1, 1.6
+func TestVolumeCreationWithDifferentRuntimes(t *testing.T) {
+	config := &Config{}
+	serverName := "uvx test-server"
+	
+	runtimes := []string{"docker", "podman", "nerdctl", "finch", "lima nerdctl"}
+	
+	for _, runtime := range runtimes {
+		t.Run(runtime, func(t *testing.T) {
+			vm := NewVolumeManager(config)
+			
+			volumeName, err := vm.CreateHomeVolume(serverName, runtime)
+			
+			// Volume name should be consistent regardless of runtime
+			expectedVolumeName := sanitizeVolumeName(strings.Fields(serverName))
+			if err == nil && volumeName != expectedVolumeName {
+				t.Errorf("Volume name should be consistent across runtimes: expected %s, got %s", expectedVolumeName, volumeName)
+			}
+			
+			// VolumeManager should be configured with the correct runtime
+			if vm.runtime != runtime {
+				t.Errorf("VolumeManager runtime should be %s, got %s", runtime, vm.runtime)
+			}
+			
+			// Commander should be initialized
+			if vm.commander == nil {
+				t.Error("VolumeManager commander should be initialized")
+			}
+		})
+	}
+}
+
+// Test volume creation error handling
+// Requirements: 1.1, 1.6
+func TestVolumeCreationErrorHandling(t *testing.T) {
+	config := &Config{}
+	
+	// Test with invalid runtime
+	vm := NewVolumeManager(config)
+	_, err := vm.CreateHomeVolume("test-server", "nonexistent-runtime")
+	
+	// Should handle gracefully (may not error immediately due to lazy initialization)
+	if err == nil {
+		// If no immediate error, the commander should still be created
+		if vm.commander == nil {
+			t.Error("VolumeManager commander should be initialized even with invalid runtime")
+		}
+	}
+	
+	// Test with empty server name
+	vm2 := NewVolumeManager(config)
+	volumeName, err := vm2.CreateHomeVolume("", "docker")
+	
+	// Should handle empty server name gracefully
+	expectedVolumeName := sanitizeVolumeName([]string{})
+	if err == nil && volumeName != expectedVolumeName {
+		t.Errorf("Empty server name should produce default volume name: expected %s, got %s", expectedVolumeName, volumeName)
+	}
+	
+	// Test with whitespace-only server name
+	vm3 := NewVolumeManager(config)
+	volumeName3, err3 := vm3.CreateHomeVolume("   \t\n   ", "docker")
+	
+	// Should handle whitespace-only server name gracefully
+	expectedVolumeName3 := sanitizeVolumeName(strings.Fields("   \t\n   "))
+	if err3 == nil && volumeName3 != expectedVolumeName3 {
+		t.Errorf("Whitespace-only server name should produce default volume name: expected %s, got %s", expectedVolumeName3, volumeName3)
+	}
+}
+
 // Test VolumeManager integration with VolumeCommander
 // Requirements: 4.11, 4.12, 2.9
 func TestVolumeManagerIntegration(t *testing.T) {

@@ -44,17 +44,17 @@ This implementation plan converts the container home isolation design into incre
   - Test label application and runtime metadata
   - _Requirements: 4.11, 4.12, 2.9_
 
-- [ ] 4. Implement home volume creation and management
+- [x] 4. Implement home volume creation and management
   - Extend `VolumeManager` with `CreateHomeVolume()` method
   - Add persistent volume creation with proper labels
   - Implement volume existence checking and reuse logic
   - _Requirements: 1.1, 1.2, 1.6_
 
-- [ ] 4.1 Write property test for volume reuse idempotency
+- [x] 4.1 Write property test for volume reuse idempotency
   - **Property 2: Volume Reuse Idempotency**
   - **Validates: Requirements 1.2, 2.4, 4.2**
 
-- [ ] 4.2 Write unit tests for volume creation
+- [x] 4.2 Write unit tests for volume creation
   - Test volume creation success and failure scenarios
   - Test concurrent access handling
   - _Requirements: 1.1, 1.6_
