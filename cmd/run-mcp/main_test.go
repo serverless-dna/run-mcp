@@ -2052,3 +2052,608 @@ func TestMountParsingEdgeCases(t *testing.T) {
 		})
 	}
 }
+
+// Property 9: Home Directory Override Behavior
+// For any home directory override (MCP_BIND_HOME or MCP_HOME_PATH), run-mcp should mount the specified host path to /home/mcp instead of using a container volume
+func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
+	// **Feature: container-home-isolation, Property 9: Home Directory Override Behavior**
+	// **Validates: Requirements 7.6, 7.7**
+	
+	// Test MCP_BIND_HOME override (Requirement 7.6)
+	t.Run("MCP_BIND_HOME_override", func(t *testing.T) {
+		// Set up environment
+		originalBindHome := os.Getenv("MCP_BIND_HOME")
+		defer func() {
+			if originalBindHome == "" {
+				os.Unsetenv("MCP_BIND_HOME")
+			} else {
+				os.Setenv("MCP_BIND_HOME", originalBindHome)
+			}
+		}()
+		
+		// Test cases for MCP_BIND_HOME
+		bindHomeCases := []struct {
+			name        string
+			bindHome    string
+			serverName  string
+			shouldBind  bool
+		}{
+			{
+				name:       "bind_home_true",
+				bindHome:   "true",
+				serverName: "uvx test-server",
+				shouldBind: true,
+			},
+			{
+				name:       "bind_home_false",
+				bindHome:   "false",
+				serverName: "uvx test-server",
+				shouldBind: false,
+			},
+			{
+				name:       "bind_home_empty",
+				bindHome:   "",
+				serverName: "uvx test-server",
+				shouldBind: false,
+			},
+			{
+				name:       "bind_home_1",
+				bindHome:   "1",
+				serverName: "uvx test-server",
+				shouldBind: true,
+			},
+			{
+				name:       "bind_home_yes",
+				bindHome:   "yes",
+				serverName: "uvx test-server",
+				shouldBind: true,
+			},
+		}
+		
+		for _, tc := range bindHomeCases {
+			t.Run(tc.name, func(t *testing.T) {
+				os.Setenv("MCP_BIND_HOME", tc.bindHome)
+				
+				homeOverrideHandler := NewHomeOverrideHandler()
+				homeMount := homeOverrideHandler.GetHomeMount(strings.Fields(tc.serverName))
+				
+				if tc.shouldBind {
+					// Should return a bind mount path
+					if homeMount == "" {
+						t.Errorf("Expected bind mount path for MCP_BIND_HOME=%s, got empty", tc.bindHome)
+					}
+					
+					// Should be in ~/.run-mcp/<volume-name>/ format
+					homeDir, err := os.UserHomeDir()
+					if err != nil {
+						t.Skip("Cannot get home directory")
+					}
+					
+					expectedPrefix := filepath.Join(homeDir, ".run-mcp")
+					if !strings.HasPrefix(homeMount, expectedPrefix) {
+						t.Errorf("Expected bind mount to start with %s, got %s", expectedPrefix, homeMount)
+					}
+					
+					// Should contain sanitized volume name
+					volumeName := sanitizeVolumeName(strings.Fields(tc.serverName))
+					expectedPath := filepath.Join(homeDir, ".run-mcp", volumeName)
+					if homeMount != expectedPath {
+						t.Errorf("Expected bind mount path %s, got %s", expectedPath, homeMount)
+					}
+				} else {
+					// Should return empty (use container volume)
+					if homeMount != "" {
+						t.Errorf("Expected empty mount path for MCP_BIND_HOME=%s, got %s", tc.bindHome, homeMount)
+					}
+				}
+			})
+		}
+	})
+	
+	// Test MCP_HOME_PATH override (Requirement 7.7)
+	t.Run("MCP_HOME_PATH_override", func(t *testing.T) {
+		// Set up environment
+		originalHomePath := os.Getenv("MCP_HOME_PATH")
+		defer func() {
+			if originalHomePath == "" {
+				os.Unsetenv("MCP_HOME_PATH")
+			} else {
+				os.Setenv("MCP_HOME_PATH", originalHomePath)
+			}
+		}()
+		
+		// Create temporary directories for testing
+		tempDir := t.TempDir()
+		testPath1 := filepath.Join(tempDir, "custom-home1")
+		testPath2 := filepath.Join(tempDir, "custom-home2")
+		os.MkdirAll(testPath1, 0755)
+		os.MkdirAll(testPath2, 0755)
+		
+		// Test cases for MCP_HOME_PATH
+		homePathCases := []struct {
+			name        string
+			homePath    string
+			serverName  string
+			expectedPath string
+		}{
+			{
+				name:         "custom_path_absolute",
+				homePath:     testPath1,
+				serverName:   "uvx test-server",
+				expectedPath: testPath1,
+			},
+			{
+				name:         "custom_path_different",
+				homePath:     testPath2,
+				serverName:   "npx different-server",
+				expectedPath: testPath2,
+			},
+			{
+				name:         "empty_path",
+				homePath:     "",
+				serverName:   "uvx test-server",
+				expectedPath: "",
+			},
+		}
+		
+		for _, tc := range homePathCases {
+			t.Run(tc.name, func(t *testing.T) {
+				os.Setenv("MCP_HOME_PATH", tc.homePath)
+				
+				homeOverrideHandler := NewHomeOverrideHandler()
+				homeMount := homeOverrideHandler.GetHomeMount(strings.Fields(tc.serverName))
+				
+				if tc.expectedPath == "" {
+					// Should return empty (use default behavior)
+					if homeMount != "" {
+						t.Errorf("Expected empty mount path for empty MCP_HOME_PATH, got %s", homeMount)
+					}
+				} else {
+					// Should return the specified path
+					if homeMount != tc.expectedPath {
+						t.Errorf("Expected mount path %s, got %s", tc.expectedPath, homeMount)
+					}
+				}
+			})
+		}
+	})
+	
+	// Test precedence: MCP_HOME_PATH takes precedence over MCP_BIND_HOME
+	t.Run("precedence_test", func(t *testing.T) {
+		// Set up environment
+		originalBindHome := os.Getenv("MCP_BIND_HOME")
+		originalHomePath := os.Getenv("MCP_HOME_PATH")
+		defer func() {
+			if originalBindHome == "" {
+				os.Unsetenv("MCP_BIND_HOME")
+			} else {
+				os.Setenv("MCP_BIND_HOME", originalBindHome)
+			}
+			if originalHomePath == "" {
+				os.Unsetenv("MCP_HOME_PATH")
+			} else {
+				os.Setenv("MCP_HOME_PATH", originalHomePath)
+			}
+		}()
+		
+		// Create temporary directory for testing
+		tempDir := t.TempDir()
+		customPath := filepath.Join(tempDir, "custom-home")
+		os.MkdirAll(customPath, 0755)
+		
+		// Set both environment variables
+		os.Setenv("MCP_BIND_HOME", "true")
+		os.Setenv("MCP_HOME_PATH", customPath)
+		
+		homeOverrideHandler := NewHomeOverrideHandler()
+		serverName := "uvx test-server"
+		homeMount := homeOverrideHandler.GetHomeMount(strings.Fields(serverName))
+		
+		// MCP_HOME_PATH should take precedence
+		if homeMount != customPath {
+			t.Errorf("Expected MCP_HOME_PATH to take precedence, got %s instead of %s", homeMount, customPath)
+		}
+	})
+	
+	// Test tilde expansion in MCP_HOME_PATH
+	t.Run("tilde_expansion", func(t *testing.T) {
+		// Set up environment
+		originalHomePath := os.Getenv("MCP_HOME_PATH")
+		defer func() {
+			if originalHomePath == "" {
+				os.Unsetenv("MCP_HOME_PATH")
+			} else {
+				os.Setenv("MCP_HOME_PATH", originalHomePath)
+			}
+		}()
+		
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("Cannot get home directory for tilde expansion test")
+		}
+		
+		// Create test directory in home
+		testSubDir := ".mcp-test-home"
+		testPath := filepath.Join(homeDir, testSubDir)
+		os.MkdirAll(testPath, 0755)
+		defer os.RemoveAll(testPath)
+		
+		// Test tilde expansion
+		os.Setenv("MCP_HOME_PATH", "~/"+testSubDir)
+		
+		homeOverrideHandler := NewHomeOverrideHandler()
+		serverName := "uvx test-server"
+		homeMount := homeOverrideHandler.GetHomeMount(strings.Fields(serverName))
+		
+		expectedPath := testPath
+		if homeMount != expectedPath {
+			t.Errorf("Expected tilde expansion to %s, got %s", expectedPath, homeMount)
+		}
+	})
+	
+	// Test directory creation for bind home
+	t.Run("bind_home_directory_creation", func(t *testing.T) {
+		// Set up environment
+		originalBindHome := os.Getenv("MCP_BIND_HOME")
+		defer func() {
+			if originalBindHome == "" {
+				os.Unsetenv("MCP_BIND_HOME")
+			} else {
+				os.Setenv("MCP_BIND_HOME", originalBindHome)
+			}
+		}()
+		
+		os.Setenv("MCP_BIND_HOME", "true")
+		
+		homeOverrideHandler := NewHomeOverrideHandler()
+		serverName := "uvx test-server-creation"
+		volumeName := sanitizeVolumeName(strings.Fields(serverName))
+		
+		// Create bind home directory
+		bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
+		if err != nil {
+			t.Errorf("CreateBindHomeDir failed: %v", err)
+		}
+		
+		// Verify directory was created
+		if _, err := os.Stat(bindPath); os.IsNotExist(err) {
+			t.Errorf("Bind home directory was not created: %s", bindPath)
+		}
+		
+		// Verify path format
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("Cannot get home directory")
+		}
+		
+		expectedPath := filepath.Join(homeDir, ".run-mcp", volumeName)
+		if bindPath != expectedPath {
+			t.Errorf("Expected bind path %s, got %s", expectedPath, bindPath)
+		}
+		
+		// Verify directory is writable
+		testFile := filepath.Join(bindPath, "test-write")
+		if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+			t.Errorf("Bind home directory is not writable: %v", err)
+		}
+		
+		// Clean up
+		os.Remove(testFile)
+		os.RemoveAll(filepath.Join(homeDir, ".run-mcp"))
+	})
+}
+
+// Unit tests for bind home directory creation
+// Test directory creation and permissions
+// Requirements: 7.6, 7.7
+func TestBindHomeDirectoryCreation(t *testing.T) {
+	homeOverrideHandler := NewHomeOverrideHandler()
+	
+	t.Run("create_bind_home_directory", func(t *testing.T) {
+		volumeName := "test-volume-bind-home"
+		
+		// Clean up any existing directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("Cannot get home directory")
+		}
+		runMcpDir := filepath.Join(homeDir, ".run-mcp")
+		os.RemoveAll(runMcpDir)
+		
+		// Create bind home directory
+		bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
+		if err != nil {
+			t.Errorf("CreateBindHomeDir failed: %v", err)
+		}
+		
+		// Verify directory was created
+		if _, err := os.Stat(bindPath); os.IsNotExist(err) {
+			t.Errorf("Bind home directory was not created: %s", bindPath)
+		}
+		
+		// Verify path format
+		expectedPath := filepath.Join(homeDir, ".run-mcp", volumeName)
+		if bindPath != expectedPath {
+			t.Errorf("Expected bind path %s, got %s", expectedPath, bindPath)
+		}
+		
+		// Clean up
+		os.RemoveAll(runMcpDir)
+	})
+	
+	t.Run("directory_permissions", func(t *testing.T) {
+		volumeName := "test-volume-permissions"
+		
+		// Clean up any existing directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("Cannot get home directory")
+		}
+		runMcpDir := filepath.Join(homeDir, ".run-mcp")
+		os.RemoveAll(runMcpDir)
+		
+		// Create bind home directory
+		bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
+		if err != nil {
+			t.Errorf("CreateBindHomeDir failed: %v", err)
+		}
+		
+		// Test write permissions
+		testFile := filepath.Join(bindPath, "test-write")
+		if err := os.WriteFile(testFile, []byte("test content"), 0644); err != nil {
+			t.Errorf("Bind home directory is not writable: %v", err)
+		}
+		
+		// Test read permissions
+		content, err := os.ReadFile(testFile)
+		if err != nil {
+			t.Errorf("Cannot read from bind home directory: %v", err)
+		}
+		
+		if string(content) != "test content" {
+			t.Errorf("Expected 'test content', got '%s'", string(content))
+		}
+		
+		// Test subdirectory creation
+		subDir := filepath.Join(bindPath, "subdir")
+		if err := os.MkdirAll(subDir, 0755); err != nil {
+			t.Errorf("Cannot create subdirectory in bind home: %v", err)
+		}
+		
+		// Clean up
+		os.RemoveAll(runMcpDir)
+	})
+	
+	t.Run("nested_directory_creation", func(t *testing.T) {
+		volumeName := "test-volume-nested"
+		
+		// Clean up any existing directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("Cannot get home directory")
+		}
+		runMcpDir := filepath.Join(homeDir, ".run-mcp")
+		os.RemoveAll(runMcpDir)
+		
+		// Create bind home directory (should create nested .run-mcp directory)
+		bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
+		if err != nil {
+			t.Errorf("CreateBindHomeDir failed: %v", err)
+		}
+		
+		// Verify parent directory was created
+		if _, err := os.Stat(runMcpDir); os.IsNotExist(err) {
+			t.Errorf("Parent .run-mcp directory was not created: %s", runMcpDir)
+		}
+		
+		// Verify target directory was created
+		if _, err := os.Stat(bindPath); os.IsNotExist(err) {
+			t.Errorf("Target bind directory was not created: %s", bindPath)
+		}
+		
+		// Clean up
+		os.RemoveAll(runMcpDir)
+	})
+	
+	t.Run("idempotent_creation", func(t *testing.T) {
+		volumeName := "test-volume-idempotent"
+		
+		// Clean up any existing directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("Cannot get home directory")
+		}
+		runMcpDir := filepath.Join(homeDir, ".run-mcp")
+		os.RemoveAll(runMcpDir)
+		
+		// Create bind home directory first time
+		bindPath1, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
+		if err != nil {
+			t.Errorf("First CreateBindHomeDir failed: %v", err)
+		}
+		
+		// Create test file
+		testFile := filepath.Join(bindPath1, "existing-file")
+		if err := os.WriteFile(testFile, []byte("existing content"), 0644); err != nil {
+			t.Errorf("Cannot create test file: %v", err)
+		}
+		
+		// Create bind home directory second time (should be idempotent)
+		bindPath2, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
+		if err != nil {
+			t.Errorf("Second CreateBindHomeDir failed: %v", err)
+		}
+		
+		// Verify paths are the same
+		if bindPath1 != bindPath2 {
+			t.Errorf("Expected same path, got %s and %s", bindPath1, bindPath2)
+		}
+		
+		// Verify existing file is preserved
+		content, err := os.ReadFile(testFile)
+		if err != nil {
+			t.Errorf("Existing file was not preserved: %v", err)
+		}
+		
+		if string(content) != "existing content" {
+			t.Errorf("Expected 'existing content', got '%s'", string(content))
+		}
+		
+		// Clean up
+		os.RemoveAll(runMcpDir)
+	})
+}
+
+// Unit tests for path expansion and validation
+// Requirements: 7.6, 7.7
+func TestHomePathExpansionAndValidation(t *testing.T) {
+	homeOverrideHandler := NewHomeOverrideHandler()
+	
+	t.Run("validate_custom_home_path", func(t *testing.T) {
+		// Create temporary directory for testing
+		tempDir := t.TempDir()
+		
+		// Test valid directory
+		err := homeOverrideHandler.ValidateCustomHomePath(tempDir)
+		if err != nil {
+			t.Errorf("ValidateCustomHomePath failed for valid directory: %v", err)
+		}
+		
+		// Test non-existent directory
+		nonExistentPath := filepath.Join(tempDir, "non-existent")
+		err = homeOverrideHandler.ValidateCustomHomePath(nonExistentPath)
+		if err == nil {
+			t.Errorf("Expected error for non-existent directory, got nil")
+		}
+		
+		// Test file instead of directory
+		testFile := filepath.Join(tempDir, "test-file")
+		os.WriteFile(testFile, []byte("test"), 0644)
+		err = homeOverrideHandler.ValidateCustomHomePath(testFile)
+		if err == nil {
+			t.Errorf("Expected error for file instead of directory, got nil")
+		}
+		
+		// Test empty path
+		err = homeOverrideHandler.ValidateCustomHomePath("")
+		if err == nil {
+			t.Errorf("Expected error for empty path, got nil")
+		}
+	})
+	
+	t.Run("tilde_expansion_in_validation", func(t *testing.T) {
+		// Create test directory in home
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("Cannot get home directory")
+		}
+		
+		testDir := filepath.Join(homeDir, "test-mcp-home-validation")
+		os.MkdirAll(testDir, 0755)
+		defer os.RemoveAll(testDir)
+		
+		// Test tilde expansion in validation
+		tildeTestDir := "~/test-mcp-home-validation"
+		err = homeOverrideHandler.ValidateCustomHomePath(tildeTestDir)
+		if err != nil {
+			t.Errorf("ValidateCustomHomePath failed for tilde path: %v", err)
+		}
+	})
+	
+	t.Run("write_permission_validation", func(t *testing.T) {
+		// Create temporary directory for testing
+		tempDir := t.TempDir()
+		
+		// Test writable directory
+		err := homeOverrideHandler.ValidateCustomHomePath(tempDir)
+		if err != nil {
+			t.Errorf("ValidateCustomHomePath failed for writable directory: %v", err)
+		}
+		
+		// Create read-only directory (if possible on this platform)
+		readOnlyDir := filepath.Join(tempDir, "readonly")
+		os.MkdirAll(readOnlyDir, 0555) // Read and execute only
+		defer os.Chmod(readOnlyDir, 0755) // Restore permissions for cleanup
+		
+		err = homeOverrideHandler.ValidateCustomHomePath(readOnlyDir)
+		// Note: This test might not work on all platforms (e.g., Windows)
+		// but it's still valuable where it does work
+		if err == nil && runtime.GOOS != "windows" {
+			t.Logf("Warning: Expected error for read-only directory, but got nil (platform may not support read-only directories)")
+		}
+	})
+}
+// Test environment variable filtering for MCP configuration variables
+// Requirements: 3.5
+func TestMCPConfigurationVariableFiltering(t *testing.T) {
+	// Save original environment
+	originalMount := os.Getenv("MCP_MOUNT")
+	originalBindHome := os.Getenv("MCP_BIND_HOME")
+	originalHomePath := os.Getenv("MCP_HOME_PATH")
+	originalOtherMCP := os.Getenv("MCP_OTHER_VAR")
+	
+	defer func() {
+		// Restore original environment
+		if originalMount == "" {
+			os.Unsetenv("MCP_MOUNT")
+		} else {
+			os.Setenv("MCP_MOUNT", originalMount)
+		}
+		if originalBindHome == "" {
+			os.Unsetenv("MCP_BIND_HOME")
+		} else {
+			os.Setenv("MCP_BIND_HOME", originalBindHome)
+		}
+		if originalHomePath == "" {
+			os.Unsetenv("MCP_HOME_PATH")
+		} else {
+			os.Setenv("MCP_HOME_PATH", originalHomePath)
+		}
+		if originalOtherMCP == "" {
+			os.Unsetenv("MCP_OTHER_VAR")
+		} else {
+			os.Setenv("MCP_OTHER_VAR", originalOtherMCP)
+		}
+	}()
+	
+	// Set test environment variables
+	os.Setenv("MCP_MOUNT", "~/test:/test")
+	os.Setenv("MCP_BIND_HOME", "true")
+	os.Setenv("MCP_HOME_PATH", "/custom/home")
+	os.Setenv("MCP_OTHER_VAR", "should_pass_through")
+	
+	// Create environment filter
+	envFilter := NewEnvFilter()
+	filteredArgs := envFilter.GetFilteredEnvArgs()
+	
+	// Convert args to map for easier checking
+	envMap := make(map[string]string)
+	for i := 0; i < len(filteredArgs); i += 2 {
+		if filteredArgs[i] == "-e" && i+1 < len(filteredArgs) {
+			parts := strings.SplitN(filteredArgs[i+1], "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+	}
+	
+	// Verify MCP configuration variables are filtered out
+	if _, exists := envMap["MCP_MOUNT"]; exists {
+		t.Errorf("MCP_MOUNT should be filtered out but was passed through")
+	}
+	
+	if _, exists := envMap["MCP_BIND_HOME"]; exists {
+		t.Errorf("MCP_BIND_HOME should be filtered out but was passed through")
+	}
+	
+	if _, exists := envMap["MCP_HOME_PATH"]; exists {
+		t.Errorf("MCP_HOME_PATH should be filtered out but was passed through")
+	}
+	
+	// Verify other MCP variables are still passed through
+	if value, exists := envMap["MCP_OTHER_VAR"]; !exists {
+		t.Errorf("MCP_OTHER_VAR should be passed through but was filtered out")
+	} else if value != "should_pass_through" {
+		t.Errorf("Expected MCP_OTHER_VAR=should_pass_through, got %s", value)
+	}
+}

@@ -334,24 +334,67 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 	volumeMounts := volumeManager.GetVolumeMounts()
 	containerArgs = append(containerArgs, volumeMounts...)
 	
-	// Create and add home volume mount
+	// Add user-specified mounts from MCP_MOUNT
+	// Requirements: 7.1, 7.2, 7.3, 7.4, 7.8
+	userMountParser := NewUserMountParser()
+	userMounts, err := userMountParser.ParseUserMounts()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to parse user mounts: %w", err)
+	}
+	
+	if len(userMounts) > 0 {
+		userMountArgs := userMountParser.GetMountArgs(userMounts)
+		containerArgs = append(containerArgs, userMountArgs...)
+	}
+	
+	// Handle home directory override support
+	// Requirements: 7.6, 7.7
+	homeOverrideHandler := NewHomeOverrideHandler()
+	homeMount := homeOverrideHandler.GetHomeMount(args)
+	
 	var volumeName string
 	serverName := strings.Join(args, " ")
 	
-	if config.EphemeralMode {
-		volumeName, err = volumeManager.CreateEphemeralVolume(serverName, containerRuntime)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to create ephemeral volume: %w", err)
+	if homeMount != "" {
+		// Use home directory override (MCP_BIND_HOME or MCP_HOME_PATH)
+		// For MCP_BIND_HOME, create the bind directory if needed
+		bindHomeValue := os.Getenv("MCP_BIND_HOME")
+		if bindHomeValue != "" {
+			// Check if MCP_BIND_HOME is truthy
+			lower := strings.ToLower(strings.TrimSpace(bindHomeValue))
+			isTruthy := lower == "true" || lower == "1" || lower == "yes" || lower == "on"
+			
+			if isTruthy {
+				// Create bind home directory
+				volumeNameForBind := sanitizeVolumeName(args)
+				bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeNameForBind)
+				if err != nil {
+					return nil, "", fmt.Errorf("failed to create bind home directory: %w", err)
+				}
+				homeMount = bindPath
+			}
 		}
+		
+		// Add home directory override mount
+		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", homeMount))
+		volumeName = "" // No volume name when using override
 	} else {
-		volumeName, err = volumeManager.CreateHomeVolume(serverName, containerRuntime)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to create home volume: %w", err)
+		// Use container volume (default behavior)
+		if config.EphemeralMode {
+			volumeName, err = volumeManager.CreateEphemeralVolume(serverName, containerRuntime)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to create ephemeral volume: %w", err)
+			}
+		} else {
+			volumeName, err = volumeManager.CreateHomeVolume(serverName, containerRuntime)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed to create home volume: %w", err)
+			}
 		}
+		
+		// Add home volume mount
+		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", volumeName))
 	}
-	
-	// Add home volume mount
-	containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", volumeName))
 	
 	// Add image
 	containerArgs = append(containerArgs, image)

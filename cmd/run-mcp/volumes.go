@@ -1250,3 +1250,106 @@ func (ump *UserMountParser) GetMountArgs(mounts []Mount) []string {
 	
 	return args
 }
+
+// HomeOverrideHandler manages MCP_BIND_HOME and MCP_HOME_PATH overrides
+// Requirements: 7.6, 7.7
+type HomeOverrideHandler struct{}
+
+// NewHomeOverrideHandler creates a new home override handler
+func NewHomeOverrideHandler() *HomeOverrideHandler {
+	return &HomeOverrideHandler{}
+}
+
+// GetHomeMount returns the home mount path based on environment variable overrides
+// Returns empty string if no override is set (use container volume)
+// Requirements: 7.6, 7.7
+func (hoh *HomeOverrideHandler) GetHomeMount(args []string) string {
+	// MCP_HOME_PATH takes precedence over MCP_BIND_HOME (Requirement 7.7)
+	if homePath := os.Getenv("MCP_HOME_PATH"); homePath != "" {
+		// Expand tilde in custom home path
+		parser := NewUserMountParser()
+		expandedPath := parser.ExpandTildePath(homePath)
+		return expandedPath
+	}
+	
+	// Check MCP_BIND_HOME (Requirement 7.6)
+	if bindHome := os.Getenv("MCP_BIND_HOME"); hoh.isTruthy(bindHome) {
+		// Use ~/.run-mcp/<volume-name>/ format
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		
+		volumeName := sanitizeVolumeName(args)
+		return filepath.Join(homeDir, ".run-mcp", volumeName)
+	}
+	
+	// No override, use container volume
+	return ""
+}
+
+// CreateBindHomeDir creates the bind home directory for MCP_BIND_HOME
+// Requirements: 7.6
+func (hoh *HomeOverrideHandler) CreateBindHomeDir(volumeName string) (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot get home directory: %w", err)
+	}
+	
+	bindPath := filepath.Join(homeDir, ".run-mcp", volumeName)
+	
+	// Create directory with proper permissions
+	if err := os.MkdirAll(bindPath, 0755); err != nil {
+		return "", fmt.Errorf("failed to create bind home directory %s: %w", bindPath, err)
+	}
+	
+	return bindPath, nil
+}
+
+// ValidateCustomHomePath validates a custom home path from MCP_HOME_PATH
+// Requirements: 7.7
+func (hoh *HomeOverrideHandler) ValidateCustomHomePath(path string) error {
+	if path == "" {
+		return fmt.Errorf("custom home path cannot be empty")
+	}
+	
+	// Expand tilde
+	parser := NewUserMountParser()
+	expandedPath := parser.ExpandTildePath(path)
+	
+	// Check if path exists
+	info, err := os.Stat(expandedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("custom home path does not exist: %s", expandedPath)
+		}
+		return fmt.Errorf("cannot access custom home path: %w", err)
+	}
+	
+	// Check if it's a directory
+	if !info.IsDir() {
+		return fmt.Errorf("custom home path is not a directory: %s", expandedPath)
+	}
+	
+	// Test write access
+	testFile := filepath.Join(expandedPath, ".mcp-write-test")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		return fmt.Errorf("custom home path is not writable: %s", expandedPath)
+	}
+	
+	// Clean up test file
+	os.Remove(testFile)
+	
+	return nil
+}
+
+// isTruthy checks if a string value should be considered true
+// Supports: "true", "1", "yes", "on" (case insensitive)
+func (hoh *HomeOverrideHandler) isTruthy(value string) bool {
+	if value == "" {
+		return false
+	}
+	
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return lower == "true" || lower == "1" || lower == "yes" || lower == "on"
+}

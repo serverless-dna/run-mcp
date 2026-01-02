@@ -92,17 +92,17 @@ This implementation plan converts the container home isolation design into incre
   - Test error message formatting
   - _Requirements: 7.9, 7.10_
 
-- [ ] 8. Implement home directory override support
+- [x] 8. Implement home directory override support
   - Add `MCP_BIND_HOME` and `MCP_HOME_PATH` handling
   - Create bind mount directory creation for `~/.run-mcp/<volume-name>/`
   - Implement override precedence logic
   - _Requirements: 7.6, 7.7_
 
-- [ ] 8.1 Write property test for home directory overrides
+- [x] 8.1 Write property test for home directory overrides
   - **Property 9: Home Directory Override Behavior**
   - **Validates: Requirements 7.6, 7.7**
 
-- [ ] 8.2 Write unit tests for bind home directory creation
+- [x] 8.2 Write unit tests for bind home directory creation
   - Test directory creation and permissions
   - Test path expansion and validation
   - _Requirements: 7.6, 7.7_
