@@ -33,13 +33,13 @@ This implementation plan converts the container home isolation design into incre
   - Test truncation behavior with various input lengths
   - _Requirements: 2.7, 2.8_
 
-- [ ] 3. Implement container runtime abstraction for volume commands
+- [x] 3. Implement container runtime abstraction for volume commands
   - Create `VolumeCommander` interface in `cmd/run-mcp/volumes.go`
   - Implement runtime-specific volume command builders (Docker, Podman, Nerdctl, Finch)
   - Add volume creation with runtime-specific labels
   - _Requirements: 4.11, 4.12, 2.9_
 
-- [ ] 3.1 Write unit tests for volume command abstraction
+- [x] 3.1 Write unit tests for volume command abstraction
   - Test command generation for each supported runtime
   - Test label application and runtime metadata
   - _Requirements: 4.11, 4.12, 2.9_

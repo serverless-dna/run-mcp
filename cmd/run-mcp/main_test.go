@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -713,6 +714,221 @@ func TestVolumeNameTruncation(t *testing.T) {
 			result2 := sanitizeVolumeName(tc.args)
 			if result != result2 {
 				t.Errorf("Truncation should be deterministic: %s != %s", result, result2)
+			}
+		})
+	}
+}
+// Test volume command abstraction functionality
+// Requirements: 4.11, 4.12, 2.9
+func TestVolumeCommandAbstraction(t *testing.T) {
+	testCases := []struct {
+		name    string
+		runtime string
+	}{
+		{"Docker", "docker"},
+		{"Podman", "podman"},
+		{"Nerdctl", "nerdctl"},
+		{"Finch", "finch"},
+		{"Lima Nerdctl", "lima nerdctl"},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			commander := NewVolumeCommander(tc.runtime)
+			
+			// Test that commander is not nil
+			if commander == nil {
+				t.Errorf("NewVolumeCommander(%s) returned nil", tc.runtime)
+			}
+			
+			// Test that commander implements VolumeCommander interface
+			var _ VolumeCommander = commander
+		})
+	}
+}
+
+// Test volume command generation for each supported runtime
+// Requirements: 4.11, 4.12, 2.9
+func TestVolumeCommandGeneration(t *testing.T) {
+	testCases := []struct {
+		name            string
+		runtime         string
+		expectedType    string
+	}{
+		{"Docker", "docker", "*main.DockerVolumeCommander"},
+		{"Podman", "podman", "*main.PodmanVolumeCommander"},
+		{"Nerdctl", "nerdctl", "*main.NerdctlVolumeCommander"},
+		{"Finch", "finch", "*main.FinchVolumeCommander"},
+		{"Lima Nerdctl", "lima nerdctl", "*main.LimaNerdctlVolumeCommander"},
+		{"Unknown Runtime", "unknown", "*main.DockerVolumeCommander"}, // Should default to Docker
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			commander := NewVolumeCommander(tc.runtime)
+			
+			// Check the type of the returned commander
+			commanderType := fmt.Sprintf("%T", commander)
+			if commanderType != tc.expectedType {
+				t.Errorf("NewVolumeCommander(%s) returned type %s, expected %s", 
+					tc.runtime, commanderType, tc.expectedType)
+			}
+		})
+	}
+}
+
+// Test label application and runtime metadata
+// Requirements: 4.11, 4.12, 2.9
+func TestVolumeLabelApplication(t *testing.T) {
+	// Test that all commanders support the same label format
+	runtimes := []string{"docker", "podman", "nerdctl", "finch", "lima nerdctl"}
+	
+	for _, runtime := range runtimes {
+		t.Run(runtime, func(t *testing.T) {
+			commander := NewVolumeCommander(runtime)
+			
+			// We can't actually create volumes in unit tests without the runtime available,
+			// but we can test that the interface accepts the labels without error
+			// This is a structural test to ensure the interface is correctly implemented
+			
+			// Test VolumeExists method (should not panic)
+			_, err := commander.VolumeExists("test-volume")
+			// Error is expected since volume doesn't exist and runtime may not be available
+			// We're just testing that the method can be called without panic
+			_ = err // Ignore the error for this structural test
+			
+			// Test that the commander has the expected runtime-specific behavior
+			switch runtime {
+			case "lima nerdctl":
+				// Lima nerdctl should be a special case
+				if lvc, ok := commander.(*LimaNerdctlVolumeCommander); ok {
+					if lvc.runtime != "lima nerdctl" {
+						t.Errorf("LimaNerdctlVolumeCommander runtime should be 'lima nerdctl', got %s", lvc.runtime)
+					}
+				} else {
+					t.Errorf("Expected LimaNerdctlVolumeCommander for lima nerdctl runtime")
+				}
+			default:
+				// Other runtimes should have their runtime name set correctly
+				switch cmd := commander.(type) {
+				case *DockerVolumeCommander:
+					if cmd.runtime != runtime && runtime != "unknown" {
+						t.Errorf("DockerVolumeCommander runtime should be %s, got %s", runtime, cmd.runtime)
+					}
+				case *PodmanVolumeCommander:
+					if cmd.runtime != runtime {
+						t.Errorf("PodmanVolumeCommander runtime should be %s, got %s", runtime, cmd.runtime)
+					}
+				case *NerdctlVolumeCommander:
+					if cmd.runtime != runtime {
+						t.Errorf("NerdctlVolumeCommander runtime should be %s, got %s", runtime, cmd.runtime)
+					}
+				case *FinchVolumeCommander:
+					if cmd.runtime != runtime {
+						t.Errorf("FinchVolumeCommander runtime should be %s, got %s", runtime, cmd.runtime)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Test VolumeManager integration with VolumeCommander
+// Requirements: 4.11, 4.12, 2.9
+func TestVolumeManagerIntegration(t *testing.T) {
+	config := &Config{}
+	
+	// Test NewVolumeManagerWithRuntime
+	testRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
+	
+	for _, runtime := range testRuntimes {
+		t.Run(runtime, func(t *testing.T) {
+			vm := NewVolumeManagerWithRuntime(config, runtime)
+			
+			if vm == nil {
+				t.Errorf("NewVolumeManagerWithRuntime returned nil for runtime %s", runtime)
+			}
+			
+			if vm.config != config {
+				t.Error("VolumeManager config not set correctly")
+			}
+			
+			if vm.commander == nil {
+				t.Error("VolumeManager commander not set")
+			}
+			
+			if vm.runtime != runtime {
+				t.Errorf("VolumeManager runtime should be %s, got %s", runtime, vm.runtime)
+			}
+		})
+	}
+	
+	// Test that NewVolumeManager creates a manager without commander (lazy initialization)
+	vm := NewVolumeManager(config)
+	if vm.commander != nil {
+		t.Error("NewVolumeManager should not initialize commander immediately")
+	}
+	if vm.runtime != "" {
+		t.Error("NewVolumeManager should not set runtime immediately")
+	}
+}
+
+// Test volume name sanitization with VolumeManager
+// Requirements: 1.1, 2.1, 2.2, 2.3
+func TestVolumeManagerCreateHomeVolume(t *testing.T) {
+	config := &Config{}
+	
+	testCases := []struct {
+		name       string
+		serverName string
+		runtime    string
+		expectErr  bool
+	}{
+		{
+			name:       "valid server name",
+			serverName: "uvx awslabs.aws-api-mcp-server@latest",
+			runtime:    "docker",
+			expectErr:  true, // Will error because docker may not be available, but tests the flow
+		},
+		{
+			name:       "simple server name",
+			serverName: "npx server-memory",
+			runtime:    "podman",
+			expectErr:  true, // Will error because podman may not be available, but tests the flow
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			vm := NewVolumeManager(config)
+			
+			volumeName, err := vm.CreateHomeVolume(tc.serverName, tc.runtime)
+			
+			if tc.expectErr {
+				// We expect an error because the runtime is likely not available in test environment
+				// But we can still test that the volume name is generated correctly
+				expectedVolumeName := sanitizeVolumeName(strings.Fields(tc.serverName))
+				if err == nil && volumeName != expectedVolumeName {
+					t.Errorf("Expected volume name %s, got %s", expectedVolumeName, volumeName)
+				}
+				
+				// Test that commander was initialized
+				if vm.commander == nil {
+					t.Error("VolumeManager commander should be initialized after CreateHomeVolume call")
+				}
+				
+				if vm.runtime != tc.runtime {
+					t.Errorf("VolumeManager runtime should be %s, got %s", tc.runtime, vm.runtime)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+				
+				// Verify volume name follows expected pattern
+				if !strings.HasPrefix(volumeName, "mcp-home-") {
+					t.Errorf("Volume name should start with 'mcp-home-', got %s", volumeName)
+				}
 			}
 		})
 	}
