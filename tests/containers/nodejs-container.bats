@@ -347,11 +347,7 @@ export default { test: true };
     [ "$status" -eq 0 ]
     
     # Test that we can write files in subdirectories
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "mkdir -p /home/mcp/.config && echo 'test content' > /home/mcp/.config/test-file"
-    [ "$status" -eq 0 ]
-    
-    # Test that we can read back the content
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" cat /home/mcp/.config/test-file
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "mkdir -p /home/mcp/.config && echo 'test content' > /home/mcp/.config/test-file && cat /home/mcp/.config/test-file"
     [ "$status" -eq 0 ]
     [ "$output" = "test content" ]
 }
