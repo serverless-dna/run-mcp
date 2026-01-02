@@ -999,3 +999,254 @@ func (vm *VolumeManager) ValidateDataDir() error {
 	
 	return nil
 }
+
+// Mount represents a user-specified mount configuration
+// Requirements: 7.1, 7.2, 7.3, 7.4
+type Mount struct {
+	Source      string
+	Destination string
+	Options     string
+}
+
+// UserMountParser handles parsing and validation of MCP_MOUNT environment variable
+// Requirements: 7.1, 7.2, 7.3, 7.4, 7.9, 7.10
+type UserMountParser struct{}
+
+// NewUserMountParser creates a new user mount parser
+func NewUserMountParser() *UserMountParser {
+	return &UserMountParser{}
+}
+
+// ParseMountString parses the MCP_MOUNT environment variable into Mount structs
+// Format: <src>:<dest>[:<opts>],<src>:<dest>[:<opts>],...
+// Requirements: 7.1, 7.2, 7.9, 7.10
+func (ump *UserMountParser) ParseMountString(mountStr string) ([]Mount, error) {
+	if mountStr == "" {
+		return []Mount{}, nil
+	}
+	
+	var mounts []Mount
+	
+	// Split by comma to get individual mount specifications
+	mountSpecs := strings.Split(mountStr, ",")
+	
+	for _, spec := range mountSpecs {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		
+		mount, err := ump.parseSingleMount(spec)
+		if err != nil {
+			return nil, fmt.Errorf("invalid MCP_MOUNT syntax: %s\n\nExpected format: <src>:<dest>[:<opts>],<src>:<dest>[:<opts>],...\nExample: MCP_MOUNT=~/.aws:/home/mcp/.aws:ro,~/data:/data\nError: %w", spec, err)
+		}
+		
+		mounts = append(mounts, mount)
+	}
+	
+	return mounts, nil
+}
+
+// parseSingleMount parses a single mount specification
+// Requirements: 7.1, 7.2, 7.3, 7.4
+func (ump *UserMountParser) parseSingleMount(spec string) (Mount, error) {
+	// Split by colon, but be careful about Windows paths (C:\path)
+	parts := ump.splitMountSpec(spec)
+	
+	if len(parts) < 2 {
+		return Mount{}, fmt.Errorf("mount specification must have at least source and destination: %s", spec)
+	}
+	
+	if len(parts) > 3 {
+		return Mount{}, fmt.Errorf("mount specification has too many parts: %s", spec)
+	}
+	
+	source := strings.TrimSpace(parts[0])
+	destination := strings.TrimSpace(parts[1])
+	options := ""
+	
+	if len(parts) == 3 {
+		options = strings.TrimSpace(parts[2])
+		// Check if options contain additional colons (indicating too many parts)
+		if strings.Contains(options, ":") {
+			return Mount{}, fmt.Errorf("mount specification has too many parts: %s", spec)
+		}
+	}
+	
+	if source == "" {
+		return Mount{}, fmt.Errorf("source path cannot be empty")
+	}
+	
+	if destination == "" {
+		return Mount{}, fmt.Errorf("destination path cannot be empty")
+	}
+	
+	// Expand tilde in source path (Requirement 7.3)
+	expandedSource := ump.ExpandTildePath(source)
+	
+	// Convert Windows paths (Requirement 7.4)
+	normalizedSource := ump.ConvertWindowsPath(expandedSource)
+	
+	return Mount{
+		Source:      normalizedSource,
+		Destination: destination,
+		Options:     options,
+	}, nil
+}
+
+// splitMountSpec splits a mount specification by colons, handling Windows paths
+// Requirements: 7.4
+func (ump *UserMountParser) splitMountSpec(spec string) []string {
+	// Handle Windows absolute paths (C:\path or C:/path)
+	if runtime.GOOS == "windows" && len(spec) >= 2 && spec[1] == ':' {
+		// This is a Windows absolute path, find the next colon
+		colonIndex := strings.Index(spec[2:], ":")
+		if colonIndex == -1 {
+			// No destination specified
+			return []string{spec}
+		}
+		
+		// Adjust index to account for the offset
+		colonIndex += 2
+		
+		source := spec[:colonIndex]
+		remainder := spec[colonIndex+1:]
+		
+		// Split the remainder normally
+		parts := strings.SplitN(remainder, ":", 2)
+		result := []string{source}
+		result = append(result, parts...)
+		
+		return result
+	}
+	
+	// Normal case: split by colon
+	return strings.SplitN(spec, ":", 3)
+}
+
+// ExpandTildePath expands ~ to the user's home directory
+// Requirements: 7.3
+func (ump *UserMountParser) ExpandTildePath(path string) string {
+	if !strings.HasPrefix(path, "~") {
+		return path
+	}
+	
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// If we can't get home directory, return path unchanged
+		return path
+	}
+	
+	if path == "~" {
+		return homeDir
+	}
+	
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(homeDir, path[2:])
+	}
+	
+	// Handle ~user syntax (not supported, return unchanged)
+	return path
+}
+
+// ConvertWindowsPath converts Windows paths for cross-platform compatibility
+// Requirements: 7.4
+func (ump *UserMountParser) ConvertWindowsPath(path string) string {
+	if runtime.GOOS != "windows" {
+		return path
+	}
+	
+	// Convert backslashes to forward slashes
+	path = strings.ReplaceAll(path, "\\", "/")
+	
+	// Handle Windows drive letters (C: -> /c)
+	if len(path) >= 2 && path[1] == ':' {
+		drive := strings.ToLower(string(path[0]))
+		if len(path) == 2 {
+			// Just the drive letter
+			return "/" + drive
+		} else {
+			// Drive letter with path
+			return "/" + drive + path[2:]
+		}
+	}
+	
+	return path
+}
+
+// ValidateMount validates a mount configuration
+// Requirements: 7.9, 7.10
+func (ump *UserMountParser) ValidateMount(mount Mount) error {
+	// Check if source path exists (Requirement 7.9)
+	if _, err := os.Stat(mount.Source); os.IsNotExist(err) {
+		return fmt.Errorf("mount source path does not exist: %s", mount.Source)
+	}
+	
+	// Validate destination path format
+	if !strings.HasPrefix(mount.Destination, "/") {
+		return fmt.Errorf("destination path must be absolute: %s", mount.Destination)
+	}
+	
+	// Validate options if specified
+	if mount.Options != "" {
+		validOptions := map[string]bool{
+			"ro":     true,
+			"rw":     true,
+			"bind":   true,
+			"rbind":  true,
+			"shared": true,
+			"slave":  true,
+			"private": true,
+		}
+		
+		options := strings.Split(mount.Options, ",")
+		for _, opt := range options {
+			opt = strings.TrimSpace(opt)
+			if opt != "" && !validOptions[opt] {
+				return fmt.Errorf("invalid mount option: %s", opt)
+			}
+		}
+	}
+	
+	return nil
+}
+
+// ParseUserMounts parses the MCP_MOUNT environment variable and validates all mounts
+// Requirements: 7.1, 7.2, 7.3, 7.4, 7.9, 7.10
+func (ump *UserMountParser) ParseUserMounts() ([]Mount, error) {
+	mountStr := os.Getenv("MCP_MOUNT")
+	if mountStr == "" {
+		return []Mount{}, nil
+	}
+	
+	mounts, err := ump.ParseMountString(mountStr)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Validate all mounts
+	for _, mount := range mounts {
+		if err := ump.ValidateMount(mount); err != nil {
+			return nil, err
+		}
+	}
+	
+	return mounts, nil
+}
+
+// GetMountArgs converts Mount structs to Docker mount arguments
+// Requirements: 7.1, 7.2, 7.8
+func (ump *UserMountParser) GetMountArgs(mounts []Mount) []string {
+	var args []string
+	
+	for _, mount := range mounts {
+		mountSpec := fmt.Sprintf("%s:%s", mount.Source, mount.Destination)
+		if mount.Options != "" {
+			mountSpec += ":" + mount.Options
+		}
+		
+		args = append(args, "-v", mountSpec)
+	}
+	
+	return args
+}

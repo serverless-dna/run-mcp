@@ -74,20 +74,20 @@ This implementation plan converts the container home isolation design into incre
   - Test cleanup behavior
   - _Requirements: 6.4, 6.5_
 
-- [ ] 6. Checkpoint - Ensure basic volume functionality works
+- [x] 6. Checkpoint - Ensure basic volume functionality works
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 7. Implement MCP_MOUNT parsing and validation
+- [x] 7. Implement MCP_MOUNT parsing and validation
   - Create `UserMountParser` struct with parsing methods
   - Implement tilde expansion and Windows path conversion
   - Add source path validation and syntax error handling
   - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.9, 7.10_
 
-- [ ] 7.1 Write property test for user mount configuration
+- [x] 7.1 Write property test for user mount configuration
   - **Property 8: User Mount Configuration**
   - **Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.8**
 
-- [ ] 7.2 Write unit tests for mount parsing edge cases
+- [x] 7.2 Write unit tests for mount parsing edge cases
   - Test invalid syntax, missing paths, Windows path conversion
   - Test error message formatting
   - _Requirements: 7.9, 7.10_

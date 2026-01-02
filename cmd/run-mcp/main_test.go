@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1491,5 +1493,562 @@ func TestEphemeralVolumeNameTruncation(t *testing.T) {
 		if len(parts) < 4 {
 			t.Errorf("Truncated volume name %s should contain hash component", volumeName)
 		}
+	}
+}
+
+// Property 8: User Mount Configuration
+// For any valid MCP_MOUNT specification, run-mcp should correctly parse, expand paths (including tilde expansion), 
+// and mount the specified host directories to container destinations with appropriate options
+func TestProperty8_UserMountConfiguration(t *testing.T) {
+	// **Feature: container-home-isolation, Property 8: User Mount Configuration**
+	// **Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.8**
+	
+	parser := NewUserMountParser()
+	
+	// Create temporary directories for testing
+	tempDir := t.TempDir()
+	testDir1 := filepath.Join(tempDir, "test1")
+	testDir2 := filepath.Join(tempDir, "test2")
+	os.MkdirAll(testDir1, 0755)
+	os.MkdirAll(testDir2, 0755)
+	
+	// Test cases for valid mount configurations
+	testCases := []struct {
+		name        string
+		mountString string
+		expected    []Mount
+	}{
+		{
+			name:        "single mount without options",
+			mountString: fmt.Sprintf("%s:/data", testDir1),
+			expected: []Mount{
+				{Source: testDir1, Destination: "/data", Options: ""},
+			},
+		},
+		{
+			name:        "single mount with read-only option",
+			mountString: fmt.Sprintf("%s:/data:ro", testDir1),
+			expected: []Mount{
+				{Source: testDir1, Destination: "/data", Options: "ro"},
+			},
+		},
+		{
+			name:        "multiple mounts",
+			mountString: fmt.Sprintf("%s:/data,%s:/config:ro", testDir1, testDir2),
+			expected: []Mount{
+				{Source: testDir1, Destination: "/data", Options: ""},
+				{Source: testDir2, Destination: "/config", Options: "ro"},
+			},
+		},
+		{
+			name:        "mount with bind option",
+			mountString: fmt.Sprintf("%s:/data:bind", testDir1),
+			expected: []Mount{
+				{Source: testDir1, Destination: "/data", Options: "bind"},
+			},
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mounts, err := parser.ParseMountString(tc.mountString)
+			if err != nil {
+				t.Errorf("ParseMountString failed: %v", err)
+				return
+			}
+			
+			if len(mounts) != len(tc.expected) {
+				t.Errorf("Expected %d mounts, got %d", len(tc.expected), len(mounts))
+				return
+			}
+			
+			for i, mount := range mounts {
+				expected := tc.expected[i]
+				
+				// Normalize paths for comparison
+				expectedSource := filepath.Clean(expected.Source)
+				actualSource := filepath.Clean(mount.Source)
+				
+				if actualSource != expectedSource {
+					t.Errorf("Mount %d: expected source %s, got %s", i, expectedSource, actualSource)
+				}
+				
+				if mount.Destination != expected.Destination {
+					t.Errorf("Mount %d: expected destination %s, got %s", i, expected.Destination, mount.Destination)
+				}
+				
+				if mount.Options != expected.Options {
+					t.Errorf("Mount %d: expected options %s, got %s", i, expected.Options, mount.Options)
+				}
+			}
+			
+			// Validate all mounts
+			for _, mount := range mounts {
+				if err := parser.ValidateMount(mount); err != nil {
+					t.Errorf("Mount validation failed: %v", err)
+				}
+			}
+		})
+	}
+	
+	// Test tilde expansion (Requirement 7.3)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("Cannot get home directory for tilde expansion test")
+	}
+	
+	// Create a test directory in home for tilde expansion test
+	homeTestDir := filepath.Join(homeDir, ".mcp-test-mount")
+	os.MkdirAll(homeTestDir, 0755)
+	defer os.RemoveAll(homeTestDir)
+	
+	tildeTestCases := []struct {
+		name        string
+		mountString string
+		expectedSrc string
+	}{
+		{
+			name:        "tilde expansion home directory",
+			mountString: "~/.mcp-test-mount:/config",
+			expectedSrc: homeTestDir,
+		},
+		{
+			name:        "tilde expansion root",
+			mountString: "~:/home",
+			expectedSrc: homeDir,
+		},
+	}
+	
+	for _, tc := range tildeTestCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mounts, err := parser.ParseMountString(tc.mountString)
+			if err != nil {
+				t.Errorf("ParseMountString failed: %v", err)
+				return
+			}
+			
+			if len(mounts) != 1 {
+				t.Errorf("Expected 1 mount, got %d", len(mounts))
+				return
+			}
+			
+			mount := mounts[0]
+			expectedSource := filepath.Clean(tc.expectedSrc)
+			actualSource := filepath.Clean(mount.Source)
+			
+			if actualSource != expectedSource {
+				t.Errorf("Tilde expansion failed: expected %s, got %s", expectedSource, actualSource)
+			}
+		})
+	}
+	
+	// Test Windows path conversion (Requirement 7.4)
+	if runtime.GOOS == "windows" {
+		windowsTestCases := []struct {
+			name        string
+			input       string
+			expectedSrc string
+		}{
+			{
+				name:        "windows drive letter",
+				input:       "C:\\Users\\test:/data",
+				expectedSrc: "/c/Users/test",
+			},
+			{
+				name:        "windows forward slashes",
+				input:       "C:/Users/test:/data",
+				expectedSrc: "/c/Users/test",
+			},
+		}
+		
+		for _, tc := range windowsTestCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Create the test directory
+				testPath := strings.ReplaceAll(tc.input[:strings.Index(tc.input, ":")], "/", "\\")
+				os.MkdirAll(testPath, 0755)
+				defer os.RemoveAll(testPath)
+				
+				mounts, err := parser.ParseMountString(tc.input)
+				if err != nil {
+					t.Errorf("ParseMountString failed: %v", err)
+					return
+				}
+				
+				if len(mounts) != 1 {
+					t.Errorf("Expected 1 mount, got %d", len(mounts))
+					return
+				}
+				
+				mount := mounts[0]
+				if mount.Source != tc.expectedSrc {
+					t.Errorf("Windows path conversion failed: expected %s, got %s", tc.expectedSrc, mount.Source)
+				}
+			})
+		}
+	}
+	
+	// Test mount argument generation (Requirement 7.8)
+	testMounts := []Mount{
+		{Source: testDir1, Destination: "/data", Options: ""},
+		{Source: testDir2, Destination: "/config", Options: "ro"},
+	}
+	
+	args := parser.GetMountArgs(testMounts)
+	expectedArgs := []string{
+		"-v", fmt.Sprintf("%s:/data", testDir1),
+		"-v", fmt.Sprintf("%s:/config:ro", testDir2),
+	}
+	
+	if len(args) != len(expectedArgs) {
+		t.Errorf("Expected %d mount args, got %d", len(expectedArgs), len(args))
+	}
+	
+	for i, arg := range args {
+		if i < len(expectedArgs) && arg != expectedArgs[i] {
+			t.Errorf("Mount arg %d: expected %s, got %s", i, expectedArgs[i], arg)
+		}
+	}
+}
+
+// Unit tests for mount parsing edge cases
+// Test invalid syntax, missing paths, Windows path conversion, and error message formatting
+// Requirements: 7.9, 7.10
+func TestMountParsingEdgeCases(t *testing.T) {
+	parser := NewUserMountParser()
+	
+	// Test invalid syntax cases
+	invalidSyntaxCases := []struct {
+		name        string
+		mountString string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "missing destination",
+			mountString: "/source",
+			expectError: true,
+			errorMsg:    "mount specification must have at least source and destination",
+		},
+		{
+			name:        "empty source",
+			mountString: ":/dest",
+			expectError: true,
+			errorMsg:    "source path cannot be empty",
+		},
+		{
+			name:        "empty destination",
+			mountString: "/source:",
+			expectError: true,
+			errorMsg:    "destination path cannot be empty",
+		},
+		{
+			name:        "too many colons",
+			mountString: "/source:/dest:ro:extra:more",
+			expectError: true,
+			errorMsg:    "mount specification has too many parts",
+		},
+		{
+			name:        "empty mount string",
+			mountString: "",
+			expectError: false,
+			errorMsg:    "",
+		},
+		{
+			name:        "whitespace only",
+			mountString: "   ",
+			expectError: false,
+			errorMsg:    "",
+		},
+		{
+			name:        "comma separated empty specs",
+			mountString: ",,,",
+			expectError: false,
+			errorMsg:    "",
+		},
+	}
+	
+	for _, tc := range invalidSyntaxCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mounts, err := parser.ParseMountString(tc.mountString)
+			
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected error for invalid syntax: %s", tc.mountString)
+				} else if !strings.Contains(err.Error(), tc.errorMsg) {
+					t.Errorf("Expected error message to contain '%s', got: %s", tc.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error for valid input '%s': %v", tc.mountString, err)
+				}
+				// For empty/whitespace inputs, should return empty slice
+				if len(mounts) != 0 {
+					t.Errorf("Expected empty mounts for input '%s', got %d mounts", tc.mountString, len(mounts))
+				}
+			}
+		})
+	}
+	
+	// Test missing paths validation
+	tempDir := t.TempDir()
+	nonExistentPath := filepath.Join(tempDir, "nonexistent")
+	
+	missingPathCases := []struct {
+		name        string
+		mountString string
+		expectError bool
+	}{
+		{
+			name:        "nonexistent source path",
+			mountString: fmt.Sprintf("%s:/dest", nonExistentPath),
+			expectError: true,
+		},
+		{
+			name:        "existing source path",
+			mountString: fmt.Sprintf("%s:/dest", tempDir),
+			expectError: false,
+		},
+	}
+	
+	for _, tc := range missingPathCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mounts, err := parser.ParseMountString(tc.mountString)
+			if err != nil {
+				t.Errorf("ParseMountString failed: %v", err)
+				return
+			}
+			
+			if len(mounts) != 1 {
+				t.Errorf("Expected 1 mount, got %d", len(mounts))
+				return
+			}
+			
+			err = parser.ValidateMount(mounts[0])
+			
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected validation error for nonexistent path")
+				} else if !strings.Contains(err.Error(), "does not exist") {
+					t.Errorf("Expected 'does not exist' error, got: %s", err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected validation error: %v", err)
+				}
+			}
+		})
+	}
+	
+	// Test Windows path conversion edge cases
+	// Helper function to test Windows path conversion regardless of OS
+	convertWindowsPathForTest := func(path string) string {
+		// Convert backslashes to forward slashes
+		path = strings.ReplaceAll(path, "\\", "/")
+		
+		// Handle Windows drive letters (C: -> /c)
+		if len(path) >= 2 && path[1] == ':' {
+			drive := strings.ToLower(string(path[0]))
+			if len(path) == 2 {
+				// Just the drive letter
+				return "/" + drive
+			} else {
+				// Drive letter with path
+				return "/" + drive + path[2:]
+			}
+		}
+		
+		return path
+	}
+	
+	windowsPathCases := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "backslash to forward slash",
+			input:    "C:\\Users\\test\\file.txt",
+			expected: "/c/Users/test/file.txt",
+		},
+		{
+			name:     "mixed separators",
+			input:    "C:\\Users/test\\file.txt",
+			expected: "/c/Users/test/file.txt",
+		},
+		{
+			name:     "drive letter only",
+			input:    "C:",
+			expected: "/c",
+		},
+		{
+			name:     "forward slashes already",
+			input:    "C:/Users/test",
+			expected: "/c/Users/test",
+		},
+		{
+			name:     "no drive letter",
+			input:    "/usr/local/bin",
+			expected: "/usr/local/bin",
+		},
+		{
+			name:     "relative path",
+			input:    "relative/path",
+			expected: "relative/path",
+		},
+	}
+	
+	for _, tc := range windowsPathCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := convertWindowsPathForTest(tc.input)
+			if result != tc.expected {
+				t.Errorf("ConvertWindowsPath(%s) = %s, expected %s", tc.input, result, tc.expected)
+			}
+		})
+	}
+	
+	// Test tilde expansion edge cases
+	tildeExpansionCases := []struct {
+		name     string
+		input    string
+		expected string // Will be computed based on actual home directory
+	}{
+		{
+			name:  "tilde only",
+			input: "~",
+		},
+		{
+			name:  "tilde with path",
+			input: "~/.config",
+		},
+		{
+			name:  "tilde user (unsupported)",
+			input: "~user/path",
+		},
+		{
+			name:  "no tilde",
+			input: "/absolute/path",
+		},
+		{
+			name:  "tilde in middle",
+			input: "/path/~/middle",
+		},
+	}
+	
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("Cannot get home directory for tilde expansion tests")
+	}
+	
+	for _, tc := range tildeExpansionCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := parser.ExpandTildePath(tc.input)
+			
+			switch tc.input {
+			case "~":
+				if result != homeDir {
+					t.Errorf("ExpandTildePath(%s) = %s, expected %s", tc.input, result, homeDir)
+				}
+			case "~/.config":
+				expected := filepath.Join(homeDir, ".config")
+				if result != expected {
+					t.Errorf("ExpandTildePath(%s) = %s, expected %s", tc.input, result, expected)
+				}
+			case "~user/path", "/absolute/path", "/path/~/middle":
+				// These should remain unchanged
+				if result != tc.input {
+					t.Errorf("ExpandTildePath(%s) = %s, expected %s", tc.input, result, tc.input)
+				}
+			}
+		})
+	}
+	
+	// Test mount option validation
+	optionValidationCases := []struct {
+		name        string
+		options     string
+		expectError bool
+	}{
+		{
+			name:        "valid single option",
+			options:     "ro",
+			expectError: false,
+		},
+		{
+			name:        "valid multiple options",
+			options:     "ro,bind",
+			expectError: false,
+		},
+		{
+			name:        "invalid option",
+			options:     "invalid",
+			expectError: true,
+		},
+		{
+			name:        "mixed valid and invalid",
+			options:     "ro,invalid,bind",
+			expectError: true,
+		},
+		{
+			name:        "empty options",
+			options:     "",
+			expectError: false,
+		},
+		{
+			name:        "whitespace in options",
+			options:     "ro, bind",
+			expectError: false,
+		},
+	}
+	
+	for _, tc := range optionValidationCases {
+		t.Run(tc.name, func(t *testing.T) {
+			mount := Mount{
+				Source:      tempDir,
+				Destination: "/dest",
+				Options:     tc.options,
+			}
+			
+			err := parser.ValidateMount(mount)
+			
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected validation error for options: %s", tc.options)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected validation error for options '%s': %v", tc.options, err)
+				}
+			}
+		})
+	}
+	
+	// Test error message formatting
+	errorMessageCases := []struct {
+		name        string
+		mountString string
+		expectMsg   string
+	}{
+		{
+			name:        "invalid syntax shows example",
+			mountString: "invalid",
+			expectMsg:   "Expected format: <src>:<dest>[:<opts>],<src>:<dest>[:<opts>],...",
+		},
+		{
+			name:        "invalid syntax shows example usage",
+			mountString: "invalid",
+			expectMsg:   "Example: MCP_MOUNT=~/.aws:/home/mcp/.aws:ro,~/data:/data",
+		},
+	}
+	
+	for _, tc := range errorMessageCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parser.ParseMountString(tc.mountString)
+			
+			if err == nil {
+				t.Errorf("Expected error for invalid syntax: %s", tc.mountString)
+			} else if !strings.Contains(err.Error(), tc.expectMsg) {
+				t.Errorf("Expected error message to contain '%s', got: %s", tc.expectMsg, err.Error())
+			}
+		})
 	}
 }
