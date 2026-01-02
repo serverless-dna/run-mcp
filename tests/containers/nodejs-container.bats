@@ -244,7 +244,7 @@ export default { test: true };
     [ "$output" = "755" ]
     
     # Verify home directory exists and has proper ownership
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%U:%G" /home/node
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%U:%G" /home/mcp
     [ "$status" -eq 0 ]
     [ "$output" = "node:node" ]
     
@@ -307,4 +307,51 @@ export default { test: true };
     run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "cd /tmp && npm init -y && echo 'npm init successful'"
     [ "$status" -eq 0 ]
     [[ "$output" =~ "npm init successful" ]]
+}
+
+# Unit Tests for Node.js Container Home Directory (Requirements 1.5)
+# Test that container starts with correct HOME environment variable
+@test "Unit Test: Node.js container has correct HOME environment variable set to /home/mcp" {
+    # Build the container
+    run docker build -t "$TEST_IMAGE_TAG" nodejs/
+    [ "$status" -eq 0 ]
+    
+    # Test that HOME environment variable is set to /home/mcp
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" printenv HOME
+    [ "$status" -eq 0 ]
+    [ "$output" = "/home/mcp" ]
+}
+
+# Test that /home/mcp directory exists and is writable
+@test "Unit Test: Node.js container /home/mcp directory exists and is writable" {
+    # Build the container
+    run docker build -t "$TEST_IMAGE_TAG" nodejs/
+    [ "$status" -eq 0 ]
+    
+    # Test that /home/mcp directory exists
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" ls -ld /home/mcp
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "drwx" ]]
+    
+    # Test that /home/mcp directory is owned by node user (UID 1000)
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%U:%G" /home/mcp
+    [ "$status" -eq 0 ]
+    [ "$output" = "node:node" ]
+    
+    # Test that /home/mcp directory is writable by the node user
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" touch /home/mcp/test-write-file
+    [ "$status" -eq 0 ]
+    
+    # Test that we can create subdirectories in /home/mcp
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" mkdir -p /home/mcp/.config/test-dir
+    [ "$status" -eq 0 ]
+    
+    # Test that we can write files in subdirectories
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "mkdir -p /home/mcp/.config && echo 'test content' > /home/mcp/.config/test-file"
+    [ "$status" -eq 0 ]
+    
+    # Test that we can read back the content
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" cat /home/mcp/.config/test-file
+    [ "$status" -eq 0 ]
+    [ "$output" = "test content" ]
 }

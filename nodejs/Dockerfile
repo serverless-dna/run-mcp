@@ -63,6 +63,11 @@ RUN chmod 755 /usr/local/bin/entrypoint.sh && \
 # Remove write permissions from system directories for security
 RUN chmod -R go-w /usr/local/bin/ /usr/bin/ /bin/ /sbin/ || true
 
+# Create home directory for node user with proper permissions (as root)
+RUN mkdir -p /home/mcp && \
+    chown -R node:node /home/mcp && \
+    chmod 755 /home/mcp
+
 # Switch to non-root user
 USER node
 
@@ -75,12 +80,7 @@ ENV NODE_ENV=production \
     NPM_CONFIG_FUND=false \
     FORCE_COLOR=0 \
     NODE_OPTIONS="--unhandled-rejections=strict" \
-    HOME=/home/node
-
-# Create home directory for node user with proper permissions
-RUN mkdir -p /home/node && \
-    chown -R node:node /home/node && \
-    chmod 755 /home/node
+    HOME=/home/mcp
 
 # Expose no ports (stdio transport only)
 # Volume mount points: /data for user data, /app for MCP server code
