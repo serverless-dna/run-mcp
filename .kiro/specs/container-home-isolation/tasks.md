@@ -6,14 +6,14 @@ This implementation plan converts the container home isolation design into incre
 
 ## Tasks
 
-- [ ] 1. Update Node.js container to use `/home/mcp` (Container Images Dependency)
+- [x] 1. Update Node.js container to use `/home/mcp` (Container Images Dependency)
   - **Note**: This task belongs in the mcp-container-images repository
   - Modify `nodejs/Dockerfile` to use `/home/mcp` instead of `/home/node`
   - Update `ENV HOME=/home/mcp` and directory creation commands
   - Ensure `node` user (UID 1000) has proper permissions for `/home/mcp`
   - _Requirements: 1.5_
 
-- [ ] 1.1 Write unit tests for Node.js container home directory
+- [x] 1.1 Write unit tests for Node.js container home directory
   - Test that container starts with correct HOME environment variable
   - Test that `/home/mcp` directory exists and is writable
   - _Requirements: 1.5_
