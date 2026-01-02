@@ -1,0 +1,46 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "run-mcp",
+      "args": ["npx", "@modelcontextprotocol/server-filesystem", "/data"],
+      "env": {
+        "MCP_DATA_DIR": "/Users/me/Documents"
+      }
+    },
+    "sqlite": {
+      "command": "run-mcp",
+      "args": ["uvx", "mcp-server-sqlite", "--db-path", "/data/database.sqlite"],
+      "env": {
+        "MCP_DATA_DIR": "/Users/me/data"
+      }
+    },
+    "aws-api": {
+      "command": "run-mcp",
+      "args": ["uvx", "awslabs.aws-api-mcp-server@latest"],
+      "env": {
+        "AWS_REGION": "us-east-1"
+      }
+    },
+    "memory": {
+      "command": "run-mcp",
+      "args": ["npx", "@modelcontextprotocol/server-memory"]
+    },
+    "custom-python": {
+      "command": "run-mcp",
+      "args": ["python", "uvx", "my-custom-mcp-server"],
+      "env": {
+        "MCP_PYTHON_IMAGE": "my-registry/custom-python:latest",
+        "MCP_DATA_DIR": "/Users/me/custom-data",
+        "MCP_PASSTHROUGH_ENV": "CUSTOM_API_KEY,SPECIAL_CONFIG"
+      }
+    },
+    "custom-nodejs": {
+      "command": "run-mcp",
+      "args": ["node", "npx", "my-custom-node-server"],
+      "env": {
+        "MCP_NODEJS_IMAGE": "my-registry/custom-nodejs:latest",
+        "MCP_CONTAINER_RUNTIME": "podman"
+      }
+    }
+  }
+}

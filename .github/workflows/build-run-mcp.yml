@@ -1,0 +1,120 @@
+name: Build run-mcp Binary
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'cmd/run-mcp/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/build-run-mcp.yml'
+      - 'Makefile'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'cmd/run-mcp/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/build-run-mcp.yml'
+      - 'Makefile'
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  build:
+    name: Build run-mcp
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Build all platform binaries
+        run: make build-run-mcp-all
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-mcp-binaries
+          path: build/run-mcp-*
+          retention-days: 30
+
+  test:
+    name: Test run-mcp
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: run-mcp-binaries
+          path: build/
+
+      - name: Test binary functionality
+        run: |
+          chmod +x build/run-mcp-linux-amd64
+          
+          # Test basic commands
+          ./build/run-mcp-linux-amd64 --version
+          ./build/run-mcp-linux-amd64 --help
+          ./build/run-mcp-linux-amd64 info
+          ./build/run-mcp-linux-amd64 config
+          
+          # Test error handling
+          if ./build/run-mcp-linux-amd64 invalid-command 2>/dev/null; then
+            echo "ERROR: Should have failed on invalid command"
+            exit 1
+          fi
+          
+          echo "✓ All tests passed"
+
+      - name: Run Go tests
+        run: make test-run-mcp
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    if: github.event_name == 'release'
+    
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: run-mcp-binaries
+          path: build/
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

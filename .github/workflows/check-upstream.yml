@@ -1,0 +1,127 @@
+name: Check Upstream Versions
+
+on:
+  schedule:
+    # Run every Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      force_check:
+        description: 'Force version check even if recently checked'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Install dependencies
+        run: |
+          echo "📦 Installing required dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+          
+          # Verify installations
+          jq --version
+          curl --version
+      
+      - name: Run version check and build script
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          FORCE_CHECK: ${{ github.event.inputs.force_check == 'true' && 'true' || 'false' }}
+        run: |
+          echo "🔍 Running upstream version check..."
+          echo "Force check: $FORCE_CHECK"
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          
+          if [[ "$FORCE_CHECK" == "true" ]]; then
+            make check-upstream-force
+          else
+            make check-upstream
+          fi
+      
+      - name: Create issue on errors
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Check if there's already an open issue for version check errors
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'upstream-version-check,automated'
+            });
+            
+            const existingIssue = issues.data.find(issue => 
+              issue.title.includes('Upstream Version Check Errors')
+            );
+            
+            const errorBody = `## Version Check Errors - ${new Date().toISOString()}
+            
+            The upstream version check encountered errors during the scheduled run.
+            
+            **Details:**
+            - Workflow run: [${context.runId}](${context.payload.repository.html_url}/actions/runs/${context.runId})
+            - Timestamp: ${new Date().toISOString()}
+            - Force check: ${{ github.event.inputs.force_check || 'false' }}
+            
+            Please review the workflow logs for specific error details.`;
+            
+            if (existingIssue) {
+              console.log('Existing issue found:', existingIssue.number);
+              
+              // Add a comment to the existing issue
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: errorBody
+              });
+              
+              console.log('Added comment to existing issue');
+            } else {
+              // Create a new issue
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Upstream Version Check Errors Detected',
+                body: `## Upstream Version Check Errors
+                
+                The automated upstream version check has encountered errors and requires attention.
+                
+                ${errorBody}
+                
+                **Possible Causes:**
+                - API rate limiting or timeouts
+                - Network connectivity issues
+                - Changes to upstream API endpoints
+                - GitHub API authentication issues
+                
+                **Action Required:**
+                1. Review the workflow logs for specific error messages
+                2. Verify upstream API endpoints are accessible
+                3. Check GitHub token permissions
+                4. Consider running a manual version check
+                
+                This issue was automatically created by the check-upstream workflow.`,
+                labels: ['upstream-version-check', 'automated', 'bug']
+              });
+              
+              console.log('Created new issue:', issue.data.number);
+            }
+        continue-on-error: true
