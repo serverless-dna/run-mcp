@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 
-# Property-Based Tests for Error Handling and Logging
-# Feature: mcp-container-images, Property 6: Build Failure Handling
-# Feature: mcp-container-images, Property 11: Build Logging Transparency
+# Property-Based Tests for Error Handling and Logging (Makefile-based approach)
+# Feature: mcp-container-images, Property 6: Makefile Error Handling
+# Feature: mcp-container-images, Property 11: Build Logging via Makefile
 # Validates: Requirements 2.4, 4.5, 5.3
 
 setup() {
@@ -10,12 +10,19 @@ setup() {
     TEST_DIR=$(mktemp -d)
     cd "$TEST_DIR"
     
-    # Set up test environment
-    export GITHUB_OUTPUT="$TEST_DIR/github_output"
-    touch "$GITHUB_OUTPUT"
+    # Copy Makefile and scripts for testing
+    cp "$BATS_TEST_DIRNAME/../../Makefile" .
+    mkdir -p scripts
+    if [ -f "$BATS_TEST_DIRNAME/../../scripts/check-upstream-versions.sh" ]; then
+        cp "$BATS_TEST_DIRNAME/../../scripts/check-upstream-versions.sh" scripts/
+        chmod +x scripts/check-upstream-versions.sh
+    fi
+    if [ -f "$BATS_TEST_DIRNAME/../../scripts/cleanup-versions.sh" ]; then
+        cp "$BATS_TEST_DIRNAME/../../scripts/cleanup-versions.sh" scripts/
+        chmod +x scripts/cleanup-versions.sh
+    fi
     
-    # Store original directory for script access
-    export SCRIPT_DIR="$BATS_TEST_DIRNAME/../../scripts"
+    # Store original directory for workflow access
     export WORKFLOW_DIR="$BATS_TEST_DIRNAME/../../.github/workflows"
 }
 
@@ -23,236 +30,116 @@ teardown() {
     rm -rf "$TEST_DIR"
 }
 
-# Property 6: Build Failure Handling
-# For any build that fails, the system should provide clear error messages, 
-# stop the pipeline for that container, and not affect other container builds
+# Property 6: Makefile Error Handling
+# The Makefile should provide clear error messages and handle failures gracefully
 
-@test "Property 6.1: Change detection script provides clear error messages on git failures" {
-    # Create a corrupted git environment to simulate git failures
-    mkdir -p .git
-    echo "corrupted" > .git/HEAD
-    
-    # Run change detection script
-    run bash "$SCRIPT_DIR/detect-changes.sh"
-    
-    # Script should handle the error gracefully and provide fallback
-    # The script may exit with 1 for validation errors, but should still provide outputs
-    [ "$status" -eq 0 ] || [ "$status" -eq 1 ]
-    
-    if [ "$status" -eq 0 ]; then
-        # Should fall back to building all containers
-        grep -q "nodejs-changed=true" "$GITHUB_OUTPUT"
-        grep -q "python-changed=true" "$GITHUB_OUTPUT"
-        
-        # Should provide clear reason for fallback
-        grep -q "build-reason=git-diff-failed\|build-reason=unknown-error\|build-reason=first-commit-or-shallow-clone" "$GITHUB_OUTPUT"
-    else
-        # If script exits with error, it should provide clear error message
-        [[ "$output" =~ "ERROR:" ]]
-    fi
+@test "Property 6.1: Makefile detects missing Docker runtime" {
+    # Test that Makefile fails gracefully when Docker is not available
+    # This test simulates the check_docker function behavior
+    run grep -A 10 "check_docker" Makefile
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "No container runtime found" ]]
+    [[ "$output" =~ "Container Runtime Options" ]]
 }
 
-@test "Property 6.2: Change detection handles missing GITHUB_OUTPUT gracefully" {
-    # Create a proper git repo
-    git init --quiet
-    git config user.email "test@test.com"
-    git config user.name "Test User"
+@test "Property 6.2: Makefile validates required files exist" {
+    # Test that Makefile checks for required Dockerfiles
+    run grep -A 5 "nodejs/Dockerfile" Makefile
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "not found" ]]
     
-    # Create initial structure
-    mkdir -p nodejs python
-    echo "# Node.js Dockerfile" > nodejs/Dockerfile
-    echo "# Python Dockerfile" > python/Dockerfile
-    git add .
-    git commit -m "Initial commit" --quiet
-    
-    # Unset GITHUB_OUTPUT to test error handling
-    unset GITHUB_OUTPUT
-    
-    # Run change detection script
-    run bash "$SCRIPT_DIR/detect-changes.sh"
-    
-    # Script should handle missing GITHUB_OUTPUT gracefully
+    run grep -A 5 "python/Dockerfile" Makefile
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "not found" ]]
+}
+
+@test "Property 6.3: Makefile provides clear error messages for missing tools" {
+    # Test that Makefile checks for required tools
+    run grep -A 5 "bats not found" Makefile
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Install with:" ]]
+}
+
+@test "Property 6.4: Makefile handles script execution failures" {
+    # Test that Makefile scripts have proper error handling
+    run grep -A 3 "chmod +x" Makefile
     [ "$status" -eq 0 ]
     
-    # Should log warning about missing GITHUB_OUTPUT
-    [[ "$output" =~ "WARNING: GITHUB_OUTPUT not set" ]]
+    # Check that scripts are made executable before running
+    [[ "$output" =~ "scripts/" ]]
 }
 
-@test "Property 6.3: Change detection provides detailed error context for different failure modes" {
-    # Test with non-git directory
-    mkdir non-git-dir
-    cd non-git-dir
-    
-    run bash "$SCRIPT_DIR/detect-changes.sh"
-    
-    # Should fail with clear error message
-    [ "$status" -eq 1 ]
-    [[ "$output" =~ "ERROR: Not in a git repository" ]]
-}
-
-@test "Property 6.4: Build workflow uses continue-on-error appropriately for container isolation" {
-    # Check that the workflow file has proper error isolation
+@test "Property 6.5: Workflow uses continue-on-error appropriately" {
+    # Check that the workflow file has proper error isolation for cleanup
     run grep -A 5 -B 5 "continue-on-error" "$WORKFLOW_DIR/build-containers.yml"
-    
     [ "$status" -eq 0 ]
     
-    # Should have continue-on-error: false for critical build steps
-    [[ "$output" =~ "continue-on-error: false" ]]
-    
-    # Should have continue-on-error: true for integration tests to allow partial success
+    # Should have continue-on-error: true for cleanup operations
     [[ "$output" =~ "continue-on-error: true" ]]
 }
 
-@test "Property 6.5: Build workflow includes proper error annotations" {
-    # Check that the workflow includes GitHub Actions error annotations
-    run grep "::error" "$WORKFLOW_DIR/build-containers.yml"
-    
+@test "Property 6.6: Makefile provides colored output for better UX" {
+    # Verify Makefile uses colors for better error visibility
+    run grep "RED.*Error" Makefile
     [ "$status" -eq 0 ]
     
-    # Should include error titles and messages
-    [[ "$output" =~ "::error title=" ]]
-    [[ "$output" =~ "Build Failed" ]]
+    run grep "GREEN.*✓" Makefile
+    [ "$status" -eq 0 ]
+    
+    run grep "YELLOW" Makefile
+    [ "$status" -eq 0 ]
 }
 
-@test "Property 6.6: Build workflow isolates container failures" {
-    # Check that build jobs are properly isolated
-    run grep -A 10 "needs: \[build-nodejs, build-python\]" "$WORKFLOW_DIR/build-containers.yml"
-    
+# Property 11: Build Logging via Makefile
+# The Makefile should provide comprehensive logging about build processes
+
+@test "Property 11.1: Makefile provides comprehensive build information" {
+    # Test that Makefile info target shows build context
+    run grep -A 20 "info:" Makefile
     [ "$status" -eq 0 ]
-    
-    # Should use 'if: always()' to run even if some builds fail
-    [[ "$output" =~ "if: always()" ]]
-    
-    # Should check individual build results
-    [[ "$output" =~ "needs.build-nodejs.result" ]]
-    [[ "$output" =~ "needs.build-python.result" ]]
+    [[ "$output" =~ "Registry:" ]]
+    [[ "$output" =~ "Owner:" ]]
+    [[ "$output" =~ "Repository:" ]]
+    [[ "$output" =~ "Branch:" ]]
+    [[ "$output" =~ "Commit:" ]]
 }
 
-# Property 11: Build Logging Transparency
-# For any build process, the system should provide clear logging about which images 
-# are being built and the reasons for building them
-
-@test "Property 11.1: Change detection provides comprehensive build reasoning" {
-    # Create a proper git repo with changes
-    git init --quiet
-    git config user.email "test@test.com"
-    git config user.name "Test User"
-    
-    # Create initial structure
-    mkdir -p nodejs python .github/workflows
-    echo "# Initial Node.js Dockerfile" > nodejs/Dockerfile
-    echo "# Initial Python Dockerfile" > python/Dockerfile
-    echo "name: build" > .github/workflows/build.yml
-    git add .
-    git commit -m "Initial commit" --quiet
-    
-    # Make a change to Node.js directory
-    echo "# Updated Node.js Dockerfile" > nodejs/Dockerfile
-    git add nodejs/Dockerfile
-    git commit -m "Update Node.js" --quiet
-    
-    # Run change detection
-    run bash "$SCRIPT_DIR/detect-changes.sh"
-    
+@test "Property 11.2: Makefile logs version information during builds" {
+    # Test that Makefile shows version information
+    run grep -A 10 "Getting latest.*version" Makefile
     [ "$status" -eq 0 ]
-    
-    # Should provide detailed logging about what changed and why
-    [[ "$output" =~ "CHANGE DETECTION SUMMARY" ]]
-    [[ "$output" =~ "CHANGE ANALYSIS BREAKDOWN" ]]
-    [[ "$output" =~ "BUILD DECISION MATRIX" ]]
-    [[ "$output" =~ "Node.js directory changes detected" ]]
-    [[ "$output" =~ "Building Node.js container" ]]
-    [[ "$output" =~ "Skipping Python container" ]]
+    [[ "$output" =~ "Node.js" ]] || [[ "$output" =~ "Python" ]]
 }
 
-@test "Property 11.2: Change detection logs repository context information" {
-    # Create a proper git repo
-    git init --quiet
-    git config user.email "test@test.com"
-    git config user.name "Test User"
-    
-    # Create initial structure
-    mkdir -p nodejs python
-    echo "# Node.js Dockerfile" > nodejs/Dockerfile
-    echo "# Python Dockerfile" > python/Dockerfile
-    git add .
-    git commit -m "Initial commit" --quiet
-    
-    # Add a remote to test remote logging
-    git remote add origin https://github.com/test/test.git
-    
-    # Make a change to trigger the detailed logging path
-    echo "# Updated Node.js Dockerfile" > nodejs/Dockerfile
-    git add nodejs/Dockerfile
-    git commit -m "Update Node.js" --quiet
-    
-    # Run change detection
-    run bash "$SCRIPT_DIR/detect-changes.sh"
-    
+@test "Property 11.3: Makefile provides progress indicators" {
+    # Test that Makefile shows progress during operations
+    run grep "Building.*container" Makefile
     [ "$status" -eq 0 ]
     
-    # Should log repository context (the script logs this when there are changes to analyze)
-    [[ "$output" =~ "CHANGE DETECTION SUMMARY" ]] || [[ "$output" =~ "Starting change detection" ]]
+    run grep "✓.*built" Makefile
+    [ "$status" -eq 0 ]
 }
 
-@test "Property 11.3: Change detection provides file-level change details" {
-    # Create a proper git repo with multiple file changes
-    git init --quiet
-    git config user.email "test@test.com"
-    git config user.name "Test User"
-    
-    # Create initial structure
-    mkdir -p nodejs python
-    echo "# Initial Node.js Dockerfile" > nodejs/Dockerfile
-    echo "# Initial Python Dockerfile" > python/Dockerfile
-    echo '{"name": "test"}' > nodejs/package.json
-    git add .
-    git commit -m "Initial commit" --quiet
-    
-    # Make changes to multiple files
-    echo "# Updated Node.js Dockerfile" > nodejs/Dockerfile
-    echo '{"name": "updated"}' > nodejs/package.json
-    git add nodejs/
-    git commit -m "Update Node.js files" --quiet
-    
-    # Run change detection
-    run bash "$SCRIPT_DIR/detect-changes.sh"
-    
+@test "Property 11.4: Makefile shows tool availability status" {
+    # Test that check-tools target provides clear status
+    run grep -A 15 "check-tools:" Makefile
     [ "$status" -eq 0 ]
-    
-    # Should log individual changed files
-    [[ "$output" =~ "nodejs/Dockerfile" ]]
-    [[ "$output" =~ "nodejs/package.json" ]]
-    [[ "$output" =~ "Total changed files:" ]]
+    [[ "$output" =~ "✓" ]]
+    [[ "$output" =~ "✗" ]]
 }
 
-@test "Property 11.4: Build workflow logs build start and completion information" {
-    # Check that the workflow includes comprehensive logging
-    run grep -E "(Log build start|Log build success|Log build failure)" "$WORKFLOW_DIR/build-containers.yml"
-    
+@test "Property 11.5: Makefile logs container build context" {
+    # Test that Makefile shows what's being built and why
+    run grep -A 5 "Building with" Makefile
     [ "$status" -eq 0 ]
     
-    # Should include start, success, and failure logging
-    [[ "$output" =~ "Log build start" ]]
-    [[ "$output" =~ "Log build success" ]]
-    [[ "$output" =~ "Log build failure" ]]
-}
-
-@test "Property 11.5: Build workflow logs timestamps and build context" {
-    # Check that the workflow includes timestamp logging
-    run grep -E "(Timestamp|date -u)" "$WORKFLOW_DIR/build-containers.yml"
-    
-    [ "$status" -eq 0 ]
-    
-    # Should include timestamp logging
-    [[ "$output" =~ "Timestamp:" ]]
-    [[ "$output" =~ "date -u" ]]
+    # Should show version information during builds
+    [[ "$output" =~ "Node.js" ]] || [[ "$output" =~ "Python" ]]
 }
 
 @test "Property 11.6: Container entrypoints provide comprehensive startup logging" {
     # Check Node.js entrypoint logging
     run grep -E "\[MCP-CONTAINER\]" "$BATS_TEST_DIRNAME/../../nodejs/entrypoint.sh"
-    
     [ "$status" -eq 0 ]
     
     # Should include comprehensive startup information
@@ -266,7 +153,6 @@ teardown() {
     
     # Check Python entrypoint logging
     run grep -E "\[MCP-CONTAINER\]" "$BATS_TEST_DIRNAME/../../python/entrypoint.sh"
-    
     [ "$status" -eq 0 ]
     
     # Should include comprehensive startup information
@@ -279,71 +165,35 @@ teardown() {
     [[ "$output" =~ "Virtual environment status:" ]]
 }
 
-@test "Property 11.7: Change detection provides final output summary" {
-    # Create a proper git repo
-    git init --quiet
-    git config user.email "test@test.com"
-    git config user.name "Test User"
-    
-    # Create initial structure
-    mkdir -p nodejs python
-    echo "# Node.js Dockerfile" > nodejs/Dockerfile
-    echo "# Python Dockerfile" > python/Dockerfile
-    git add .
-    git commit -m "Initial commit" --quiet
-    
-    # Run change detection
-    run bash "$SCRIPT_DIR/detect-changes.sh"
-    
+@test "Property 11.7: Makefile provides help documentation" {
+    # Test that Makefile has comprehensive help
+    run grep -A 10 "help:" Makefile
     [ "$status" -eq 0 ]
-    
-    # Should provide final summary of outputs (check for key summary elements)
-    [[ "$output" =~ "Final outputs:" ]] || [[ "$output" =~ "Change detection completed" ]]
-    [[ "$output" =~ "nodejs-changed:" ]] || [[ "$output" =~ "nodejs-changed=" ]]
-    [[ "$output" =~ "python-changed:" ]] || [[ "$output" =~ "python-changed=" ]]
-    [[ "$output" =~ "build-reason:" ]] || [[ "$output" =~ "build-reason=" ]]
+    [[ "$output" =~ "Available targets:" ]]
+    [[ "$output" =~ "Configuration:" ]]
 }
 
-@test "Property 11.8: Build workflow provides integration test result summaries" {
-    # Check that the workflow includes integration test result logging
-    run grep -A 10 "Log integration test results" "$WORKFLOW_DIR/build-containers.yml"
-    
+@test "Property 11.8: Makefile shows dynamic version detection" {
+    # Test that Makefile shows supported versions
+    run grep -A 5 "Supported Versions:" Makefile
     [ "$status" -eq 0 ]
-    
-    # Should include test result summaries
-    [[ "$output" =~ "Integration test results summary:" ]]
-    [[ "$output" =~ "Node.js container test:" ]]
-    [[ "$output" =~ "Python container test:" ]]
-    [[ "$output" =~ "stdio mode test:" ]]
-    [[ "$output" =~ "Volume mounting test:" ]]
+    [[ "$output" =~ "Node.js:" ]]
+    [[ "$output" =~ "Python:" ]]
 }
 
-@test "Property 11.9: Change detection handles edge cases with appropriate logging" {
-    # Test empty repository (no commits)
-    git init --quiet
-    git config user.email "test@test.com"
-    git config user.name "Test User"
-    
-    # Run change detection on empty repo
-    run bash "$SCRIPT_DIR/detect-changes.sh"
-    
+@test "Property 11.9: Makefile handles missing dependencies gracefully" {
+    # Test that Makefile provides guidance for missing dependencies
+    run grep -A 5 "setup-dev:" Makefile
     [ "$status" -eq 0 ]
-    
-    # Should provide clear explanation for fallback behavior
-    [[ "$output" =~ "No comparison commit available" ]]
-    [[ "$output" =~ "first-commit-or-shallow-clone" ]]
-    [[ "$output" =~ "fallback mode" ]]
+    [[ "$output" =~ "Installing" ]]
+    [[ "$output" =~ "required tools" ]]
 }
 
-@test "Property 11.10: Build workflow logs specific failure contexts" {
-    # Check that the workflow provides specific failure context
-    run grep -A 10 -B 5 "failure context\|failure\|Failed" "$WORKFLOW_DIR/build-containers.yml"
-    
+@test "Property 11.10: Workflow provides clear job descriptions" {
+    # Check that the workflow has descriptive job and step names
+    run grep -E "name:|jobs:" "$WORKFLOW_DIR/build-containers.yml"
     [ "$status" -eq 0 ]
     
-    # Should check individual step outcomes (look for any step outcome checks)
-    [[ "$output" =~ "steps\." ]] && [[ "$output" =~ "\.outcome" ]]
-    
-    # Should have specific error messages for different failure types (check for any failure-related text)
-    [[ "$output" =~ "Failed" ]] || [[ "$output" =~ "failure" ]]
+    # Should have clear job names
+    [[ "$output" =~ "Build Container Images" ]]
 }

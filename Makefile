@@ -308,7 +308,7 @@ push-python-matrix: ## Push all Python matrix images to registry
 # TESTING TARGETS
 # =============================================================================
 
-test: test-scripts test-run-mcp ## Run all tests
+test: test-scripts test-containers test-workflows test-run-mcp ## Run all tests
 
 test-scripts: ## Run shell script tests with Bats
 	@echo "$(BLUE)Running shell script tests...$(NC)"
@@ -322,6 +322,19 @@ test-scripts: ## Run shell script tests with Bats
 		echo "$(YELLOW)No script tests found$(NC)"; \
 	fi
 	@echo "$(GREEN)✓ Shell script tests passed$(NC)"
+
+test-workflows: ## Run workflow tests with Bats
+	@echo "$(BLUE)Running workflow tests...$(NC)"
+	@if ! command -v bats >/dev/null 2>&1; then \
+		echo "$(RED)Error: bats not found. Install with: sudo apt-get install bats$(NC)"; \
+		exit 1; \
+	fi
+	@if [ -d "tests/workflows" ]; then \
+		bats tests/workflows/; \
+	else \
+		echo "$(YELLOW)No workflow tests found$(NC)"; \
+	fi
+	@echo "$(GREEN)✓ Workflow tests passed$(NC)"
 
 test-containers: ## Run container tests with Bats
 	@echo "$(BLUE)Running container tests...$(NC)"

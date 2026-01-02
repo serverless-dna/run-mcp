@@ -60,15 +60,15 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" =~ "User:" ]]
     [[ "$output" =~ "Working directory:" ]]
-    [[ "$output" =~ "Command:" ]]
-    [[ "$output" =~ "Starting MCP server..." ]]
+    [[ "$output" =~ "Command to execute:" ]]
+    [[ "$output" =~ "Starting MCP server process..." ]]
     
     run bash -c "docker run --rm '$PYTHON_TEST_IMAGE' echo 'test' 2>&1"
     [ "$status" -eq 0 ]
     [[ "$output" =~ "User:" ]]
     [[ "$output" =~ "Working directory:" ]]
-    [[ "$output" =~ "Command:" ]]
-    [[ "$output" =~ "Starting MCP server..." ]]
+    [[ "$output" =~ "Command to execute:" ]]
+    [[ "$output" =~ "Starting MCP server process..." ]]
 }
 
 @test "Property 2: Both containers run as the same UID (1000) for consistent volume permissions" {
@@ -245,6 +245,8 @@ teardown() {
 
 @test "Property 17: Containers forward termination signals properly" {
     # Test that containers handle SIGTERM gracefully
+    # Note: In WSL2, signal handling may behave differently than native Linux
+    
     # Start a long-running process and send SIGTERM
     timeout 10 docker run --rm "$NODEJS_TEST_IMAGE" node -e "
         process.on('SIGTERM', () => { console.log('SIGTERM received'); process.exit(0); });
@@ -253,11 +255,11 @@ teardown() {
     PID=$!
     sleep 2
     kill -TERM $PID
-    wait $PID
-    exit_code=$?
+    wait $PID || exit_code=$?
     
+    # In WSL2, SIGTERM typically results in exit code 143, which is expected
     # Process should exit cleanly (exit code 0 or 143 for SIGTERM)
-    [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 143 ]
+    [ "${exit_code:-0}" -eq 0 ] || [ "${exit_code:-0}" -eq 143 ]
     
     # Test Python container signal handling
     timeout 10 docker run --rm "$PYTHON_TEST_IMAGE" python -c "
@@ -271,11 +273,11 @@ time.sleep(30)
     PID=$!
     sleep 2
     kill -TERM $PID
-    wait $PID
-    exit_code=$?
+    wait $PID || exit_code=$?
     
+    # In WSL2, SIGTERM typically results in exit code 143, which is expected
     # Process should exit cleanly (exit code 0 or 143 for SIGTERM)
-    [ "$exit_code" -eq 0 ] || [ "$exit_code" -eq 143 ]
+    [ "${exit_code:-0}" -eq 0 ] || [ "${exit_code:-0}" -eq 143 ]
 }
 
 @test "Property 17: Containers exit with child process exit code" {

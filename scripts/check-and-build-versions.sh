@@ -49,6 +49,9 @@ GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 FORCE_CHECK="${FORCE_CHECK:-false}"
 
+# Script directory for accessing other scripts
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Registry configuration (matching Makefile)
 REGISTRY="${REGISTRY:-ghcr.io}"
 OWNER="${OWNER:-$(git config --get remote.origin.url | sed 's/.*github.com[:/]\([^/]*\).*/\1/' 2>/dev/null || echo "")}"
@@ -80,64 +83,45 @@ validate_environment() {
     log "Environment validation completed"
 }
 
-# Check if we should skip due to recent check (simplified without versions.json)
+# Check if we should skip due to recent check (no persistent state needed)
 should_skip_check() {
     if [[ "$FORCE_CHECK" == "true" ]]; then
-        log "Force check requested - bypassing recent check validation"
+        log "Force check requested - running full check"
         return 1  # Don't skip
     fi
     
-    # For now, always run checks since we don't have persistent state
-    # In the future, this could check container registry timestamps
+    # Always run checks since we determine versions dynamically
+    # No persistent state file needed - we check against registry
     return 1  # Don't skip
 }
 
-# Get current version for a runtime/major from container registry or fallback
+# Get current version for a runtime/major from container registry
 get_current_version() {
     local runtime="$1"
     local major="$2"
     
-    # Try to get version from local container images first
-    local image_name
-    if [[ "$runtime" == "nodejs" ]]; then
-        image_name="$NODEJS_IMAGE"
-    else
-        image_name="$PYTHON_IMAGE"
+    # Use the check-upstream-versions.sh script to get current state
+    local version_data
+    version_data=$(bash "$SCRIPT_DIR/check-upstream-versions.sh" 2>/dev/null)
+    
+    if [[ -z "$version_data" ]]; then
+        log "Could not get version data from check-upstream-versions.sh"
+        echo ""
+        return
     fi
     
-    # Check if we have container runtime available
-    if [[ -n "$DOCKER_CMD" ]]; then
-        # Try to get version from local image tags
-        local current_version
-        if [[ "$runtime" == "nodejs" ]]; then
-            current_version=$($DOCKER_CMD image ls --format "table {{.Tag}}" "$image_name" 2>/dev/null | \
-                grep "^node$major\." | head -1 | sed "s/^node//")
-        else
-            current_version=$($DOCKER_CMD image ls --format "table {{.Tag}}" "$image_name" 2>/dev/null | \
-                grep "^python$major\." | head -1 | sed "s/^python//")
-        fi
-        
-        if [[ -n "$current_version" && "$current_version" != "Tag" ]]; then
-            echo "$current_version"
-            return 0
-        fi
+    # Extract the latest version for this runtime/major
+    local latest_version
+    if [[ "$runtime" == "nodejs" ]]; then
+        latest_version=$(echo "$version_data" | jq -r ".nodejs.latest_versions[\"$major\"]" 2>/dev/null)
+    else
+        latest_version=$(echo "$version_data" | jq -r ".python.latest_versions[\"$major\"]" 2>/dev/null)
     fi
     
-    # Fallback to reasonable defaults if no local images found
-    if [[ "$runtime" == "nodejs" ]]; then
-        case "$major" in
-            18) echo "18.19.0" ;;
-            20) echo "20.11.0" ;;
-            22) echo "22.11.0" ;;
-            *) echo "$major.0.0" ;;
-        esac
+    if [[ -n "$latest_version" && "$latest_version" != "null" ]]; then
+        echo "$latest_version"
     else
-        case "$major" in
-            3.11) echo "3.11.8" ;;
-            3.12) echo "3.12.8" ;;
-            3.13) echo "3.13.1" ;;
-            *) echo "$major.0" ;;
-        esac
+        echo ""
     fi
 }
 
@@ -148,32 +132,19 @@ check_nodejs() {
     
     log "Checking Node.js $major version (current: $current)"
     
-    local latest=""
-    local retry_count=0
-    local max_retries=3
+    # Use the check-upstream-versions.sh script to get latest version
+    local version_data latest
+    version_data=$(bash "$SCRIPT_DIR/check-upstream-versions.sh" 2>/dev/null)
     
-    while [[ $retry_count -lt $max_retries ]]; do
-        if latest=$(curl -s --max-time 30 https://nodejs.org/dist/index.json 2>/dev/null | \
-            jq -r --arg maj "$major" '[.[] | select(.version | startswith("v" + $maj + "."))] | .[0].version' 2>/dev/null | tr -d 'v'); then
-            
-            if [[ -n "$latest" && "$latest" != "null" && "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                log "Successfully retrieved Node.js $major latest version: $latest"
-                break
-            else
-                log "Invalid response for Node.js $major: '$latest'"
-                latest=""
-            fi
-        fi
-        
-        retry_count=$((retry_count + 1))
-        if [[ $retry_count -lt $max_retries ]]; then
-            log "Retrying Node.js $major version check (attempt $((retry_count + 1))/$max_retries)..."
-            sleep 2
-        fi
-    done
+    if [[ -z "$version_data" ]]; then
+        error "Could not get version data from check-upstream-versions.sh"
+        return 1
+    fi
     
-    if [[ -z "$latest" ]]; then
-        error "Failed to retrieve Node.js $major version after $max_retries attempts"
+    latest=$(echo "$version_data" | jq -r ".nodejs.latest_versions[\"$major\"]" 2>/dev/null)
+    
+    if [[ -z "$latest" || "$latest" == "null" ]]; then
+        error "Failed to retrieve Node.js $major version"
         return 1
     fi
     
@@ -195,32 +166,19 @@ check_python() {
     
     log "Checking Python $major version (current: $current)"
     
-    local latest=""
-    local retry_count=0
-    local max_retries=3
+    # Use the check-upstream-versions.sh script to get latest version
+    local version_data latest
+    version_data=$(bash "$SCRIPT_DIR/check-upstream-versions.sh" 2>/dev/null)
     
-    while [[ $retry_count -lt $max_retries ]]; do
-        if latest=$(curl -s --max-time 30 https://endoflife.date/api/python.json 2>/dev/null | \
-            jq -r --arg maj "$major" '[.[] | select(.cycle == $maj)] | .[0].latest' 2>/dev/null); then
-            
-            if [[ -n "$latest" && "$latest" != "null" && "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                log "Successfully retrieved Python $major latest version: $latest"
-                break
-            else
-                log "Invalid response for Python $major: '$latest'"
-                latest=""
-            fi
-        fi
-        
-        retry_count=$((retry_count + 1))
-        if [[ $retry_count -lt $max_retries ]]; then
-            log "Retrying Python $major version check (attempt $((retry_count + 1))/$max_retries)..."
-            sleep 2
-        fi
-    done
+    if [[ -z "$version_data" ]]; then
+        error "Could not get version data from check-upstream-versions.sh"
+        return 1
+    fi
     
-    if [[ -z "$latest" ]]; then
-        error "Failed to retrieve Python $major version after $max_retries attempts"
+    latest=$(echo "$version_data" | jq -r ".python.latest_versions[\"$major\"]" 2>/dev/null)
+    
+    if [[ -z "$latest" || "$latest" == "null" ]]; then
+        error "Failed to retrieve Python $major version"
         return 1
     fi
     
@@ -293,10 +251,27 @@ main() {
     
     # Show current configuration
     log "Configuration:"
-    log "  Node.js versions: $NODEJS_VERSIONS"
-    log "  Python versions: $PYTHON_VERSIONS"
+    log "  Using dynamic version detection from check-upstream-versions.sh"
     log "  Node.js image: $NODEJS_IMAGE"
     log "  Python image: $PYTHON_IMAGE"
+    echo "" >&2
+    
+    # Get supported versions from check-upstream-versions.sh
+    local version_data
+    version_data=$(bash "$SCRIPT_DIR/check-upstream-versions.sh" 2>/dev/null)
+    
+    if [[ -z "$version_data" ]]; then
+        error "Could not get version data from check-upstream-versions.sh"
+        exit 1
+    fi
+    
+    # Extract supported versions
+    local nodejs_versions python_versions
+    nodejs_versions=$(echo "$version_data" | jq -r '.nodejs.supported_versions[]' 2>/dev/null | tr '\n' ' ')
+    python_versions=$(echo "$version_data" | jq -r '.python.supported_versions[]' 2>/dev/null | tr '\n' ' ')
+    
+    log "  Supported Node.js versions: $nodejs_versions"
+    log "  Supported Python versions: $python_versions"
     echo "" >&2
     
     local updates_detected=false
@@ -308,7 +283,7 @@ main() {
     
     # Check all supported Node.js versions
     log "Checking Node.js versions..."
-    for major in $NODEJS_VERSIONS; do
+    for major in $nodejs_versions; do
         local current new_version
         current=$(get_current_version "nodejs" "$major")
         
@@ -326,7 +301,7 @@ main() {
     
     # Check all supported Python versions
     log "Checking Python versions..."
-    for major in $PYTHON_VERSIONS; do
+    for major in $python_versions; do
         local current new_version
         current=$(get_current_version "python" "$major")
         

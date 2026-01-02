@@ -196,11 +196,16 @@ check_nodejs_versions() {
     
     # Get supported versions dynamically
     local supported_versions
-    supported_versions=$(get_supported_nodejs_versions)
+    if ! supported_versions=$(get_supported_nodejs_versions); then
+        log "⚠️  Could not determine supported Node.js versions - skipping Node.js checks"
+        echo ""
+        return 0
+    fi
     
     if [[ -z "$supported_versions" ]]; then
-        error "Could not determine supported Node.js versions"
-        return 1
+        log "⚠️  No supported Node.js versions found"
+        echo ""
+        return 0
     fi
     
     for major in $supported_versions; do
@@ -244,11 +249,16 @@ check_python_versions() {
     
     # Get supported versions dynamically
     local supported_versions
-    supported_versions=$(get_supported_python_versions)
+    if ! supported_versions=$(get_supported_python_versions); then
+        log "⚠️  Could not determine supported Python versions - skipping Python checks"
+        echo ""
+        return 0
+    fi
     
     if [[ -z "$supported_versions" ]]; then
-        error "Could not determine supported Python versions"
-        return 1
+        log "⚠️  No supported Python versions found"
+        echo ""
+        return 0
     fi
     
     for major in $supported_versions; do
@@ -303,8 +313,12 @@ main() {
     
     # Get all supported versions (not just updates)
     local nodejs_supported python_supported
-    nodejs_supported=$(get_supported_nodejs_versions)
-    python_supported=$(get_supported_python_versions)
+    if ! nodejs_supported=$(get_supported_nodejs_versions); then
+        nodejs_supported=""
+    fi
+    if ! python_supported=$(get_supported_python_versions); then
+        python_supported=""
+    fi
     
     # Set summary outputs for GitHub Actions
     if [[ -n "$nodejs_updates" || -n "$python_updates" ]]; then
