@@ -107,35 +107,35 @@ This implementation plan converts the container home isolation design into incre
   - Test path expansion and validation
   - _Requirements: 7.6, 7.7_
 
-- [ ] 9. Integrate volume mounting into container execution
+- [x] 9. Integrate volume mounting into container execution
   - Update `buildContainerCommand()` to include home volume mounts
   - Add user-specified mount integration
   - Ensure backward compatibility with existing commands
   - _Requirements: 1.5, 5.1, 5.4_
 
-- [ ] 9.1 Write property test for backward compatibility
+- [x] 9.1 Write property test for backward compatibility
   - **Property 12: Backward Compatibility**
   - **Validates: Requirements 5.1, 5.4**
 
-- [ ] 9.2 Write integration tests for container execution
+- [x] 9.2 Write integration tests for container execution
   - Test complete container startup with volume mounts
   - Test environment variable passthrough
   - _Requirements: 3.1, 3.3, 3.5_
 
-- [ ] 9.3 Implement environment variable filtering
+- [x] 9.3 Implement environment variable filtering
   - Filter out MCP_MOUNT, MCP_BIND_HOME, MCP_HOME_PATH from container env
   - Pass through all other user-provided variables
   - _Requirements: 3.5_
 
-- [ ] 9.4 Write property test for home directory write access
+- [x] 9.4 Write property test for home directory write access
   - **Property 3: Home Directory Write Access**
   - **Validates: Requirements 1.3, 3.2**
 
-- [ ] 9.5 Write property test for consistent mount point
+- [x] 9.5 Write property test for consistent mount point
   - **Property 5: Consistent Mount Point**
   - **Validates: Requirements 1.5**
 
-- [ ] 9.6 Write property test for environment variable passthrough
+- [x] 9.6 Write property test for environment variable passthrough
   - **Property 7: Environment Variable Passthrough**
   - **Validates: Requirements 3.1, 3.3**
 

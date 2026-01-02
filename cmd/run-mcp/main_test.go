@@ -2657,3 +2657,1102 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 		t.Errorf("Expected MCP_OTHER_VAR=should_pass_through, got %s", value)
 	}
 }
+// Property 12: Backward Compatibility
+// For any existing MCP server command that worked before volume isolation, 
+// the command should continue to work transparently with automatic volume creation
+func TestProperty12_BackwardCompatibility(t *testing.T) {
+	// **Feature: container-home-isolation, Property 12: Backward Compatibility**
+	// **Validates: Requirements 5.1, 5.4**
+	
+	// Test cases representing existing MCP server commands that should continue working
+	testCases := []struct {
+		name        string
+		args        []string
+		language    string
+		description string
+	}{
+		{
+			name:        "uvx command",
+			args:        []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			language:    "python",
+			description: "Python uvx command should work transparently",
+		},
+		{
+			name:        "npx command",
+			args:        []string{"npx", "@modelcontextprotocol/server-filesystem", "/data"},
+			language:    "nodejs",
+			description: "Node.js npx command should work transparently",
+		},
+		{
+			name:        "python explicit",
+			args:        []string{"python", "uvx", "awslabs.aws-api-mcp-server@latest"},
+			language:    "python",
+			description: "Explicit python runtime should work transparently",
+		},
+		{
+			name:        "node explicit",
+			args:        []string{"node", "npx", "@modelcontextprotocol/server-memory"},
+			language:    "nodejs",
+			description: "Explicit node runtime should work transparently",
+		},
+		{
+			name:        "complex command with flags",
+			args:        []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/test.db", "--readonly"},
+			language:    "python",
+			description: "Complex commands with multiple flags should work transparently",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := &Config{
+				NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
+				PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
+				DataDir:     t.TempDir(),
+			}
+			
+			// Build container command - this should work without errors
+			cmd, volumeName, err := buildContainerCommand(config, "docker", tc.language, tc.args)
+			if err != nil {
+				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
+			}
+			
+			// Verify command was built successfully
+			if cmd == nil {
+				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
+			}
+			
+			// Verify volume name was generated (unless using home override)
+			homeMount := os.Getenv("MCP_BIND_HOME")
+			customHome := os.Getenv("MCP_HOME_PATH")
+			if homeMount == "" && customHome == "" {
+				// Should have a volume name when not using overrides
+				if volumeName == "" {
+					t.Errorf("Expected volume name to be generated for %s", tc.description)
+				}
+				
+				// Volume name should follow expected pattern
+				if !strings.HasPrefix(volumeName, "mcp-home-") && !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
+					t.Errorf("Volume name should follow expected pattern, got: %s", volumeName)
+				}
+			}
+			
+			// Verify container arguments include expected elements
+			args := cmd.Args
+			
+			// Should have docker/runtime command
+			if len(args) == 0 {
+				t.Fatalf("Command args should not be empty for %s", tc.description)
+			}
+			
+			// Should include run, -i, --rm flags
+			foundRun := false
+			foundInteractive := false
+			foundRemove := false
+			foundVolumeMount := false
+			
+			for i, arg := range args {
+				switch arg {
+				case "run":
+					foundRun = true
+				case "-i":
+					foundInteractive = true
+				case "--rm":
+					foundRemove = true
+				case "-v":
+					if i+1 < len(args) && strings.Contains(args[i+1], ":/home/mcp") {
+						foundVolumeMount = true
+					}
+				}
+			}
+			
+			if !foundRun {
+				t.Errorf("Command should include 'run' argument for %s", tc.description)
+			}
+			if !foundInteractive {
+				t.Errorf("Command should include '-i' argument for %s", tc.description)
+			}
+			if !foundRemove {
+				t.Errorf("Command should include '--rm' argument for %s", tc.description)
+			}
+			if !foundVolumeMount {
+				t.Errorf("Command should include volume mount to /home/mcp for %s", tc.description)
+			}
+			
+			// Verify the original command arguments are preserved at the end
+			// Find the image argument first
+			imageIndex := -1
+			expectedImage, _ := config.GetImageForLanguage(tc.language)
+			for i, arg := range args {
+				if arg == expectedImage {
+					imageIndex = i
+					break
+				}
+			}
+			
+			if imageIndex == -1 {
+				t.Errorf("Expected image %s not found in command args for %s", expectedImage, tc.description)
+			} else {
+				// Arguments after the image should match the original command
+				commandArgs := args[imageIndex+1:]
+				
+				// Handle explicit runtime specification
+				expectedArgs := tc.args
+				if len(tc.args) >= 2 && (tc.args[0] == "python" || tc.args[0] == "node" || tc.args[0] == "nodejs") {
+					expectedArgs = tc.args[1:]
+				}
+				
+				if len(commandArgs) != len(expectedArgs) {
+					t.Errorf("Command args length mismatch for %s: expected %d, got %d", tc.description, len(expectedArgs), len(commandArgs))
+				} else {
+					for i, expected := range expectedArgs {
+						if i < len(commandArgs) && commandArgs[i] != expected {
+							t.Errorf("Command arg mismatch for %s at position %d: expected %s, got %s", tc.description, i, expected, commandArgs[i])
+						}
+					}
+				}
+			}
+		})
+	}
+}
+// Integration tests for container execution
+// Test complete container startup with volume mounts and environment variable passthrough
+// Requirements: 3.1, 3.3, 3.5
+func TestContainerExecutionIntegration(t *testing.T) {
+	// Save original environment
+	originalAWS := os.Getenv("AWS_ACCESS_KEY_ID")
+	originalOpenAI := os.Getenv("OPENAI_API_KEY")
+	originalMount := os.Getenv("MCP_MOUNT")
+	originalBindHome := os.Getenv("MCP_BIND_HOME")
+	originalHomePath := os.Getenv("MCP_HOME_PATH")
+	
+	defer func() {
+		// Restore original environment
+		if originalAWS == "" {
+			os.Unsetenv("AWS_ACCESS_KEY_ID")
+		} else {
+			os.Setenv("AWS_ACCESS_KEY_ID", originalAWS)
+		}
+		if originalOpenAI == "" {
+			os.Unsetenv("OPENAI_API_KEY")
+		} else {
+			os.Setenv("OPENAI_API_KEY", originalOpenAI)
+		}
+		if originalMount == "" {
+			os.Unsetenv("MCP_MOUNT")
+		} else {
+			os.Setenv("MCP_MOUNT", originalMount)
+		}
+		if originalBindHome == "" {
+			os.Unsetenv("MCP_BIND_HOME")
+		} else {
+			os.Setenv("MCP_BIND_HOME", originalBindHome)
+		}
+		if originalHomePath == "" {
+			os.Unsetenv("MCP_HOME_PATH")
+		} else {
+			os.Setenv("MCP_HOME_PATH", originalHomePath)
+		}
+	}()
+	
+	testCases := []struct {
+		name        string
+		args        []string
+		language    string
+		envVars     map[string]string
+		mountConfig string
+		description string
+	}{
+		{
+			name:     "basic_python_command",
+			args:     []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			language: "python",
+			envVars: map[string]string{
+				"AWS_ACCESS_KEY_ID": "test-aws-key",
+				"OPENAI_API_KEY":    "test-openai-key",
+			},
+			description: "Basic Python command with environment variables",
+		},
+		{
+			name:     "nodejs_with_user_mounts",
+			args:     []string{"npx", "@modelcontextprotocol/server-filesystem", "/data"},
+			language: "nodejs",
+			envVars: map[string]string{
+				"GITHUB_TOKEN": "test-github-token",
+			},
+			mountConfig: "~/test-data:/data:ro",
+			description: "Node.js command with user-specified mounts",
+		},
+		{
+			name:     "python_with_complex_env",
+			args:     []string{"python", "uvx", "awslabs.aws-api-mcp-server@latest"},
+			language: "python",
+			envVars: map[string]string{
+				"AWS_REGION":           "us-east-1",
+				"AWS_ACCESS_KEY_ID":    "test-key",
+				"AWS_SECRET_ACCESS_KEY": "test-secret",
+				"ANTHROPIC_API_KEY":    "test-anthropic",
+			},
+			description: "Python command with multiple environment variables",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Clear MCP_MOUNT for each test case
+			os.Unsetenv("MCP_MOUNT")
+			
+			// Set up test environment
+			for key, value := range tc.envVars {
+				os.Setenv(key, value)
+				defer os.Unsetenv(key)
+			}
+			
+			if tc.mountConfig != "" {
+				// Create test directory for mount source
+				testDir := t.TempDir()
+				// Replace ~/test-data with actual temp dir
+				actualMountConfig := strings.Replace(tc.mountConfig, "~/test-data", testDir, 1)
+				os.Setenv("MCP_MOUNT", actualMountConfig)
+				defer os.Unsetenv("MCP_MOUNT")
+			}
+			
+			config := &Config{
+				NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
+				PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
+				DataDir:     t.TempDir(),
+			}
+			
+			// Build container command
+			cmd, volumeName, err := buildContainerCommand(config, "docker", tc.language, tc.args)
+			if err != nil {
+				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
+			}
+			
+			// Verify command structure
+			if cmd == nil {
+				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
+			}
+			
+			args := cmd.Args
+			if len(args) == 0 {
+				t.Fatalf("Command args should not be empty for %s", tc.description)
+			}
+			
+			// Test 1: Verify volume mount is present
+			foundHomeMount := false
+			for i, arg := range args {
+				if arg == "-v" && i+1 < len(args) {
+					if strings.Contains(args[i+1], ":/home/mcp") {
+						foundHomeMount = true
+						break
+					}
+				}
+			}
+			if !foundHomeMount {
+				t.Errorf("Expected home volume mount to /home/mcp for %s", tc.description)
+			}
+			
+			// Test 2: Verify environment variables are passed through correctly
+			envFound := make(map[string]bool)
+			for i, arg := range args {
+				if arg == "-e" && i+1 < len(args) {
+					envPair := args[i+1]
+					parts := strings.SplitN(envPair, "=", 2)
+					if len(parts) == 2 {
+						envKey := parts[0]
+						envValue := parts[1]
+						
+						// Check if this is one of our test environment variables
+						if expectedValue, exists := tc.envVars[envKey]; exists {
+							if envValue == expectedValue {
+								envFound[envKey] = true
+							} else {
+								t.Errorf("Environment variable %s has wrong value: expected %s, got %s", envKey, expectedValue, envValue)
+							}
+						}
+						
+						// Verify MCP configuration variables are NOT passed through
+						if envKey == "MCP_MOUNT" || envKey == "MCP_BIND_HOME" || envKey == "MCP_HOME_PATH" {
+							t.Errorf("MCP configuration variable %s should not be passed to container", envKey)
+						}
+					}
+				}
+			}
+			
+			// Verify all expected environment variables were found
+			for envKey := range tc.envVars {
+				if !envFound[envKey] {
+					t.Errorf("Expected environment variable %s not found in container args for %s", envKey, tc.description)
+				}
+			}
+			
+			// Test 3: Verify user mounts are included when specified
+			if tc.mountConfig != "" {
+				foundUserMount := false
+				for i, arg := range args {
+					if arg == "-v" && i+1 < len(args) {
+						mountSpec := args[i+1]
+						// Check if this looks like our user mount (contains :ro or matches pattern)
+						if strings.Contains(mountSpec, ":ro") || strings.Contains(mountSpec, ":/data") {
+							foundUserMount = true
+							break
+						}
+					}
+				}
+				if !foundUserMount {
+					t.Errorf("Expected user mount not found in container args for %s", tc.description)
+				}
+			}
+			
+			// Test 4: Verify volume name generation
+			if volumeName == "" && os.Getenv("MCP_BIND_HOME") == "" && os.Getenv("MCP_HOME_PATH") == "" {
+				t.Errorf("Expected volume name to be generated for %s", tc.description)
+			}
+			
+			// Test 5: Verify image selection
+			expectedImage, _ := config.GetImageForLanguage(tc.language)
+			foundImage := false
+			for _, arg := range args {
+				if arg == expectedImage {
+					foundImage = true
+					break
+				}
+			}
+			if !foundImage {
+				t.Errorf("Expected image %s not found in container args for %s", expectedImage, tc.description)
+			}
+			
+			// Test 6: Verify command arguments are preserved
+			imageIndex := -1
+			for i, arg := range args {
+				if arg == expectedImage {
+					imageIndex = i
+					break
+				}
+			}
+			
+			if imageIndex != -1 && imageIndex+1 < len(args) {
+				commandArgs := args[imageIndex+1:]
+				expectedArgs := tc.args
+				
+				// Handle explicit runtime specification
+				if len(tc.args) >= 2 && (tc.args[0] == "python" || tc.args[0] == "node" || tc.args[0] == "nodejs") {
+					expectedArgs = tc.args[1:]
+				}
+				
+				if len(commandArgs) >= len(expectedArgs) {
+					for i, expected := range expectedArgs {
+						if i < len(commandArgs) && commandArgs[i] != expected {
+							t.Errorf("Command arg mismatch for %s at position %d: expected %s, got %s", tc.description, i, expected, commandArgs[i])
+						}
+					}
+				} else {
+					t.Errorf("Not enough command arguments for %s: expected at least %d, got %d", tc.description, len(expectedArgs), len(commandArgs))
+				}
+			}
+		})
+	}
+}
+// Property 3: Home Directory Write Access
+// For any file or directory operation within /home/mcp, the container should have full read/write permissions,
+// enabling MCP servers to create configuration files, logs, and cache data
+func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
+	// **Feature: container-home-isolation, Property 3: Home Directory Write Access**
+	// **Validates: Requirements 1.3, 3.2**
+	
+	// Test cases for different types of file operations that should be possible in /home/mcp
+	testCases := []struct {
+		name        string
+		args        []string
+		language    string
+		description string
+	}{
+		{
+			name:        "python_server_config",
+			args:        []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			language:    "python",
+			description: "Python server should be able to write config files",
+		},
+		{
+			name:        "nodejs_server_logs",
+			args:        []string{"npx", "@modelcontextprotocol/server-filesystem", "/data"},
+			language:    "nodejs",
+			description: "Node.js server should be able to write log files",
+		},
+		{
+			name:        "python_cache_data",
+			args:        []string{"python", "uvx", "awslabs.aws-api-mcp-server@latest"},
+			language:    "python",
+			description: "Python server should be able to write cache data",
+		},
+		{
+			name:        "nodejs_temp_files",
+			args:        []string{"node", "npx", "@modelcontextprotocol/server-memory"},
+			language:    "nodejs",
+			description: "Node.js server should be able to create temporary files",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := &Config{
+				NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
+				PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
+				DataDir:     t.TempDir(),
+			}
+			
+			// Build container command
+			cmd, volumeName, err := buildContainerCommand(config, "docker", tc.language, tc.args)
+			if err != nil {
+				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
+			}
+			
+			// Verify command was built successfully
+			if cmd == nil {
+				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
+			}
+			
+			// Verify volume mount is present and writable (not read-only)
+			args := cmd.Args
+			foundWritableHomeMount := false
+			
+			for i, arg := range args {
+				if arg == "-v" && i+1 < len(args) {
+					mountSpec := args[i+1]
+					if strings.Contains(mountSpec, ":/home/mcp") {
+						// Verify it's NOT read-only (should not contain :ro)
+						if !strings.Contains(mountSpec, ":ro") {
+							foundWritableHomeMount = true
+						} else {
+							t.Errorf("Home directory mount should be writable, but found read-only mount: %s", mountSpec)
+						}
+						break
+					}
+				}
+			}
+			
+			if !foundWritableHomeMount {
+				t.Errorf("Expected writable home volume mount to /home/mcp for %s", tc.description)
+			}
+			
+			// Verify volume name was generated (indicates persistent storage)
+			homeMount := os.Getenv("MCP_BIND_HOME")
+			customHome := os.Getenv("MCP_HOME_PATH")
+			if homeMount == "" && customHome == "" {
+				if volumeName == "" {
+					t.Errorf("Expected volume name to be generated for persistent home directory for %s", tc.description)
+				}
+				
+				// Volume should follow expected naming pattern
+				if !strings.HasPrefix(volumeName, "mcp-home-") && !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
+					t.Errorf("Volume name should follow expected pattern for %s, got: %s", tc.description, volumeName)
+				}
+			}
+			
+			// Verify the container will run with appropriate user permissions
+			// The container should run as UID 1000 (mcp user) which has write access to /home/mcp
+			expectedImage, _ := config.GetImageForLanguage(tc.language)
+			foundImage := false
+			for _, arg := range args {
+				if arg == expectedImage {
+					foundImage = true
+					break
+				}
+			}
+			
+			if !foundImage {
+				t.Errorf("Expected image %s not found in container args for %s", expectedImage, tc.description)
+			}
+			
+			// Verify no conflicting user or permission flags that would prevent write access
+			for i, arg := range args {
+				// Check for user override that might conflict with write permissions
+				if arg == "--user" && i+1 < len(args) {
+					userSpec := args[i+1]
+					// If user is set to root (0:0) or other non-mcp user, it might affect permissions
+					if userSpec != "1000:1000" && userSpec != "mcp:mcp" {
+						t.Logf("Warning: User override detected (%s) for %s - verify write permissions", userSpec, tc.description)
+					}
+				}
+				
+				// Check for read-only filesystem flags
+				if arg == "--read-only" {
+					t.Errorf("Container should not have read-only filesystem for %s", tc.description)
+				}
+			}
+			
+			// Test different mount scenarios
+			t.Run("volume_mount", func(t *testing.T) {
+				// When using container volumes, verify mount is writable
+				if volumeName != "" {
+					// Volume mount should be in format: volumeName:/home/mcp (no :ro suffix)
+					expectedMount := volumeName + ":/home/mcp"
+					foundExpectedMount := false
+					
+					for i, arg := range args {
+						if arg == "-v" && i+1 < len(args) {
+							if args[i+1] == expectedMount {
+								foundExpectedMount = true
+								break
+							}
+						}
+					}
+					
+					if !foundExpectedMount {
+						t.Errorf("Expected volume mount %s not found for %s", expectedMount, tc.description)
+					}
+				}
+			})
+			
+			t.Run("bind_mount", func(t *testing.T) {
+				// When using bind mounts (MCP_BIND_HOME or MCP_HOME_PATH), verify they're writable
+				if homeMount != "" || customHome != "" {
+					// Bind mounts should also be writable (no :ro suffix)
+					foundBindMount := false
+					
+					for i, arg := range args {
+						if arg == "-v" && i+1 < len(args) {
+							mountSpec := args[i+1]
+							if strings.Contains(mountSpec, ":/home/mcp") && !strings.Contains(mountSpec, ":ro") {
+								foundBindMount = true
+								break
+							}
+						}
+					}
+					
+					if !foundBindMount {
+						t.Errorf("Expected writable bind mount to /home/mcp for %s", tc.description)
+					}
+				}
+			})
+		})
+	}
+}
+// Property 5: Consistent Mount Point
+// For any container type (Python or Node.js) and MCP server command, 
+// the Container_Home volume should always be mounted at /home/mcp with read/write permissions
+func TestProperty5_ConsistentMountPoint(t *testing.T) {
+	// **Feature: container-home-isolation, Property 5: Consistent Mount Point**
+	// **Validates: Requirements 1.5**
+	
+	// Test cases covering different container types and command variations
+	testCases := []struct {
+		name         string
+		args         []string
+		language     string
+		ephemeral    bool
+		description  string
+	}{
+		{
+			name:        "python_uvx_persistent",
+			args:        []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			language:    "python",
+			ephemeral:   false,
+			description: "Python uvx command with persistent volume",
+		},
+		{
+			name:        "python_uvx_ephemeral",
+			args:        []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			language:    "python",
+			ephemeral:   true,
+			description: "Python uvx command with ephemeral volume",
+		},
+		{
+			name:        "nodejs_npx_persistent",
+			args:        []string{"npx", "@modelcontextprotocol/server-filesystem", "/data"},
+			language:    "nodejs",
+			ephemeral:   false,
+			description: "Node.js npx command with persistent volume",
+		},
+		{
+			name:        "nodejs_npx_ephemeral",
+			args:        []string{"npx", "@modelcontextprotocol/server-filesystem", "/data"},
+			language:    "nodejs",
+			ephemeral:   true,
+			description: "Node.js npx command with ephemeral volume",
+		},
+		{
+			name:        "python_explicit_runtime",
+			args:        []string{"python", "uvx", "awslabs.aws-api-mcp-server@latest"},
+			language:    "python",
+			ephemeral:   false,
+			description: "Explicit Python runtime specification",
+		},
+		{
+			name:        "nodejs_explicit_runtime",
+			args:        []string{"node", "npx", "@modelcontextprotocol/server-memory"},
+			language:    "nodejs",
+			ephemeral:   false,
+			description: "Explicit Node.js runtime specification",
+		},
+		{
+			name:        "python_complex_command",
+			args:        []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/test.db", "--readonly", "--port", "8080"},
+			language:    "python",
+			ephemeral:   false,
+			description: "Complex Python command with multiple arguments",
+		},
+		{
+			name:        "nodejs_complex_command",
+			args:        []string{"npx", "@modelcontextprotocol/server-filesystem", "/data", "--verbose", "--port", "3000"},
+			language:    "nodejs",
+			ephemeral:   true,
+			description: "Complex Node.js command with multiple arguments",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := &Config{
+				NodejsImage:   "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
+				PythonImage:   "ghcr.io/serverless-dna/run-mcp-python:latest",
+				DataDir:       t.TempDir(),
+				EphemeralMode: tc.ephemeral,
+			}
+			
+			// Build container command
+			cmd, volumeName, err := buildContainerCommand(config, "docker", tc.language, tc.args)
+			if err != nil {
+				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
+			}
+			
+			// Verify command was built successfully
+			if cmd == nil {
+				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
+			}
+			
+			args := cmd.Args
+			if len(args) == 0 {
+				t.Fatalf("Command args should not be empty for %s", tc.description)
+			}
+			
+			// Test 1: Verify exactly one mount to /home/mcp exists
+			homeMountCount := 0
+			var homeMountSpec string
+			
+			for i, arg := range args {
+				if arg == "-v" && i+1 < len(args) {
+					mountSpec := args[i+1]
+					if strings.Contains(mountSpec, ":/home/mcp") {
+						homeMountCount++
+						homeMountSpec = mountSpec
+					}
+				}
+			}
+			
+			if homeMountCount == 0 {
+				t.Errorf("Expected exactly one mount to /home/mcp for %s, found none", tc.description)
+			} else if homeMountCount > 1 {
+				t.Errorf("Expected exactly one mount to /home/mcp for %s, found %d", tc.description, homeMountCount)
+			}
+			
+			// Test 2: Verify mount point is exactly /home/mcp (not /home/mcp/ or other variations)
+			if homeMountSpec != "" {
+				parts := strings.Split(homeMountSpec, ":")
+				if len(parts) >= 2 {
+					mountPoint := parts[1]
+					if mountPoint != "/home/mcp" {
+						t.Errorf("Expected mount point to be exactly '/home/mcp' for %s, got '%s'", tc.description, mountPoint)
+					}
+				}
+			}
+			
+			// Test 3: Verify mount is read/write (not read-only)
+			if homeMountSpec != "" && strings.Contains(homeMountSpec, ":ro") {
+				t.Errorf("Home directory mount should be read/write, not read-only for %s: %s", tc.description, homeMountSpec)
+			}
+			
+			// Test 4: Verify volume name consistency based on mode
+			homeMount := os.Getenv("MCP_BIND_HOME")
+			customHome := os.Getenv("MCP_HOME_PATH")
+			
+			if homeMount == "" && customHome == "" {
+				// Using container volumes
+				if volumeName == "" {
+					t.Errorf("Expected volume name to be generated for %s", tc.description)
+				} else {
+					// Verify volume name follows expected pattern
+					if tc.ephemeral {
+						if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
+							t.Errorf("Expected ephemeral volume name to start with 'mcp-ephemeral-' for %s, got: %s", tc.description, volumeName)
+						}
+					} else {
+						if !strings.HasPrefix(volumeName, "mcp-home-") {
+							t.Errorf("Expected persistent volume name to start with 'mcp-home-' for %s, got: %s", tc.description, volumeName)
+						}
+					}
+					
+					// Verify mount spec uses the generated volume name
+					expectedMountPrefix := volumeName + ":/home/mcp"
+					if !strings.HasPrefix(homeMountSpec, expectedMountPrefix) {
+						t.Errorf("Expected mount spec to start with '%s' for %s, got: %s", expectedMountPrefix, tc.description, homeMountSpec)
+					}
+				}
+			}
+			
+			// Test 5: Verify consistency across different container types
+			expectedImage, _ := config.GetImageForLanguage(tc.language)
+			foundImage := false
+			
+			for _, arg := range args {
+				if arg == expectedImage {
+					foundImage = true
+					break
+				}
+			}
+			
+			if !foundImage {
+				t.Errorf("Expected image %s not found in container args for %s", expectedImage, tc.description)
+			}
+			
+			// Test 6: Verify no conflicting mounts to /home directory
+			for i, arg := range args {
+				if arg == "-v" && i+1 < len(args) {
+					mountSpec := args[i+1]
+					parts := strings.Split(mountSpec, ":")
+					if len(parts) >= 2 {
+						mountPoint := parts[1]
+						// Check for conflicting mounts to /home or subdirectories other than /home/mcp
+						if strings.HasPrefix(mountPoint, "/home/") && mountPoint != "/home/mcp" {
+							t.Errorf("Found conflicting mount to /home directory for %s: %s", tc.description, mountSpec)
+						}
+					}
+				}
+			}
+			
+			// Test 7: Verify mount consistency across runtime variations
+			t.Run("runtime_consistency", func(t *testing.T) {
+				// Test with different runtime commands to ensure consistency
+				runtimes := []string{"docker", "podman", "nerdctl", "finch"}
+				
+				for _, runtime := range runtimes {
+					// Skip if runtime is not available (this is just a consistency check)
+					cmd2, volumeName2, err2 := buildContainerCommand(config, runtime, tc.language, tc.args)
+					if err2 != nil {
+						// Runtime might not be available, skip
+						continue
+					}
+					
+					// Find home mount in this runtime's command
+					args2 := cmd2.Args
+					var homeMountSpec2 string
+					
+					for i, arg := range args2 {
+						if arg == "-v" && i+1 < len(args2) {
+							mountSpec := args2[i+1]
+							if strings.Contains(mountSpec, ":/home/mcp") {
+								homeMountSpec2 = mountSpec
+								break
+							}
+						}
+					}
+					
+					// Verify mount point is consistent across runtimes
+					if homeMountSpec2 != "" {
+						parts := strings.Split(homeMountSpec2, ":")
+						if len(parts) >= 2 && parts[1] != "/home/mcp" {
+							t.Errorf("Mount point inconsistent across runtimes for %s with %s: expected /home/mcp, got %s", tc.description, runtime, parts[1])
+						}
+					}
+					
+					// Verify volume name consistency (should be same across runtimes for same command)
+					// Note: Ephemeral volumes use timestamps so they will be different each time
+					if homeMount == "" && customHome == "" && volumeName != "" && volumeName2 != "" && !tc.ephemeral {
+						if volumeName != volumeName2 {
+							t.Errorf("Volume name inconsistent across runtimes for %s: %s vs %s", tc.description, volumeName, volumeName2)
+						}
+					}
+				}
+			})
+		})
+	}
+}
+// Property 7: Environment Variable Passthrough
+// For any user-provided environment variables, run-mcp should pass them through to the container 
+// without modification, preserving both names and values
+func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
+	// **Feature: container-home-isolation, Property 7: Environment Variable Passthrough**
+	// **Validates: Requirements 3.1, 3.3**
+	
+	// Save original environment to restore later
+	originalEnv := make(map[string]string)
+	testEnvVars := []string{
+		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "AWS_SESSION_TOKEN",
+		"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY",
+		"GOOGLE_API_KEY", "GITHUB_TOKEN", "GITLAB_TOKEN",
+		"DATABASE_URL", "REDIS_URL", "HF_TOKEN", "REPLICATE_API_TOKEN",
+		"COHERE_API_KEY", "MCP_CUSTOM_VAR", "MCP_PASSTHROUGH_TEST",
+	}
+	
+	// Save original values
+	for _, envVar := range testEnvVars {
+		originalEnv[envVar] = os.Getenv(envVar)
+	}
+	
+	defer func() {
+		// Restore original environment
+		for _, envVar := range testEnvVars {
+			if originalValue, existed := originalEnv[envVar]; existed && originalValue != "" {
+				os.Setenv(envVar, originalValue)
+			} else {
+				os.Unsetenv(envVar)
+			}
+		}
+	}()
+	
+	// Test cases with different combinations of environment variables
+	testCases := []struct {
+		name        string
+		args        []string
+		language    string
+		envVars     map[string]string
+		description string
+	}{
+		{
+			name:     "aws_credentials",
+			args:     []string{"uvx", "awslabs.aws-api-mcp-server@latest"},
+			language: "python",
+			envVars: map[string]string{
+				"AWS_ACCESS_KEY_ID":     "AKIAIOSFODNN7EXAMPLE",
+				"AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+				"AWS_REGION":            "us-east-1",
+				"AWS_SESSION_TOKEN":     "example-session-token",
+			},
+			description: "AWS credentials should be passed through",
+		},
+		{
+			name:     "ai_api_keys",
+			args:     []string{"npx", "@modelcontextprotocol/server-memory"},
+			language: "nodejs",
+			envVars: map[string]string{
+				"OPENAI_API_KEY":       "sk-example-openai-key",
+				"ANTHROPIC_API_KEY":    "sk-ant-example-key",
+				"AZURE_OPENAI_API_KEY": "example-azure-key",
+				"GOOGLE_API_KEY":       "example-google-key",
+			},
+			description: "AI API keys should be passed through",
+		},
+		{
+			name:     "development_tokens",
+			args:     []string{"python", "uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			language: "python",
+			envVars: map[string]string{
+				"GITHUB_TOKEN":        "ghp_example_token",
+				"GITLAB_TOKEN":        "glpat_example_token",
+				"HF_TOKEN":            "hf_example_token",
+				"REPLICATE_API_TOKEN": "r8_example_token",
+				"COHERE_API_KEY":      "example_cohere_key",
+			},
+			description: "Development tokens should be passed through",
+		},
+		{
+			name:     "database_urls",
+			args:     []string{"node", "npx", "@modelcontextprotocol/server-filesystem", "/data"},
+			language: "nodejs",
+			envVars: map[string]string{
+				"DATABASE_URL": "postgresql://user:pass@localhost:5432/db",
+				"REDIS_URL":    "redis://localhost:6379",
+			},
+			description: "Database URLs should be passed through",
+		},
+		{
+			name:     "custom_mcp_vars",
+			args:     []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			language: "python",
+			envVars: map[string]string{
+				"MCP_CUSTOM_VAR":       "custom_value",
+				"MCP_PASSTHROUGH_TEST": "test_value",
+				"MCP_SERVER_CONFIG":    "config_value",
+			},
+			description: "Custom MCP variables should be passed through",
+		},
+		{
+			name:     "mixed_environment",
+			args:     []string{"npx", "@modelcontextprotocol/server-filesystem", "/data"},
+			language: "nodejs",
+			envVars: map[string]string{
+				"AWS_ACCESS_KEY_ID": "AKIAIOSFODNN7EXAMPLE",
+				"OPENAI_API_KEY":    "sk-example-key",
+				"GITHUB_TOKEN":      "ghp_example_token",
+				"DATABASE_URL":      "postgresql://localhost:5432/db",
+				"MCP_CUSTOM_VAR":    "mixed_test_value",
+			},
+			description: "Mixed environment variables should all be passed through",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Clear all test environment variables first
+			for _, envVar := range testEnvVars {
+				os.Unsetenv(envVar)
+			}
+			
+			// Set up test environment variables
+			for key, value := range tc.envVars {
+				os.Setenv(key, value)
+			}
+			
+			config := &Config{
+				NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
+				PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
+				DataDir:     t.TempDir(),
+			}
+			
+			// Build container command
+			cmd, _, err := buildContainerCommand(config, "docker", tc.language, tc.args)
+			if err != nil {
+				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
+			}
+			
+			// Verify command was built successfully
+			if cmd == nil {
+				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
+			}
+			
+			args := cmd.Args
+			if len(args) == 0 {
+				t.Fatalf("Command args should not be empty for %s", tc.description)
+			}
+			
+			// Extract environment variables from container command
+			containerEnv := make(map[string]string)
+			for i, arg := range args {
+				if arg == "-e" && i+1 < len(args) {
+					envPair := args[i+1]
+					parts := strings.SplitN(envPair, "=", 2)
+					if len(parts) == 2 {
+						containerEnv[parts[0]] = parts[1]
+					}
+				}
+			}
+			
+			// Test 1: Verify all expected environment variables are passed through
+			for expectedKey, expectedValue := range tc.envVars {
+				if actualValue, exists := containerEnv[expectedKey]; !exists {
+					t.Errorf("Expected environment variable %s not found in container for %s", expectedKey, tc.description)
+				} else if actualValue != expectedValue {
+					t.Errorf("Environment variable %s has wrong value for %s: expected %s, got %s", expectedKey, tc.description, expectedValue, actualValue)
+				}
+			}
+			
+			// Test 2: Verify MCP configuration variables are NOT passed through
+			configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_HOME_PATH"}
+			for _, configVar := range configVars {
+				if _, exists := containerEnv[configVar]; exists {
+					t.Errorf("MCP configuration variable %s should not be passed to container for %s", configVar, tc.description)
+				}
+			}
+			
+			// Test 3: Verify environment variable names are preserved exactly
+			for expectedKey := range tc.envVars {
+				found := false
+				for containerKey := range containerEnv {
+					if containerKey == expectedKey {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Environment variable name %s not preserved exactly for %s", expectedKey, tc.description)
+				}
+			}
+			
+			// Test 4: Verify environment variable values are preserved exactly (no modification)
+			for expectedKey, expectedValue := range tc.envVars {
+				if actualValue, exists := containerEnv[expectedKey]; exists {
+					// Check for any modifications to the value
+					if len(actualValue) != len(expectedValue) {
+						t.Errorf("Environment variable %s value length changed for %s: expected %d chars, got %d chars", expectedKey, tc.description, len(expectedValue), len(actualValue))
+					}
+					
+					// Check character-by-character to ensure no modifications
+					if actualValue != expectedValue {
+						t.Errorf("Environment variable %s value modified for %s: expected '%s', got '%s'", expectedKey, tc.description, expectedValue, actualValue)
+					}
+				}
+			}
+			
+			// Test 5: Verify no unexpected environment variables are added
+			// (This test checks that we don't add extra variables beyond what's expected)
+			expectedCount := len(tc.envVars)
+			actualCount := 0
+			
+			// Count variables that match our test set
+			for containerKey := range containerEnv {
+				for expectedKey := range tc.envVars {
+					if containerKey == expectedKey {
+						actualCount++
+						break
+					}
+				}
+			}
+			
+			if actualCount != expectedCount {
+				t.Errorf("Environment variable count mismatch for %s: expected %d test variables, found %d", tc.description, expectedCount, actualCount)
+			}
+			
+			// Test 6: Verify special characters and edge cases in values are preserved
+			t.Run("special_characters", func(t *testing.T) {
+				// Test with special characters in environment variable values
+				specialTestVars := map[string]string{
+					"TEST_SPECIAL_CHARS": "value with spaces and symbols: !@#$%^&*(){}[]|\\:;\"'<>?,./",
+					"TEST_MULTILINE":     "line1\nline2\nline3",
+					"TEST_UNICODE":       "测试中文 🚀 émojis",
+					"TEST_EMPTY":         "",
+					"TEST_EQUALS":        "key=value=more=equals",
+				}
+				
+				// Save original values
+				originalSpecial := make(map[string]string)
+				for key := range specialTestVars {
+					originalSpecial[key] = os.Getenv(key)
+				}
+				
+				defer func() {
+					// Restore original values
+					for key, originalValue := range originalSpecial {
+						if originalValue != "" {
+							os.Setenv(key, originalValue)
+						} else {
+							os.Unsetenv(key)
+						}
+					}
+				}()
+				
+				// Set special test variables
+				for key, value := range specialTestVars {
+					os.Setenv(key, value)
+				}
+				
+				// Build command with special variables
+				cmd2, _, err2 := buildContainerCommand(config, "docker", tc.language, tc.args)
+				if err2 != nil {
+					t.Fatalf("buildContainerCommand failed with special characters: %v", err2)
+				}
+				
+				// Extract environment variables
+				containerEnv2 := make(map[string]string)
+				for i, arg := range cmd2.Args {
+					if arg == "-e" && i+1 < len(cmd2.Args) {
+						envPair := cmd2.Args[i+1]
+						parts := strings.SplitN(envPair, "=", 2)
+						if len(parts) == 2 {
+							containerEnv2[parts[0]] = parts[1]
+						}
+					}
+				}
+				
+				// Verify special characters are preserved
+				for key, expectedValue := range specialTestVars {
+					if actualValue, exists := containerEnv2[key]; exists {
+						if actualValue != expectedValue {
+							t.Errorf("Special character preservation failed for %s: expected '%s', got '%s'", key, expectedValue, actualValue)
+						}
+					}
+				}
+			})
+		})
+	}
+}

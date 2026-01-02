@@ -315,6 +315,7 @@ func listImageTags(containerRuntime, registry, repo string) error {
 }
 
 // buildContainerCommand constructs the container execution command
+// Requirements: 1.5, 5.1, 5.4
 func buildContainerCommand(config *Config, containerRuntime, language string, args []string) (*exec.Cmd, string, error) {
 	// Get the appropriate image for the language
 	image, err := config.GetImageForLanguage(language)
@@ -325,29 +326,12 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 	// Build container command arguments
 	containerArgs := []string{"run", "-i", "--rm"}
 	
-	// Add environment variables
+	// Add environment variables (filtered to exclude MCP configuration variables)
+	// Requirements: 3.1, 3.3, 3.5
 	envFilter := NewEnvFilter()
 	containerArgs = append(containerArgs, envFilter.GetFilteredEnvArgs()...)
 	
-	// Add volume mounts (including home volume)
-	volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
-	volumeMounts := volumeManager.GetVolumeMounts()
-	containerArgs = append(containerArgs, volumeMounts...)
-	
-	// Add user-specified mounts from MCP_MOUNT
-	// Requirements: 7.1, 7.2, 7.3, 7.4, 7.8
-	userMountParser := NewUserMountParser()
-	userMounts, err := userMountParser.ParseUserMounts()
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to parse user mounts: %w", err)
-	}
-	
-	if len(userMounts) > 0 {
-		userMountArgs := userMountParser.GetMountArgs(userMounts)
-		containerArgs = append(containerArgs, userMountArgs...)
-	}
-	
-	// Handle home directory override support
+	// Handle home directory override support first
 	// Requirements: 7.6, 7.7
 	homeOverrideHandler := NewHomeOverrideHandler()
 	homeMount := homeOverrideHandler.GetHomeMount(args)
@@ -376,10 +360,14 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 		}
 		
 		// Add home directory override mount
+		// Requirements: 1.5 - Mount at /home/mcp consistently
 		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", homeMount))
 		volumeName = "" // No volume name when using override
 	} else {
 		// Use container volume (default behavior)
+		// Requirements: 1.1, 1.2, 1.5
+		volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+		
 		if config.EphemeralMode {
 			volumeName, err = volumeManager.CreateEphemeralVolume(serverName, containerRuntime)
 			if err != nil {
@@ -392,14 +380,27 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 			}
 		}
 		
-		// Add home volume mount
+		// Add home volume mount - Requirements: 1.5
 		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", volumeName))
+	}
+	
+	// Add user-specified mounts from MCP_MOUNT
+	// Requirements: 7.1, 7.2, 7.3, 7.4, 7.8
+	userMountParser := NewUserMountParser()
+	userMounts, err := userMountParser.ParseUserMounts()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to parse user mounts: %w", err)
+	}
+	
+	if len(userMounts) > 0 {
+		userMountArgs := userMountParser.GetMountArgs(userMounts)
+		containerArgs = append(containerArgs, userMountArgs...)
 	}
 	
 	// Add image
 	containerArgs = append(containerArgs, image)
 	
-	// Handle explicit runtime specification
+	// Handle explicit runtime specification - Requirements: 5.1, 5.4 (backward compatibility)
 	if len(args) >= 2 && (args[0] == "python" || args[0] == "node" || args[0] == "nodejs") {
 		containerArgs = append(containerArgs, args[1:]...)
 	} else {
