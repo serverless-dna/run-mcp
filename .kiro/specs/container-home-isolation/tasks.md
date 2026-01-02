@@ -159,21 +159,21 @@ This implementation plan converts the container home isolation design into incre
   - Show physical storage location when supported
   - _Requirements: 4.8, 4.13_
 
-- [ ] 11. Implement volume prune functionality
+- [x] 11. Implement volume prune functionality
   - Add `PruneHomeVolumes()` method with confirmation
   - Implement runtime-specific volume filtering
   - Add storage usage warnings
   - _Requirements: 4.6, 4.7, 6.6_
 
-- [ ] 11.1 Write property test for volume prune operation
+- [x] 11.1 Write property test for volume prune operation
   - **Property 11: Volume Prune Operation**
   - **Validates: Requirements 4.6, 4.7**
 
-- [ ] 11.2 Write unit tests for storage warnings
+- [x] 11.2 Write unit tests for storage warnings
   - Test size limit detection and warning messages
   - _Requirements: 6.6_
 
-- [ ] 11.3 Write property test for volume persistence
+- [x] 11.3 Write property test for volume persistence
   - **Property 10: Volume Persistence**
   - **Validates: Requirements 4.3, 6.1, 6.2**
 

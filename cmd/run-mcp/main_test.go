@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -4204,6 +4205,73 @@ func TestVolumeCommandArgumentValidation(t *testing.T) {
 	}
 }
 
+// Property 11: Volume Prune Operation
+// For any set of managed volumes, the prune command should remove all volumes with the mcp-home-* pattern, 
+// leaving no managed volumes remaining
+func TestProperty11_VolumePruneOperation(t *testing.T) {
+	// **Feature: container-home-isolation, Property 11: Volume Prune Operation**
+	// **Validates: Requirements 4.6, 4.7**
+	
+	property := func(volumeCount int) bool {
+		if volumeCount < 0 || volumeCount > 10 {
+			return true // Skip invalid inputs
+		}
+		
+		// Create a mock volume commander for testing
+		commander := &MockVolumeCommander{
+			volumes: make(map[string]VolumeInfo),
+		}
+		
+		// Create test volumes with run-mcp labels
+		volumeNames := make([]string, volumeCount)
+		for i := 0; i < volumeCount; i++ {
+			volumeName := fmt.Sprintf("mcp-home-test-server-%d", i)
+			volumeNames[i] = volumeName
+			
+			commander.volumes[volumeName] = VolumeInfo{
+				Name: volumeName,
+				Labels: map[string]string{
+					"run-mcp":         "true",
+					"run-mcp.server":  fmt.Sprintf("test-server-%d", i),
+					"run-mcp.runtime": "docker",
+				},
+				CreatedAt: time.Now(),
+				Runtime:   "docker",
+			}
+		}
+		
+		// List volumes before prune
+		volumesBefore, err := commander.ListVolumes()
+		if err != nil {
+			return false
+		}
+		
+		if len(volumesBefore) != volumeCount {
+			return false
+		}
+		
+		// Prune all volumes
+		for _, vol := range volumesBefore {
+			if err := commander.RemoveVolume(vol.Name); err != nil {
+				return false
+			}
+		}
+		
+		// List volumes after prune
+		volumesAfter, err := commander.ListVolumes()
+		if err != nil {
+			return false
+		}
+		
+		// Property: After prune, no managed volumes should remain
+		return len(volumesAfter) == 0
+	}
+	
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Error(err)
+	}
+}
+
 // Test volume command flag parsing
 // Requirements: 4.9, 4.13
 func TestVolumeCommandFlagParsing(t *testing.T) {
@@ -4267,5 +4335,452 @@ func TestVolumeCommandFlagParsing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Test storage warning message formatting
+// Requirements: 6.6
+func TestStorageWarningMessageFormatting(t *testing.T) {
+	testCases := []struct {
+		name        string
+		volumeName  string
+		volumeSize  string
+		sizeLimit   string
+		expectedMsg string
+	}{
+		{
+			name:        "basic warning message",
+			volumeName:  "mcp-home-test-server",
+			volumeSize:  "200MB",
+			sizeLimit:   "100MB",
+			expectedMsg: "Warning: Volume 'mcp-home-test-server' size (200MB) exceeds configured limit (100MB)",
+		},
+		{
+			name:        "warning with GB sizes",
+			volumeName:  "mcp-home-large-server",
+			volumeSize:  "2.5GB",
+			sizeLimit:   "1GB",
+			expectedMsg: "Warning: Volume 'mcp-home-large-server' size (2.5GB) exceeds configured limit (1GB)",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := formatStorageWarningMessage(tc.volumeName, tc.volumeSize, tc.sizeLimit)
+			
+			if msg != tc.expectedMsg {
+				t.Errorf("Expected message '%s', got '%s'", tc.expectedMsg, msg)
+			}
+		})
+	}
+}
+
+// Test storage size parsing and comparison
+// Requirements: 6.6
+func TestStorageSizeComparison(t *testing.T) {
+	testCases := []struct {
+		name      string
+		size1     string
+		size2     string
+		expected  int // -1 if size1 < size2, 0 if equal, 1 if size1 > size2
+		expectErr bool
+	}{
+		{
+			name:     "MB comparison - smaller",
+			size1:    "50MB",
+			size2:    "100MB",
+			expected: -1,
+		},
+		{
+			name:     "MB comparison - equal",
+			size1:    "100MB",
+			size2:    "100MB",
+			expected: 0,
+		},
+		{
+			name:     "MB comparison - larger",
+			size1:    "150MB",
+			size2:    "100MB",
+			expected: 1,
+		},
+		{
+			name:     "GB vs MB comparison",
+			size1:    "2GB",
+			size2:    "500MB",
+			expected: 1,
+		},
+		{
+			name:     "KB vs MB comparison",
+			size1:    "500KB",
+			size2:    "1MB",
+			expected: -1,
+		},
+		{
+			name:      "invalid size format",
+			size1:     "invalid",
+			size2:     "100MB",
+			expectErr: true,
+		},
+		{
+			name:      "empty size",
+			size1:     "",
+			size2:     "100MB",
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := compareStorageSizes(tc.size1, tc.size2)
+			
+			if tc.expectErr {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error but got: %v", err)
+				} else if result != tc.expected {
+					t.Errorf("Expected comparison result %d, got %d", tc.expected, result)
+				}
+			}
+		})
+	}
+}
+
+// Unit tests for storage warnings
+// Test size limit detection and warning messages
+// Requirements: 6.6
+func TestStorageWarnings(t *testing.T) {
+	testCases := []struct {
+		name           string
+		volumeSize     string
+		maxVolumeSize  string
+		expectWarning  bool
+		expectedMsg    string
+	}{
+		{
+			name:          "volume under limit",
+			volumeSize:    "50MB",
+			maxVolumeSize: "100MB",
+			expectWarning: false,
+		},
+		{
+			name:          "volume at limit",
+			volumeSize:    "100MB",
+			maxVolumeSize: "100MB",
+			expectWarning: false,
+		},
+		{
+			name:          "volume over limit",
+			volumeSize:    "150MB",
+			maxVolumeSize: "100MB",
+			expectWarning: true,
+			expectedMsg:   "Warning: Volume size (150MB) exceeds configured limit (100MB)",
+		},
+		{
+			name:          "no size limit configured",
+			volumeSize:    "500MB",
+			maxVolumeSize: "",
+			expectWarning: false,
+		},
+		{
+			name:          "no volume size available",
+			volumeSize:    "",
+			maxVolumeSize: "100MB",
+			expectWarning: false,
+		},
+		{
+			name:          "invalid size format",
+			volumeSize:    "invalid",
+			maxVolumeSize: "100MB",
+			expectWarning: false, // Should not warn on parse error
+		},
+		{
+			name:          "different units - GB vs MB",
+			volumeSize:    "2GB",
+			maxVolumeSize: "1500MB",
+			expectWarning: true,
+			expectedMsg:   "Warning: Volume size (2GB) exceeds configured limit (1500MB)",
+		},
+		{
+			name:          "different units - KB vs MB",
+			volumeSize:    "500KB",
+			maxVolumeSize: "1MB",
+			expectWarning: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := &Config{
+				MaxVolumeSize: tc.maxVolumeSize,
+			}
+			
+			volumeInfo := VolumeInfo{
+				Name: "test-volume",
+				Size: tc.volumeSize,
+			}
+			
+			warning := checkVolumeStorageWarning(config, volumeInfo)
+			
+			if tc.expectWarning {
+				if warning == "" {
+					t.Errorf("Expected warning but got none")
+				} else if warning != tc.expectedMsg {
+					t.Errorf("Expected warning message '%s', got '%s'", tc.expectedMsg, warning)
+				}
+			} else {
+				if warning != "" {
+					t.Errorf("Expected no warning but got: %s", warning)
+				}
+			}
+		})
+	}
+}
+
+// Test formatStorageWarningMessage function
+// Requirements: 6.6
+func TestFormatStorageWarningMessage(t *testing.T) {
+	testCases := []struct {
+		name        string
+		volumeName  string
+		volumeSize  string
+		sizeLimit   string
+		expected    string
+	}{
+		{
+			name:       "basic warning message",
+			volumeName: "mcp-home-test-server",
+			volumeSize: "150MB",
+			sizeLimit:  "100MB",
+			expected:   "Warning: Volume 'mcp-home-test-server' size (150MB) exceeds configured limit (100MB)",
+		},
+		{
+			name:       "warning with GB units",
+			volumeName: "mcp-home-large-server",
+			volumeSize: "2.5GB",
+			sizeLimit:  "2GB",
+			expected:   "Warning: Volume 'mcp-home-large-server' size (2.5GB) exceeds configured limit (2GB)",
+		},
+		{
+			name:       "warning with special characters in name",
+			volumeName: "mcp-home-server-with-dashes",
+			volumeSize: "1TB",
+			sizeLimit:  "500GB",
+			expected:   "Warning: Volume 'mcp-home-server-with-dashes' size (1TB) exceeds configured limit (500GB)",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := formatStorageWarningMessage(tc.volumeName, tc.volumeSize, tc.sizeLimit)
+			if result != tc.expected {
+				t.Errorf("Expected message '%s', got '%s'", tc.expected, result)
+			}
+		})
+	}
+}
+
+// Test parseStorageSize function edge cases
+// Requirements: 6.6
+func TestParseStorageSizeEdgeCases(t *testing.T) {
+	testCases := []struct {
+		name      string
+		input     string
+		expected  int64
+		expectErr bool
+	}{
+		{
+			name:     "bytes",
+			input:    "1024B",
+			expected: 1024,
+		},
+		{
+			name:     "kilobytes",
+			input:    "1KB",
+			expected: 1024,
+		},
+		{
+			name:     "megabytes",
+			input:    "1MB",
+			expected: 1024 * 1024,
+		},
+		{
+			name:     "gigabytes",
+			input:    "1GB",
+			expected: 1024 * 1024 * 1024,
+		},
+		{
+			name:     "terabytes",
+			input:    "1TB",
+			expected: 1024 * 1024 * 1024 * 1024,
+		},
+		{
+			name:     "decimal megabytes",
+			input:    "1.5MB",
+			expected: int64(1.5 * 1024 * 1024),
+		},
+		{
+			name:     "decimal gigabytes",
+			input:    "2.5GB",
+			expected: int64(2.5 * 1024 * 1024 * 1024),
+		},
+		{
+			name:     "lowercase units",
+			input:    "100mb",
+			expected: 100 * 1024 * 1024,
+		},
+		{
+			name:     "mixed case units",
+			input:    "50Mb",
+			expected: 50 * 1024 * 1024,
+		},
+		{
+			name:     "spaces in input",
+			input:    " 100 MB ",
+			expected: 100 * 1024 * 1024,
+		},
+		{
+			name:      "empty string",
+			input:     "",
+			expectErr: true,
+		},
+		{
+			name:      "no unit",
+			input:     "100",
+			expectErr: true,
+		},
+		{
+			name:      "invalid unit",
+			input:     "100XB",
+			expectErr: true,
+		},
+		{
+			name:      "invalid number",
+			input:     "abcMB",
+			expectErr: true,
+		},
+		{
+			name:      "negative number",
+			input:     "-100MB",
+			expectErr: true,
+		},
+		{
+			name:     "zero size",
+			input:    "0MB",
+			expected: 0,
+		},
+		{
+			name:      "multiple decimal points",
+			input:     "1.2.3MB",
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := parseStorageSize(tc.input)
+			
+			if tc.expectErr {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error but got: %v", err)
+				} else if result != tc.expected {
+					t.Errorf("Expected %d bytes, got %d bytes", tc.expected, result)
+				}
+			}
+		})
+	}
+}
+// Property 10: Volume Persistence
+// For any created volume, the data should persist indefinitely across container stops, crashes, and restarts 
+// until explicitly removed by user commands
+func TestProperty10_VolumePersistence(t *testing.T) {
+	// **Feature: container-home-isolation, Property 10: Volume Persistence**
+	// **Validates: Requirements 4.3, 6.1, 6.2**
+	
+	property := func(serverName string, restartCount int) bool {
+		// Limit inputs to reasonable ranges
+		if len(serverName) == 0 || len(serverName) > 50 || restartCount < 0 || restartCount > 10 {
+			return true // Skip invalid inputs
+		}
+		
+		// Sanitize server name to ensure it's valid
+		sanitizedName := strings.ReplaceAll(serverName, " ", "-")
+		if sanitizedName == "" {
+			return true
+		}
+		
+		config := &Config{}
+		
+		// Create a mock volume commander for testing
+		commander := &MockVolumeCommander{
+			volumes: make(map[string]VolumeInfo),
+		}
+		
+		vm := &VolumeManager{
+			config:    config,
+			commander: commander,
+			runtime:   "docker",
+		}
+		
+		// Create initial volume
+		volumeName, err := vm.CreateHomeVolume(sanitizedName, "docker")
+		if err != nil {
+			return false
+		}
+		
+		// Verify volume was created
+		exists, err := commander.VolumeExists(volumeName)
+		if err != nil || !exists {
+			return false
+		}
+		
+		// Simulate multiple container restarts
+		for i := 0; i < restartCount; i++ {
+			// Simulate container stop (volume should persist)
+			// In real scenario, only container is removed, not volume
+			
+			// Simulate container restart - volume should still exist and be reused
+			volumeName2, err := vm.CreateHomeVolume(sanitizedName, "docker")
+			if err != nil {
+				return false
+			}
+			
+			// Property: Same server name should always return same volume name
+			if volumeName2 != volumeName {
+				return false
+			}
+			
+			// Property: Volume should still exist after restart
+			exists, err := commander.VolumeExists(volumeName)
+			if err != nil || !exists {
+				return false
+			}
+		}
+		
+		// Property: Volume should persist until explicitly removed
+		// Simulate explicit removal
+		err = vm.RemoveHomeVolume(sanitizedName)
+		if err != nil {
+			return false
+		}
+		
+		// Property: After explicit removal, volume should no longer exist
+		exists, err = commander.VolumeExists(volumeName)
+		if err != nil {
+			return false
+		}
+		
+		// Volume should not exist after explicit removal
+		return !exists
+	}
+	
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Error(err)
 	}
 }

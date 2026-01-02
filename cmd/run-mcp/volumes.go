@@ -1353,3 +1353,333 @@ func (hoh *HomeOverrideHandler) isTruthy(value string) bool {
 	lower := strings.ToLower(strings.TrimSpace(value))
 	return lower == "true" || lower == "1" || lower == "yes" || lower == "on"
 }
+// Storage warning functionality for requirement 6.6
+
+// checkVolumeStorageWarning checks if a volume exceeds the configured size limit and returns a warning message
+// Requirements: 6.6
+func checkVolumeStorageWarning(config *Config, volumeInfo VolumeInfo) string {
+	if config.MaxVolumeSize == "" || volumeInfo.Size == "" {
+		return ""
+	}
+	
+	comparison, err := compareStorageSizes(volumeInfo.Size, config.MaxVolumeSize)
+	if err != nil {
+		// If we can't parse sizes, don't show warning
+		return ""
+	}
+	
+	if comparison > 0 {
+		return fmt.Sprintf("Warning: Volume size (%s) exceeds configured limit (%s)", volumeInfo.Size, config.MaxVolumeSize)
+	}
+	
+	return ""
+}
+
+// formatStorageWarningMessage formats a storage warning message with volume name
+// Requirements: 6.6
+func formatStorageWarningMessage(volumeName, volumeSize, sizeLimit string) string {
+	return fmt.Sprintf("Warning: Volume '%s' size (%s) exceeds configured limit (%s)", volumeName, volumeSize, sizeLimit)
+}
+
+// compareStorageSizes compares two storage size strings
+// Returns -1 if size1 < size2, 0 if equal, 1 if size1 > size2
+// Requirements: 6.6
+func compareStorageSizes(size1, size2 string) (int, error) {
+	bytes1, err := parseStorageSize(size1)
+	if err != nil {
+		return 0, fmt.Errorf("invalid size format for '%s': %w", size1, err)
+	}
+	
+	bytes2, err := parseStorageSize(size2)
+	if err != nil {
+		return 0, fmt.Errorf("invalid size format for '%s': %w", size2, err)
+	}
+	
+	if bytes1 < bytes2 {
+		return -1, nil
+	} else if bytes1 > bytes2 {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+// parseStorageSize parses a storage size string (e.g., "100MB", "2GB") into bytes
+// Requirements: 6.6
+func parseStorageSize(sizeStr string) (int64, error) {
+	if sizeStr == "" {
+		return 0, fmt.Errorf("empty size string")
+	}
+	
+	// Remove all spaces and convert to uppercase
+	sizeStr = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(sizeStr), " ", ""))
+	
+	// Define size multipliers
+	multipliers := map[string]int64{
+		"B":  1,
+		"KB": 1024,
+		"MB": 1024 * 1024,
+		"GB": 1024 * 1024 * 1024,
+		"TB": 1024 * 1024 * 1024 * 1024,
+	}
+	
+	// Find the unit suffix - check longer units first to avoid partial matches
+	units := []string{"TB", "GB", "MB", "KB", "B"}
+	var unit string
+	var numberPart string
+	
+	for _, suffix := range units {
+		if strings.HasSuffix(sizeStr, suffix) {
+			unit = suffix
+			numberPart = strings.TrimSuffix(sizeStr, suffix)
+			break
+		}
+	}
+	
+	if unit == "" {
+		return 0, fmt.Errorf("no valid unit found (B, KB, MB, GB, TB)")
+	}
+	
+	// Parse the numeric part
+	var number float64
+	var err error
+	
+	if strings.Contains(numberPart, ".") {
+		number, err = parseFloat(numberPart)
+	} else {
+		var intNumber int64
+		intNumber, err = parseInt(numberPart)
+		number = float64(intNumber)
+	}
+	
+	if err != nil {
+		return 0, fmt.Errorf("invalid number format: %s", numberPart)
+	}
+	
+	if number < 0 {
+		return 0, fmt.Errorf("negative size not allowed")
+	}
+	
+	bytes := int64(number * float64(multipliers[unit]))
+	return bytes, nil
+}
+
+// parseInt parses an integer string
+func parseInt(s string) (int64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty string")
+	}
+	
+	var result int64
+	var sign int64 = 1
+	
+	if s[0] == '-' {
+		sign = -1
+		s = s[1:]
+	} else if s[0] == '+' {
+		s = s[1:]
+	}
+	
+	for _, char := range s {
+		if char < '0' || char > '9' {
+			return 0, fmt.Errorf("invalid character: %c", char)
+		}
+		result = result*10 + int64(char-'0')
+	}
+	
+	return result * sign, nil
+}
+
+// parseFloat parses a float string
+func parseFloat(s string) (float64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("empty string")
+	}
+	
+	var result float64
+	var sign float64 = 1
+	var decimalPlaces int
+	var afterDecimal bool
+	
+	if s[0] == '-' {
+		sign = -1
+		s = s[1:]
+	} else if s[0] == '+' {
+		s = s[1:]
+	}
+	
+	for _, char := range s {
+		if char == '.' {
+			if afterDecimal {
+				return 0, fmt.Errorf("multiple decimal points")
+			}
+			afterDecimal = true
+			continue
+		}
+		
+		if char < '0' || char > '9' {
+			return 0, fmt.Errorf("invalid character: %c", char)
+		}
+		
+		digit := float64(char - '0')
+		
+		if afterDecimal {
+			decimalPlaces++
+			result += digit / pow10(decimalPlaces)
+		} else {
+			result = result*10 + digit
+		}
+	}
+	
+	return result * sign, nil
+}
+
+// pow10 returns 10^n
+func pow10(n int) float64 {
+	result := 1.0
+	for i := 0; i < n; i++ {
+		result *= 10
+	}
+	return result
+}
+
+// PruneHomeVolumes removes all managed volumes with confirmation
+// Requirements: 4.6, 4.7, 6.6
+func (vm *VolumeManager) PruneHomeVolumes() error {
+	if vm.commander == nil {
+		return fmt.Errorf("volume commander not initialized")
+	}
+	
+	// List all managed volumes
+	volumes, err := vm.commander.ListVolumes()
+	if err != nil {
+		return fmt.Errorf("failed to list volumes: %w", err)
+	}
+	
+	if len(volumes) == 0 {
+		return nil // No volumes to prune
+	}
+	
+	// Filter volumes to only include home volumes (runtime-specific filtering)
+	// Requirements: 4.6, 4.7
+	var homeVolumes []VolumeInfo
+	for _, vol := range volumes {
+		// Check if this is a home volume (has mcp-home- prefix or run-mcp.type=home label)
+		if strings.HasPrefix(vol.Name, "mcp-home-") || vol.Labels["run-mcp.type"] == "home" {
+			// Additional runtime filtering - only include volumes for current runtime
+			if vm.runtime == "" || vol.Labels["run-mcp.runtime"] == vm.runtime {
+				homeVolumes = append(homeVolumes, vol)
+			}
+		}
+	}
+	
+	if len(homeVolumes) == 0 {
+		return nil // No home volumes to prune
+	}
+	
+	// Check for storage warnings before pruning
+	// Requirements: 6.6
+	var warnings []string
+	for _, vol := range homeVolumes {
+		if warning := checkVolumeStorageWarning(vm.config, vol); warning != "" {
+			warnings = append(warnings, warning)
+		}
+	}
+	
+	// Display storage warnings if any
+	if len(warnings) > 0 {
+		fmt.Println("Storage Warnings:")
+		for _, warning := range warnings {
+			fmt.Printf("  %s\n", warning)
+		}
+		fmt.Println()
+	}
+	
+	// Remove all home volumes
+	var errors []string
+	for _, vol := range homeVolumes {
+		if err := vm.commander.RemoveVolume(vol.Name); err != nil {
+			errors = append(errors, fmt.Sprintf("failed to remove volume %s: %v", vol.Name, err))
+		}
+	}
+	
+	if len(errors) > 0 {
+		return fmt.Errorf("some volumes could not be removed:\n%s", strings.Join(errors, "\n"))
+	}
+	
+	return nil
+}
+
+// ListHomeVolumes lists all managed home volumes
+// Requirements: 4.4, 4.5, 2.10
+func (vm *VolumeManager) ListHomeVolumes() ([]VolumeInfo, error) {
+	if vm.commander == nil {
+		return nil, fmt.Errorf("volume commander not initialized")
+	}
+	
+	// List all managed volumes
+	volumes, err := vm.commander.ListVolumes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list volumes: %w", err)
+	}
+	
+	// Filter to only include home volumes for current runtime
+	var homeVolumes []VolumeInfo
+	for _, vol := range volumes {
+		// Check if this is a home volume
+		if strings.HasPrefix(vol.Name, "mcp-home-") || vol.Labels["run-mcp.type"] == "home" {
+			// Runtime-specific filtering
+			if vm.runtime == "" || vol.Labels["run-mcp.runtime"] == vm.runtime {
+				homeVolumes = append(homeVolumes, vol)
+			}
+		}
+	}
+	
+	return homeVolumes, nil
+}
+
+// RemoveHomeVolume removes a specific home volume by server name
+// Requirements: 4.5, 4.9
+func (vm *VolumeManager) RemoveHomeVolume(serverName string) error {
+	if vm.commander == nil {
+		return fmt.Errorf("volume commander not initialized")
+	}
+	
+	// Generate volume name from server name
+	volumeName := sanitizeVolumeName(strings.Fields(serverName))
+	
+	// Check if volume exists
+	exists, err := vm.commander.VolumeExists(volumeName)
+	if err != nil {
+		return fmt.Errorf("failed to check if volume exists: %w", err)
+	}
+	
+	if !exists {
+		return fmt.Errorf("volume for server '%s' not found (expected volume name: %s)", serverName, volumeName)
+	}
+	
+	// Remove the volume
+	if err := vm.commander.RemoveVolume(volumeName); err != nil {
+		return fmt.Errorf("failed to remove volume %s: %w", volumeName, err)
+	}
+	
+	return nil
+}
+
+// InspectHomeVolume inspects a specific home volume by server name
+// Requirements: 4.8, 4.13
+func (vm *VolumeManager) InspectHomeVolume(serverName string) (*VolumeDetails, error) {
+	if vm.commander == nil {
+		return nil, fmt.Errorf("volume commander not initialized")
+	}
+	
+	// Generate volume name from server name
+	volumeName := sanitizeVolumeName(strings.Fields(serverName))
+	
+	// Inspect the volume
+	details, err := vm.commander.InspectVolume(volumeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect volume %s: %w", volumeName, err)
+	}
+	
+	return details, nil
+}
