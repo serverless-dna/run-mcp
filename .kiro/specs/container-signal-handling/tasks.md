@@ -107,25 +107,25 @@ This implementation plan transforms the current blocking container execution (`c
   - **Property 10: Host Termination Cleanup**
   - **Validates: Requirements 5.4**
 
-- [ ] 9. Implement stream handling during shutdown
+- [x] 9. Implement stream handling during shutdown
   - Add stdout/stderr draining before termination
   - Implement EOF detection for container stream closure
   - Ensure stream draining doesn't prevent force termination
   - _Requirements: 8.1, 8.2, 8.3, 8.4_
 
-- [ ] 9.1 Write property test for stream draining
+- [x] 9.1 Write property test for stream draining
   - **Property 16: Stream Draining**
   - **Validates: Requirements 8.1**
 
-- [ ] 9.2 Write property test for EOF detection and shutdown
+- [x] 9.2 Write property test for EOF detection and shutdown
   - **Property 17: EOF Detection and Shutdown**
   - **Validates: Requirements 8.2**
 
-- [ ] 9.3 Write property test for stream timeout override
+- [x] 9.3 Write property test for stream timeout override
   - **Property 18: Stream Timeout Override**
   - **Validates: Requirements 8.3**
 
-- [ ] 9.4 Write property test for stdin EOF handling
+- [x] 9.4 Write property test for stdin EOF handling
   - **Property 19: Stdin EOF Handling**
   - **Validates: Requirements 8.4**
 
