@@ -30,17 +30,17 @@ This implementation plan transforms the current blocking container execution (`c
   - **Property 5: Configuration Loading**
   - **Validates: Requirements 2.3**
 
-- [ ] 3. Replace blocking execution with signal-aware execution
+- [x] 3. Replace blocking execution with signal-aware execution
   - Replace `containerCmd.Run()` in main.go with `Start()` + signal handling + `Wait()`
   - Integrate SignalHandler and ProcessManager into main execution flow
   - Ensure stdio passthrough continues to work correctly
   - _Requirements: 1.3, 1.4, 8.1, 8.2_
 
-- [ ] 3.1 Write property test for exit code propagation
+- [x] 3.1 Write property test for exit code propagation
   - **Property 2: Exit Code Propagation**
   - **Validates: Requirements 1.4**
 
-- [ ] 3.2 Write property test for graceful shutdown wait
+- [x] 3.2 Write property test for graceful shutdown wait
   - **Property 3: Graceful Shutdown Wait**
   - **Validates: Requirements 1.3**
 

@@ -6,6 +6,5 @@ inclusion: always
    
    Learn about inclusion modes: https://kiro.dev/docs/steering/#inclusion-modes
 -------------------------------------------------------------------------------------> 
-- When needing to compile the run-mcp go command.  ALways use the `make build-run-mcp` action.  It places the binary into the correct location in build/run-mcp.  
-- Always is make targets for testing so we can be sure all tests are included in the make targets.
-- All project tests, linting, validations must be accessible through make targets.
+- Always ensure there are make targets for all added tests so we can be sure all tests are used in CI/CD.
+- You MUST us the emakefile to run tests and build run-mcp

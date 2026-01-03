@@ -90,34 +90,25 @@ func runMCP(cmd *cobra.Command, args []string, ephemeralMode bool) error {
 		return fmt.Errorf("language detection failed: %w", err)
 	}
 
-	// Build and execute container command
-	containerCmd, volumeName, err := buildContainerCommand(config, containerRuntime, language, args)
+	// Build container command with signal handling support
+	containerCmd, volumeName, signalHandler, err := buildContainerCommandWithSignals(config, containerRuntime, language, args)
 	if err != nil {
 		errorHandler := NewErrorHandler()
 		return errorHandler.FormatUserFriendlyError(err, "container")
 	}
 	
-	// Set up cleanup for ephemeral volumes
-	if ephemeralMode && volumeName != "" {
-		defer func() {
+	// Set up cleanup for ephemeral volumes (AFTER container exits)
+	defer func() {
+		if ephemeralMode && volumeName != "" {
 			volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
 			if cleanupErr := volumeManager.CleanupEphemeralVolume(volumeName); cleanupErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup ephemeral volume %s: %v\n", volumeName, cleanupErr)
 			}
-		}()
-	}
+		}
+	}()
 	
-	// Execute with stdio passthrough
-	containerCmd.Stdin = os.Stdin
-	containerCmd.Stdout = os.Stdout
-	containerCmd.Stderr = os.Stderr
-
-	if err := containerCmd.Run(); err != nil {
-		errorHandler := NewErrorHandler()
-		return errorHandler.HandleContainerStartupError(err, containerRuntime, config.NodejsImage)
-	}
-	
-	return nil
+	// Execute with signal-aware execution
+	return executeWithSignalHandling(containerCmd, signalHandler)
 }
 
 func createDoctorCommand() *cobra.Command {
@@ -990,4 +981,170 @@ func containsIssue(issues []string, issue string) bool {
 		}
 	}
 	return false
+}
+
+// buildContainerCommandWithSignals constructs the container execution command with signal handling support
+// Requirements: 1.3, 1.4, 8.1, 8.2
+func buildContainerCommandWithSignals(config *Config, containerRuntime, language string, args []string) (*exec.Cmd, string, SignalHandler, error) {
+	// Get the appropriate image for the language
+	image, err := config.GetImageForLanguage(language)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// Create ProcessManager with container naming for signal forwarding
+	processManager := NewContainerProcessManager(containerRuntime, args)
+	
+	// Build base container command arguments
+	containerArgs := []string{"run", "-i", "--rm"}
+	
+	// Add unique container name for signal forwarding
+	containerArgs = append(containerArgs, "--name", processManager.GetContainerName())
+	
+	// Add environment variables (filtered to exclude MCP configuration variables)
+	envFilter := NewEnvFilter()
+	containerArgs = append(containerArgs, envFilter.GetFilteredEnvArgs()...)
+	
+	// Handle home directory override support first
+	homeOverrideHandler := NewHomeOverrideHandler()
+	homeMount := homeOverrideHandler.GetHomeMount(args)
+	
+	var volumeName string
+	serverName := strings.Join(args, " ")
+	
+	if homeMount != "" {
+		// Use home directory override (MCP_BIND_HOME or MCP_HOME_PATH)
+		bindHomeValue := os.Getenv("MCP_BIND_HOME")
+		if bindHomeValue != "" {
+			// Check if MCP_BIND_HOME is truthy
+			lower := strings.ToLower(strings.TrimSpace(bindHomeValue))
+			isTruthy := lower == "true" || lower == "1" || lower == "yes" || lower == "on"
+			
+			if isTruthy {
+				// Create bind home directory with enhanced error handling
+				volumeNameForBind := sanitizeVolumeName(args)
+				bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeNameForBind)
+				if err != nil {
+					errorHandler := NewErrorHandler()
+					return nil, "", nil, errorHandler.HandleFilesystemError(err, "~/.run-mcp/"+volumeNameForBind)
+				}
+				homeMount = bindPath
+			}
+		}
+		
+		// Add home directory override mount
+		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", homeMount))
+		volumeName = "" // No volume name when using override
+	} else {
+		// Use container volume (default behavior)
+		volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+		
+		if config.EphemeralMode {
+			volumeName, err = volumeManager.CreateEphemeralVolume(serverName, containerRuntime)
+			if err != nil {
+				errorHandler := NewErrorHandler()
+				return nil, "", nil, errorHandler.HandleVolumeError(err, "ephemeral volume creation")
+			}
+		} else {
+			volumeName, err = volumeManager.CreateHomeVolume(serverName, containerRuntime)
+			if err != nil {
+				errorHandler := NewErrorHandler()
+				return nil, "", nil, errorHandler.HandleVolumeError(err, "home volume creation")
+			}
+		}
+		
+		// Add home volume mount
+		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", volumeName))
+	}
+	
+	// Add user-specified mounts from MCP_MOUNT with enhanced error handling
+	userMountParser := NewUserMountParser()
+	userMounts, err := userMountParser.ParseUserMounts()
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return nil, "", nil, errorHandler.HandleMountError(err, os.Getenv("MCP_MOUNT"))
+	}
+	
+	if len(userMounts) > 0 {
+		userMountArgs := userMountParser.GetMountArgs(userMounts)
+		containerArgs = append(containerArgs, userMountArgs...)
+	}
+	
+	// Add image
+	containerArgs = append(containerArgs, image)
+	
+	// Handle explicit runtime specification
+	if len(args) >= 2 && (args[0] == "python" || args[0] == "node" || args[0] == "nodejs") {
+		containerArgs = append(containerArgs, args[1:]...)
+	} else {
+		containerArgs = append(containerArgs, args...)
+	}
+
+	// Build final command using ProcessManager for consistent runtime handling
+	parts := strings.Fields(containerRuntime)
+	var containerCmd *exec.Cmd
+	if len(parts) > 1 {
+		// Multi-word runtime (e.g., "lima nerdctl")
+		finalArgs := append(parts[1:], containerArgs...)
+		containerCmd = exec.Command(parts[0], finalArgs...)
+	} else {
+		// Single-word runtime (e.g., "docker", "podman")
+		containerCmd = exec.Command(containerRuntime, containerArgs...)
+	}
+	
+	// Create signal handler
+	signalHandler := NewSignalHandler(processManager)
+	
+	return containerCmd, volumeName, signalHandler, nil
+}
+
+// executeWithSignalHandling executes the container with signal-aware handling
+// Requirements: 1.3, 1.4, 8.1, 8.2
+func executeWithSignalHandling(containerCmd *exec.Cmd, signalHandler SignalHandler) error {
+	// Configure stdio passthrough
+	containerCmd.Stdin = os.Stdin
+	containerCmd.Stdout = os.Stdout
+	containerCmd.Stderr = os.Stderr
+	
+	// Get process manager from signal handler
+	processManager := signalHandler.GetProcessManager()
+	
+	// Start container (non-blocking)
+	if err := processManager.StartContainer(containerCmd); err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleContainerStartupError(err, "container", "")
+	}
+	
+	// Start signal handling
+	if err := signalHandler.Start(containerCmd); err != nil {
+		return fmt.Errorf("failed to start signal handling: %w", err)
+	}
+	
+	// Wait for completion and get exit code
+	exitCode, err := processManager.WaitForExit()
+	
+	// Stop signal handling
+	signalHandler.Stop()
+	
+	// Handle exit based on exit code and error
+	return handleExit(exitCode, err)
+}
+
+// handleExit processes the container exit code and error
+// Requirements: 1.4
+func handleExit(exitCode int, err error) error {
+	if err != nil {
+		// If there's an error but we have an exit code, prioritize the exit code
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+		return err
+	}
+	
+	// Exit with the same code as the container
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+	
+	return nil
 }

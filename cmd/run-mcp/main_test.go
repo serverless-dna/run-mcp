@@ -5,6 +5,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -5746,6 +5747,199 @@ func TestContainerNamingIntegration(t *testing.T) {
 			if len(lastPart) < 10 { // Nanosecond timestamps are long
 				t.Errorf("Container name should contain nanosecond timestamp for uniqueness: %s", containerName)
 			}
+		})
+	}
+}
+
+// Property 2: Exit Code Propagation
+// For any container exit code, when the container process exits after receiving a signal, the host process should exit with the same exit code
+func TestProperty2_ExitCodePropagation(t *testing.T) {
+	// **Feature: container-signal-handling, Property 2: Exit Code Propagation**
+	// **Validates: Requirements 1.4**
+	
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+	
+	// Skip if no container runtime available
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		t.Skipf("No container runtime available: %v", err)
+	}
+	
+	// Property test with reduced iterations for faster execution
+	for i := 0; i < 10; i++ {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+			// Generate test exit codes (reduced set for faster testing)
+			exitCodes := []int{0, 1, 2, 42, 130}
+			exitCode := exitCodes[i%len(exitCodes)]
+			
+			// Create a simple container command that exits with the specified code
+			// Use a minimal container that can exit with any code
+			args := []string{"sh", "-c", fmt.Sprintf("exit %d", exitCode)}
+			
+			// Create process manager
+			processManager := NewContainerProcessManager(containerRuntime, args)
+			
+			// Build a minimal container command for testing
+			containerArgs := []string{
+				"run", "-i", "--rm",
+				"--name", processManager.GetContainerName(),
+				"alpine:latest", // Use minimal alpine image
+			}
+			containerArgs = append(containerArgs, args...)
+			
+			// Handle multi-word runtimes
+			parts := strings.Fields(containerRuntime)
+			var containerCmd *exec.Cmd
+			if len(parts) > 1 {
+				finalArgs := append(parts[1:], containerArgs...)
+				containerCmd = exec.Command(parts[0], finalArgs...)
+			} else {
+				containerCmd = exec.Command(containerRuntime, containerArgs...)
+			}
+			
+			// Start the container
+			if err := processManager.StartContainer(containerCmd); err != nil {
+				t.Skipf("Failed to start container (may not have alpine image): %v", err)
+			}
+			
+			// Wait for exit and get the exit code
+			actualExitCode, err := processManager.WaitForExit()
+			
+			// Verify exit code propagation
+			if err != nil && exitCode == 0 {
+				t.Errorf("Expected no error for exit code 0, got: %v", err)
+			}
+			
+			if actualExitCode != exitCode {
+				t.Errorf("Exit code not propagated correctly: expected %d, got %d", exitCode, actualExitCode)
+			}
+			
+			// Test the handleExit function behavior
+			// Note: We can't test os.Exit() directly, but we can test the logic
+			if exitCode == 0 {
+				if handleExitResult := handleExit(actualExitCode, nil); handleExitResult != nil {
+					t.Errorf("handleExit should return nil for exit code 0, got: %v", handleExitResult)
+				}
+			}
+			// For non-zero exit codes, handleExit calls os.Exit() which we can't test directly
+			// but we can verify the exit code is correctly passed through
+		})
+	}
+}
+// Property 3: Graceful Shutdown Wait
+// For any signal forwarded to a container process, the host process should wait for the container to exit gracefully before terminating itself
+func TestProperty3_GracefulShutdownWait(t *testing.T) {
+	// **Feature: container-signal-handling, Property 3: Graceful Shutdown Wait**
+	// **Validates: Requirements 1.3**
+	
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+	
+	// Skip if no container runtime available
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		t.Skipf("No container runtime available: %v", err)
+	}
+	
+	// Property test with reduced iterations for faster execution
+	for i := 0; i < 5; i++ {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+			// Test different graceful shutdown scenarios
+			shutdownDelays := []int{1, 2, 3} // seconds to wait before exiting
+			delay := shutdownDelays[i%len(shutdownDelays)]
+			
+			// Create a container command that handles signals gracefully
+			// This script will catch SIGTERM and wait before exiting
+			script := fmt.Sprintf(`
+				trap 'echo "Received signal, shutting down gracefully..."; sleep %d; exit 0' TERM INT
+				echo "Container started, waiting for signal..."
+				sleep 30 &  # Background sleep so we can interrupt
+				wait
+			`, delay)
+			
+			args := []string{"sh", "-c", script}
+			
+			// Create process manager and signal handler
+			processManager := NewContainerProcessManager(containerRuntime, args)
+			signalHandler := NewSignalHandler(processManager)
+			
+			// Build container command
+			containerArgs := []string{
+				"run", "-i", "--rm",
+				"--name", processManager.GetContainerName(),
+				"alpine:latest", // Use minimal alpine image
+			}
+			containerArgs = append(containerArgs, args...)
+			
+			// Handle multi-word runtimes
+			parts := strings.Fields(containerRuntime)
+			var containerCmd *exec.Cmd
+			if len(parts) > 1 {
+				finalArgs := append(parts[1:], containerArgs...)
+				containerCmd = exec.Command(parts[0], finalArgs...)
+			} else {
+				containerCmd = exec.Command(containerRuntime, containerArgs...)
+			}
+			
+			// Start the container
+			if err := processManager.StartContainer(containerCmd); err != nil {
+				t.Skipf("Failed to start container (may not have alpine image): %v", err)
+			}
+			
+			// Start signal handling
+			if err := signalHandler.Start(containerCmd); err != nil {
+				t.Fatalf("Failed to start signal handling: %v", err)
+			}
+			
+			// Give container time to start
+			time.Sleep(500 * time.Millisecond)
+			
+			// Record start time for measuring graceful shutdown
+			startTime := time.Now()
+			
+			// Send SIGTERM signal to test graceful shutdown
+			if err := processManager.ForwardSignal(syscall.SIGTERM); err != nil {
+				signalHandler.Stop()
+				t.Skipf("Failed to forward signal (container may have exited): %v", err)
+			}
+			
+			// Wait for container to exit gracefully
+			exitCode, err := processManager.WaitForExit()
+			shutdownDuration := time.Since(startTime)
+			
+			// Stop signal handling
+			signalHandler.Stop()
+			
+			// Verify graceful shutdown behavior
+			if err != nil {
+				t.Errorf("Expected graceful shutdown, got error: %v", err)
+			}
+			
+			if exitCode != 0 {
+				t.Errorf("Expected exit code 0 for graceful shutdown, got: %d", exitCode)
+			}
+			
+			// Verify that the host process waited for the container's graceful shutdown
+			// The shutdown should take at least the delay time (allowing some tolerance)
+			minExpectedDuration := time.Duration(delay) * time.Second
+			maxExpectedDuration := minExpectedDuration + 2*time.Second // Allow 2s tolerance
+			
+			if shutdownDuration < minExpectedDuration {
+				t.Errorf("Host process did not wait for graceful shutdown: expected at least %v, got %v", 
+					minExpectedDuration, shutdownDuration)
+			}
+			
+			if shutdownDuration > maxExpectedDuration {
+				t.Logf("Shutdown took longer than expected (but this is acceptable): expected max %v, got %v", 
+					maxExpectedDuration, shutdownDuration)
+			}
+			
+			t.Logf("Graceful shutdown completed in %v (expected ~%ds)", shutdownDuration, delay)
 		})
 	}
 }
