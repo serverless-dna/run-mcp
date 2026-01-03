@@ -1,6 +1,9 @@
 # Multi-stage build for Python MCP server container
+# Accept Python version as build argument
+ARG PYTHON_VERSION=3.12.12
+
 # Stage 1: Builder stage for installing dependencies
-FROM python:3.12-slim AS builder
+FROM python:${PYTHON_VERSION}-slim AS builder
 
 # Install system dependencies needed for building Python packages
 RUN apt-get update && \
@@ -21,7 +24,7 @@ RUN uv venv /app/venv
 RUN uv pip install --no-cache-dir --python /app/venv/bin/python mcp>=1.0.0 uvloop>=0.19.0 httpx>=0.25.0 pydantic>=2.0.0 typing-extensions>=4.8.0
 
 # Stage 2: Runtime stage
-FROM python:3.12-slim AS runtime
+FROM python:${PYTHON_VERSION}-slim AS runtime
 
 # Install runtime dependencies and security updates
 RUN apt-get update && \
