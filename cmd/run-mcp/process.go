@@ -107,7 +107,26 @@ func (pm *ContainerProcessManager) ForwardSignal(sig os.Signal) error {
 	args := append(parts[1:], "kill", "--signal", signalName, pm.containerName)
 	cmd := exec.Command(parts[0], args...)
 	
-	return cmd.Run()
+	// Execute the signal forwarding command
+	if err := cmd.Run(); err != nil {
+		// Requirements 6.2: Handle duplicate signals gracefully for already-terminated containers
+		// Check if the error is because the container is already stopped
+		if strings.Contains(err.Error(), "no such container") || 
+		   strings.Contains(err.Error(), "container not found") ||
+		   strings.Contains(err.Error(), "is not running") ||
+		   strings.Contains(err.Error(), "container has stopped") ||
+		   strings.Contains(err.Error(), "container already terminated") ||
+		   strings.Contains(err.Error(), "container is not running") ||
+		   strings.Contains(err.Error(), "no container found") {
+			// Container already stopped, return descriptive error for duplicate signal handling
+			return fmt.Errorf("container already terminated")
+		}
+		
+		// Return the actual error for other cases
+		return fmt.Errorf("failed to forward signal %s to container %s: %w", signalName, pm.containerName, err)
+	}
+	
+	return nil
 }
 
 // ForceKill forcefully terminates the container

@@ -129,17 +129,17 @@ This implementation plan transforms the current blocking container execution (`c
   - **Property 19: Stdin EOF Handling**
   - **Validates: Requirements 8.4**
 
-- [ ] 10. Add unsupported signal resilience and duplicate signal handling
+- [x] 10. Add unsupported signal resilience and duplicate signal handling
   - Implement graceful handling of unsupported signals
   - Add duplicate signal handling for already-terminated containers
   - Ensure system continues normal operation when receiving unsupported signals
   - _Requirements: 3.5, 6.2_
 
-- [ ] 10.1 Write property test for unsupported signal resilience
+- [x] 10.1 Write property test for unsupported signal resilience
   - **Property 7: Unsupported Signal Resilience**
   - **Validates: Requirements 3.5**
 
-- [ ] 10.2 Write property test for duplicate signal handling
+- [x] 10.2 Write property test for duplicate signal handling
   - **Property 13: Duplicate Signal Handling**
   - **Validates: Requirements 6.2**
 

@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -290,14 +291,36 @@ func (sh *DefaultSignalHandler) handleSignals() {
 // handleSignal processes a single signal with progressive timeout handling
 // Enhanced to support child process signal propagation (Requirements 5.2)
 // Enhanced to support stream handling during shutdown (Requirements 8.1, 8.3)
+// Enhanced to support unsupported signal resilience (Requirements 3.5)
+// Enhanced to support duplicate signal handling (Requirements 6.2)
 func (sh *DefaultSignalHandler) handleSignal(sig os.Signal) {
 	if sh.config.EnableLogging {
 		fmt.Fprintf(os.Stderr, "[DEBUG] Received signal: %v at %s\n", sig, time.Now().Format(time.RFC3339))
 	}
 	
+	// Requirements 3.5: Unsupported Signal Resilience
+	// Check if this is a supported signal for the current platform
+	if !sh.isSupportedSignal(sig) {
+		if sh.config.EnableLogging {
+			fmt.Fprintf(os.Stderr, "[DEBUG] Ignoring unsupported signal: %v\n", sig)
+		}
+		// Ignore unsupported signals and continue normal operation
+		return
+	}
+	
 	// Forward signal to container with child process propagation
 	// Requirements 5.2: Child process signal propagation
+	// Requirements 6.2: Duplicate signal handling
 	if err := sh.forwardSignalWithChildPropagation(sig); err != nil {
+		// Requirements 6.2: Handle duplicate signals gracefully for already-terminated containers
+		if sh.isDuplicateSignalError(err) {
+			if sh.config.EnableLogging {
+				fmt.Fprintf(os.Stderr, "[DEBUG] Container already terminated, ignoring duplicate signal %v\n", sig)
+			}
+			// Gracefully handle duplicate signals - don't treat as error
+			return
+		}
+		
 		fmt.Fprintf(os.Stderr, "[ERROR] Failed to forward signal %v: %v\n", sig, err)
 		return
 	}
@@ -441,6 +464,52 @@ func getSignalName(sig os.Signal) string {
 	default:
 		return sig.String()
 	}
+}
+
+// isSupportedSignal checks if a signal is supported on the current platform
+// Requirements 3.5: Unsupported Signal Resilience
+func (sh *DefaultSignalHandler) isSupportedSignal(sig os.Signal) bool {
+	switch runtime.GOOS {
+	case "windows":
+		// Windows only supports os.Interrupt (Ctrl-C and Ctrl-Break)
+		return sig == os.Interrupt
+	case "linux", "darwin":
+		// Unix systems support SIGINT, SIGTERM, and SIGQUIT
+		return sig == syscall.SIGINT || sig == syscall.SIGTERM || sig == syscall.SIGQUIT
+	default:
+		// Other platforms default to os.Interrupt only
+		return sig == os.Interrupt
+	}
+}
+
+// isDuplicateSignalError checks if an error indicates a duplicate signal to already-terminated container
+// Requirements 6.2: Duplicate Signal Handling
+func (sh *DefaultSignalHandler) isDuplicateSignalError(err error) bool {
+	if err == nil {
+		return false
+	}
+	
+	errorMsg := strings.ToLower(err.Error())
+	
+	// Check for common error messages indicating container is already terminated
+	duplicateSignalIndicators := []string{
+		"container not started",
+		"no such container",
+		"container not found",
+		"is not running",
+		"container has stopped",
+		"container already terminated",
+		"container is not running",
+		"no container found",
+	}
+	
+	for _, indicator := range duplicateSignalIndicators {
+		if strings.Contains(errorMsg, indicator) {
+			return true
+		}
+	}
+	
+	return false
 }
 // drainStreamsWithTimeout allows streams to drain before termination with timeout override
 // Requirements 8.1: Stream draining before termination

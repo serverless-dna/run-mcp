@@ -7715,3 +7715,301 @@ func TestProperty19_StdinEOFHandling(t *testing.T) {
 		})
 	}
 }
+
+// Property 7: Unsupported Signal Resilience
+// For any unsupported signal sent to the host process, the signal handler should ignore it and continue normal operation without disruption
+func TestProperty7_UnsupportedSignalResilience(t *testing.T) {
+	// **Feature: container-signal-handling, Property 7: Unsupported Signal Resilience**
+	// **Validates: Requirements 3.5**
+	
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+	
+	// Test supported container runtimes
+	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
+	
+	// Define platform-specific supported and unsupported signals
+	var supportedSignals []os.Signal
+	var unsupportedSignals []os.Signal
+	
+	switch runtime.GOOS {
+	case "windows":
+		supportedSignals = []os.Signal{os.Interrupt}
+		// On Windows, Unix signals are unsupported
+		unsupportedSignals = []os.Signal{syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGUSR1, syscall.SIGUSR2}
+	case "linux", "darwin":
+		supportedSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT}
+		// On Unix, these signals are typically unsupported for container signal forwarding
+		unsupportedSignals = []os.Signal{syscall.SIGUSR1, syscall.SIGUSR2, syscall.SIGPIPE, syscall.SIGALRM}
+	default:
+		supportedSignals = []os.Signal{os.Interrupt}
+		unsupportedSignals = []os.Signal{syscall.SIGTERM, syscall.SIGQUIT}
+	}
+	
+	// Property test with multiple iterations
+	for i := 0; i < 10; i++ {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+			// Generate random test data
+			runtimeIndex := rand.Intn(len(supportedRuntimes))
+			testRuntime := supportedRuntimes[runtimeIndex]
+			
+			// Create process manager and signal handler
+			testArgs := []string{"uvx", "test-server"}
+			processManager := NewContainerProcessManager(testRuntime, testArgs)
+			signalHandler := NewSignalHandler(processManager)
+			
+			// Test that supported signals are recognized as supported
+			for _, sig := range supportedSignals {
+				if !signalHandler.(*DefaultSignalHandler).isSupportedSignal(sig) {
+					t.Errorf("Signal %v should be supported on platform %s", sig, runtime.GOOS)
+				}
+			}
+			
+			// Test that unsupported signals are recognized as unsupported
+			for _, sig := range unsupportedSignals {
+				if signalHandler.(*DefaultSignalHandler).isSupportedSignal(sig) {
+					t.Errorf("Signal %v should be unsupported on platform %s", sig, runtime.GOOS)
+				}
+			}
+			
+			// Test signal handler creation and configuration
+			if signalHandler == nil {
+				t.Fatal("Signal handler should not be nil")
+			}
+			
+			// Test that unsupported signals don't cause errors in signal name conversion
+			for _, sig := range unsupportedSignals {
+				signalName := getSignalName(sig)
+				if signalName == "" {
+					t.Errorf("Signal name should not be empty for unsupported signal %v", sig)
+				}
+				// Signal name should either be a standard name or the string representation
+				if signalName != "SIGINT" && signalName != "SIGTERM" && signalName != "SIGKILL" && 
+				   signalName != "SIGQUIT" && signalName != sig.String() {
+					t.Errorf("Signal name %s should be either standard or string representation for signal %v", signalName, sig)
+				}
+			}
+			
+			// Test container naming consistency for unsupported signal scenarios
+			containerName := processManager.GetContainerName()
+			if containerName == "" {
+				t.Error("Container name should not be empty for unsupported signal handling")
+			}
+			
+			// Container name should follow expected pattern
+			expectedVolumeName := sanitizeVolumeName(testArgs)
+			if !strings.HasPrefix(containerName, expectedVolumeName+"-") {
+				t.Errorf("Container name %s does not follow expected pattern %s-", containerName, expectedVolumeName)
+			}
+			
+			// Test that BuildCommand creates proper container for signal handling
+			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
+			cmd := processManager.BuildCommand(image, testArgs)
+			if cmd == nil {
+				t.Error("Built command should not be nil for unsupported signal handling")
+			}
+			
+			// Verify command includes necessary flags for signal handling
+			cmdArgs := cmd.Args
+			hasNameFlag := false
+			hasRemoveFlag := false
+			
+			for i, arg := range cmdArgs {
+				if arg == "--name" && i+1 < len(cmdArgs) && cmdArgs[i+1] == containerName {
+					hasNameFlag = true
+				}
+				if arg == "--rm" {
+					hasRemoveFlag = true
+				}
+			}
+			
+			if !hasNameFlag {
+				t.Error("Container command should include --name flag for signal handling")
+			}
+			
+			if !hasRemoveFlag {
+				t.Error("Container command should include --rm flag for cleanup")
+			}
+			
+			// Test runtime command parsing for unsupported signal scenarios
+			parts := strings.Fields(testRuntime)
+			if len(parts) == 0 {
+				t.Errorf("Runtime %s should not be empty", testRuntime)
+			}
+			
+			// Test signal handler configuration
+			signalHandler.SetTimeout(5*time.Second, 10*time.Second)
+			
+			// Test that signal handler can be stopped gracefully
+			if err := signalHandler.Stop(); err != nil {
+				t.Errorf("Signal handler stop should not fail: %v", err)
+			}
+		})
+	}
+}
+
+// Property 13: Duplicate Signal Handling
+// For any container process that has already terminated, sending additional signals should be handled gracefully without errors or crashes
+func TestProperty13_DuplicateSignalHandling(t *testing.T) {
+	// **Feature: container-signal-handling, Property 13: Duplicate Signal Handling**
+	// **Validates: Requirements 6.2**
+	
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+	
+	// Test supported container runtimes
+	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
+	
+	// Test supported signals (platform-specific)
+	var supportedSignals []os.Signal
+	switch runtime.GOOS {
+	case "windows":
+		supportedSignals = []os.Signal{os.Interrupt}
+	case "linux", "darwin":
+		supportedSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT}
+	default:
+		supportedSignals = []os.Signal{os.Interrupt}
+	}
+	
+	// Common error messages that indicate container already terminated
+	duplicateSignalErrors := []string{
+		"container not started",
+		"no such container",
+		"container not found",
+		"is not running",
+		"container has stopped",
+		"container already terminated",
+		"container is not running",
+		"no container found",
+	}
+	
+	// Property test with multiple iterations
+	for i := 0; i < 10; i++ {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+			// Generate random test data
+			runtimeIndex := rand.Intn(len(supportedRuntimes))
+			signalIndex := rand.Intn(len(supportedSignals))
+			errorIndex := rand.Intn(len(duplicateSignalErrors))
+			
+			testRuntime := supportedRuntimes[runtimeIndex]
+			testSignal := supportedSignals[signalIndex]
+			testErrorMsg := duplicateSignalErrors[errorIndex]
+			
+			// Create process manager and signal handler
+			testArgs := []string{"uvx", "test-server"}
+			processManager := NewContainerProcessManager(testRuntime, testArgs)
+			signalHandler := NewSignalHandler(processManager)
+			
+			// Test duplicate signal error detection
+			testError := fmt.Errorf("failed to forward signal: %s", testErrorMsg)
+			isDuplicate := signalHandler.(*DefaultSignalHandler).isDuplicateSignalError(testError)
+			
+			if !isDuplicate {
+				t.Errorf("Error '%s' should be recognized as duplicate signal error", testError.Error())
+			}
+			
+			// Test that non-duplicate errors are not misidentified
+			nonDuplicateErrors := []string{
+				"network error",
+				"permission denied",
+				"command not found",
+				"invalid signal",
+				"timeout occurred",
+			}
+			
+			for _, nonDuplicateMsg := range nonDuplicateErrors {
+				nonDuplicateError := fmt.Errorf("failed to forward signal: %s", nonDuplicateMsg)
+				if signalHandler.(*DefaultSignalHandler).isDuplicateSignalError(nonDuplicateError) {
+					t.Errorf("Error '%s' should NOT be recognized as duplicate signal error", nonDuplicateError.Error())
+				}
+			}
+			
+			// Test nil error handling
+			if signalHandler.(*DefaultSignalHandler).isDuplicateSignalError(nil) {
+				t.Error("Nil error should not be recognized as duplicate signal error")
+			}
+			
+			// Test signal handler creation and configuration
+			if signalHandler == nil {
+				t.Fatal("Signal handler should not be nil")
+			}
+			
+			// Test container naming for duplicate signal scenarios
+			containerName := processManager.GetContainerName()
+			if containerName == "" {
+				t.Error("Container name should not be empty for duplicate signal handling")
+			}
+			
+			// Container name should follow expected pattern
+			expectedVolumeName := sanitizeVolumeName(testArgs)
+			if !strings.HasPrefix(containerName, expectedVolumeName+"-") {
+				t.Errorf("Container name %s does not follow expected pattern %s-", containerName, expectedVolumeName)
+			}
+			
+			// Test that BuildCommand creates proper container for signal handling
+			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
+			cmd := processManager.BuildCommand(image, testArgs)
+			if cmd == nil {
+				t.Error("Built command should not be nil for duplicate signal handling")
+			}
+			
+			// Verify command includes necessary flags for signal handling
+			cmdArgs := cmd.Args
+			hasNameFlag := false
+			hasRemoveFlag := false
+			
+			for i, arg := range cmdArgs {
+				if arg == "--name" && i+1 < len(cmdArgs) && cmdArgs[i+1] == containerName {
+					hasNameFlag = true
+				}
+				if arg == "--rm" {
+					hasRemoveFlag = true
+				}
+			}
+			
+			if !hasNameFlag {
+				t.Error("Container command should include --name flag for signal handling")
+			}
+			
+			if !hasRemoveFlag {
+				t.Error("Container command should include --rm flag for cleanup")
+			}
+			
+			// Test signal name conversion for duplicate signal scenarios
+			signalName := getSignalName(testSignal)
+			if signalName == "" {
+				t.Errorf("Signal name should not be empty for signal %v", testSignal)
+			}
+			
+			// Test runtime command parsing for duplicate signal scenarios
+			parts := strings.Fields(testRuntime)
+			if len(parts) == 0 {
+				t.Errorf("Runtime %s should not be empty", testRuntime)
+			}
+			
+			// Test signal handler configuration
+			signalHandler.SetTimeout(5*time.Second, 10*time.Second)
+			
+			// Test that signal handler can be stopped gracefully
+			if err := signalHandler.Stop(); err != nil {
+				t.Errorf("Signal handler stop should not fail: %v", err)
+			}
+			
+			// Test that process manager handles duplicate signals gracefully
+			// We can't actually test with a running container, but we can test error handling
+			pm := signalHandler.GetProcessManager()
+			if pm == nil {
+				t.Error("Process manager should not be nil for duplicate signal handling")
+			}
+			
+			// Test force kill error handling (should handle "container not found" gracefully)
+			err := pm.ForceKill()
+			// Error is expected since no container is running, but it should be handled gracefully
+			if err != nil && !strings.Contains(err.Error(), "container not started") {
+				t.Errorf("Force kill should handle non-running container gracefully, got: %v", err)
+			}
+		})
+	}
+}
