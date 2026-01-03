@@ -92,98 +92,98 @@ This implementation plan converts the container home isolation design into incre
   - Test error message formatting
   - _Requirements: 7.9, 7.10_
 
-- [ ] 8. Implement home directory override support
+- [x] 8. Implement home directory override support
   - Add `MCP_BIND_HOME` and `MCP_HOME_PATH` handling
   - Create bind mount directory creation for `~/.run-mcp/<volume-name>/`
   - Implement override precedence logic
   - _Requirements: 7.6, 7.7_
 
-- [ ] 8.1 Write property test for home directory overrides
+- [x] 8.1 Write property test for home directory overrides
   - **Property 9: Home Directory Override Behavior**
   - **Validates: Requirements 7.6, 7.7**
 
-- [ ] 8.2 Write unit tests for bind home directory creation
+- [x] 8.2 Write unit tests for bind home directory creation
   - Test directory creation and permissions
   - Test path expansion and validation
   - _Requirements: 7.6, 7.7_
 
-- [ ] 9. Integrate volume mounting into container execution
+- [x] 9. Integrate volume mounting into container execution
   - Update `buildContainerCommand()` to include home volume mounts
   - Add user-specified mount integration
   - Ensure backward compatibility with existing commands
   - _Requirements: 1.5, 5.1, 5.4_
 
-- [ ] 9.1 Write property test for backward compatibility
+- [x] 9.1 Write property test for backward compatibility
   - **Property 12: Backward Compatibility**
   - **Validates: Requirements 5.1, 5.4**
 
-- [ ] 9.2 Write integration tests for container execution
+- [x] 9.2 Write integration tests for container execution
   - Test complete container startup with volume mounts
   - Test environment variable passthrough
   - _Requirements: 3.1, 3.3, 3.5_
 
-- [ ] 9.3 Implement environment variable filtering
+- [x] 9.3 Implement environment variable filtering
   - Filter out MCP_MOUNT, MCP_BIND_HOME, MCP_HOME_PATH from container env
   - Pass through all other user-provided variables
   - _Requirements: 3.5_
 
-- [ ] 9.4 Write property test for home directory write access
+- [x] 9.4 Write property test for home directory write access
   - **Property 3: Home Directory Write Access**
   - **Validates: Requirements 1.3, 3.2**
 
-- [ ] 9.5 Write property test for consistent mount point
+- [x] 9.5 Write property test for consistent mount point
   - **Property 5: Consistent Mount Point**
   - **Validates: Requirements 1.5**
 
-- [ ] 9.6 Write property test for environment variable passthrough
+- [x] 9.6 Write property test for environment variable passthrough
   - **Property 7: Environment Variable Passthrough**
   - **Validates: Requirements 3.1, 3.3**
 
-- [ ] 10. Implement volume management CLI commands
+- [x] 10. Implement volume management CLI commands
   - Add `run-mcp volume` subcommand with list, clean, prune, inspect
   - Implement confirmation prompts for destructive operations
   - Add cross-runtime volume filtering
   - _Requirements: 4.4, 4.5, 4.6, 4.8, 4.9, 4.13, 2.10_
 
-- [ ] 10.1 Write property test for volume management commands
+- [x] 10.1 Write property test for volume management commands
   - **Property 6: Volume Management Commands**
   - **Validates: Requirements 2.5, 4.4, 4.5, 4.8, 4.10**
 
-- [ ] 10.2 Write unit tests for CLI command parsing
+- [x] 10.2 Write unit tests for CLI command parsing
   - Test subcommand routing and argument validation
   - Test confirmation prompt behavior
   - _Requirements: 4.9, 4.13_
 
-- [ ] 10.3 Implement volume inspect command
+- [x] 10.3 Implement volume inspect command
   - Show volume details, mount point, labels
   - Show physical storage location when supported
   - _Requirements: 4.8, 4.13_
 
-- [ ] 11. Implement volume prune functionality
+- [x] 11. Implement volume prune functionality
   - Add `PruneHomeVolumes()` method with confirmation
   - Implement runtime-specific volume filtering
   - Add storage usage warnings
   - _Requirements: 4.6, 4.7, 6.6_
 
-- [ ] 11.1 Write property test for volume prune operation
+- [x] 11.1 Write property test for volume prune operation
   - **Property 11: Volume Prune Operation**
   - **Validates: Requirements 4.6, 4.7**
 
-- [ ] 11.2 Write unit tests for storage warnings
+- [x] 11.2 Write unit tests for storage warnings
   - Test size limit detection and warning messages
   - _Requirements: 6.6_
 
-- [ ] 11.3 Write property test for volume persistence
+- [x] 11.3 Write property test for volume persistence
   - **Property 10: Volume Persistence**
   - **Validates: Requirements 4.3, 6.1, 6.2**
 
-- [ ] 12. Implement error handling and recovery
+- [x] 12. Implement error handling and recovery
   - Add clear error messages for runtime unavailable scenarios
   - Implement fallback strategies for volume creation failures
   - Add filesystem error detection and suggestions
   - _Requirements: 5.2, 5.3, 5.5_
 
-- [ ] 12.1 Write unit tests for error scenarios
+- [x] 12.1 Write unit tests for error scenarios
   - Test runtime detection failures
   - Test volume creation error handling
   - _Requirements: 5.2, 5.3_

@@ -69,6 +69,20 @@ func (ef *EnvFilter) GetFilteredEnvArgs() []string {
 
 // shouldPassthrough determines if an environment variable should be passed to the container
 func (ef *EnvFilter) shouldPassthrough(key string) bool {
+	// Exclude run-mcp configuration variables (Requirement 3.5)
+	// These should be consumed by run-mcp and not passed to the container
+	configVars := []string{
+		"MCP_MOUNT",
+		"MCP_BIND_HOME", 
+		"MCP_HOME_PATH",
+	}
+	
+	for _, configVar := range configVars {
+		if key == configVar {
+			return false
+		}
+	}
+	
 	// Check exact match first
 	if ef.allowedExact[key] {
 		return true

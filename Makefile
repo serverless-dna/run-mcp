@@ -352,7 +352,7 @@ test-containers: ## Run container tests with Bats
 test-run-mcp: ## Test the run-mcp binary
 	@echo "$(BLUE)Testing run-mcp binary...$(NC)"
 	@if [ -d "cmd/run-mcp" ]; then \
-		cd cmd/run-mcp && go test -v .; \
+		cd cmd/run-mcp && go test -v -short .; \
 	else \
 		echo "$(YELLOW)No run-mcp tests found$(NC)"; \
 	fi

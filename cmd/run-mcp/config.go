@@ -13,7 +13,9 @@ type Config struct {
 	PythonImage      string
 	DataDir          string
 	ContainerRuntime string
-	EphemeralMode    bool // New field for ephemeral volume support
+	EphemeralMode    bool   // New field for ephemeral volume support
+	MaxVolumeSize    string // Maximum volume size for storage warnings (Requirements: 6.6)
+	SignalConfig     *SignalConfig // Signal handling configuration
 }
 
 // loadConfig loads configuration from environment variables with defaults
@@ -25,6 +27,8 @@ func loadConfig() *Config {
 		PythonImage:      getEnvWithDefault("MCP_PYTHON_IMAGE", "ghcr.io/serverless-dna/run-mcp-python:latest"),
 		DataDir:          getEnvWithDefault("MCP_DATA_DIR", homeDir),
 		ContainerRuntime: os.Getenv("MCP_CONTAINER_RUNTIME"), // Optional override
+		MaxVolumeSize:    os.Getenv("MCP_MAX_VOLUME_SIZE"),   // Optional storage limit for warnings
+		SignalConfig:     LoadSignalConfig(),                 // Load signal handling configuration
 	}
 	
 	return config
@@ -171,6 +175,8 @@ func GetEnvironmentVariables() map[string]string {
 		"MCP_DATA_DIR",
 		"MCP_CONTAINER_RUNTIME",
 		"MCP_PASSTHROUGH_ENV",
+		"MCP_SIGNAL_TIMEOUT",
+		"MCP_DEBUG",
 	}
 	
 	for _, varName := range mcpVars {

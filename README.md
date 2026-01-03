@@ -1,4 +1,6 @@
-# MCP Container Images
+# Run MCP
+
+Managed runtime containers for local MCP Servers.
 
 This repository provides pre-built container images for running MCP (Model Context Protocol) servers without requiring local development tools. The system automatically builds and publishes language-specific container images to GitHub Container Registry.
 

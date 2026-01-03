@@ -34,7 +34,8 @@ Examples:
   run-mcp --ephemeral uvx mcp-server-sqlite --db-path /data/db.sqlite
   run-mcp list-images
   run-mcp config
-  run-mcp info`,
+  run-mcp info
+  run-mcp doctor`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
 		Args:    cobra.ArbitraryArgs, // Changed from MinimumNArgs(1) to allow subcommands
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -46,6 +47,8 @@ Examples:
 	rootCmd.AddCommand(createInfoCommand())
 	rootCmd.AddCommand(createConfigCommand())
 	rootCmd.AddCommand(createListImagesCommand())
+	rootCmd.AddCommand(createVolumeCommand())
+	rootCmd.AddCommand(createDoctorCommand())
 
 	rootCmd.Flags().BoolP("help", "h", false, "Help for run-mcp")
 	rootCmd.Flags().BoolP("version", "v", false, "Version information")
@@ -68,14 +71,16 @@ func runMCP(cmd *cobra.Command, args []string, ephemeralMode bool) error {
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
-		return fmt.Errorf("configuration validation failed: %w", err)
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleFilesystemError(err, config.DataDir)
 	}
 
-	// Detect container runtime
+	// Detect container runtime with enhanced error handling
 	detector := NewRuntimeDetector()
 	containerRuntime, err := detector.Detect()
 	if err != nil {
-		return fmt.Errorf("container runtime detection failed: %w", err)
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleRuntimeError(err)
 	}
 
 	// Detect language from command
@@ -85,28 +90,26 @@ func runMCP(cmd *cobra.Command, args []string, ephemeralMode bool) error {
 		return fmt.Errorf("language detection failed: %w", err)
 	}
 
-	// Build and execute container command
-	containerCmd, volumeName, err := buildContainerCommand(config, containerRuntime, language, args)
+	// Build container command with signal handling support
+	containerCmd, volumeName, signalHandler, err := buildContainerCommandWithSignals(config, containerRuntime, language, args)
 	if err != nil {
-		return fmt.Errorf("failed to build container command: %w", err)
+		errorHandler := NewErrorHandler()
+		return errorHandler.FormatUserFriendlyError(err, "container")
 	}
 	
-	// Set up cleanup for ephemeral volumes
-	if ephemeralMode && volumeName != "" {
-		defer func() {
-			volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
-			if cleanupErr := volumeManager.CleanupEphemeralVolume(volumeName); cleanupErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup ephemeral volume %s: %v\n", volumeName, cleanupErr)
-			}
-		}()
-	}
-	
-	// Execute with stdio passthrough
-	containerCmd.Stdin = os.Stdin
-	containerCmd.Stdout = os.Stdout
-	containerCmd.Stderr = os.Stderr
+	// Execute with signal-aware execution and ephemeral volume cleanup
+	return executeWithSignalHandlingAndCleanup(containerCmd, signalHandler, config, containerRuntime, volumeName, ephemeralMode)
+}
 
-	return containerCmd.Run()
+func createDoctorCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "doctor",
+		Short: "Diagnose system configuration and requirements",
+		Long:  "Check system requirements, container runtime availability, and common configuration issues",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDoctor()
+		},
+	}
 }
 
 func createInfoCommand() *cobra.Command {
@@ -314,7 +317,8 @@ func listImageTags(containerRuntime, registry, repo string) error {
 	return nil
 }
 
-// buildContainerCommand constructs the container execution command
+// buildContainerCommand constructs the container execution command with ProcessManager integration
+// Requirements: 1.5, 5.1, 5.4, 4.1, 4.2, 4.3, 4.4
 func buildContainerCommand(config *Config, containerRuntime, language string, args []string) (*exec.Cmd, string, error) {
 	// Get the appropriate image for the language
 	image, err := config.GetImageForLanguage(language)
@@ -322,36 +326,739 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 		return nil, "", err
 	}
 
-	// Build container command arguments
+	// Create ProcessManager with container naming for signal forwarding
+	// Requirements: 4.1, 4.2, 4.3, 4.4
+	processManager := NewContainerProcessManager(containerRuntime, args)
+	
+	// Build base container command arguments
 	containerArgs := []string{"run", "-i", "--rm"}
 	
-	// Add environment variables
+	// Add unique container name for signal forwarding
+	containerArgs = append(containerArgs, "--name", processManager.GetContainerName())
+	
+	// Add environment variables (filtered to exclude MCP configuration variables)
+	// Requirements: 3.1, 3.3, 3.5
 	envFilter := NewEnvFilter()
 	containerArgs = append(containerArgs, envFilter.GetFilteredEnvArgs()...)
 	
-	// Add volume mounts (including home volume)
-	volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
-	volumeMounts := volumeManager.GetVolumeMounts()
-	containerArgs = append(containerArgs, volumeMounts...)
+	// Handle home directory override support first
+	// Requirements: 7.6, 7.7
+	homeOverrideHandler := NewHomeOverrideHandler()
+	homeMount := homeOverrideHandler.GetHomeMount(args)
 	
-	// Create and add home volume mount
 	var volumeName string
 	serverName := strings.Join(args, " ")
 	
-	if config.EphemeralMode {
-		volumeName, err = volumeManager.CreateEphemeralVolume(serverName, containerRuntime)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to create ephemeral volume: %w", err)
+	if homeMount != "" {
+		// Use home directory override (MCP_BIND_HOME or MCP_HOME_PATH)
+		// For MCP_BIND_HOME, create the bind directory if needed
+		bindHomeValue := os.Getenv("MCP_BIND_HOME")
+		if bindHomeValue != "" {
+			// Check if MCP_BIND_HOME is truthy
+			lower := strings.ToLower(strings.TrimSpace(bindHomeValue))
+			isTruthy := lower == "true" || lower == "1" || lower == "yes" || lower == "on"
+			
+			if isTruthy {
+				// Create bind home directory with enhanced error handling
+				volumeNameForBind := sanitizeVolumeName(args)
+				bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeNameForBind)
+				if err != nil {
+					errorHandler := NewErrorHandler()
+					return nil, "", errorHandler.HandleFilesystemError(err, "~/.run-mcp/"+volumeNameForBind)
+				}
+				homeMount = bindPath
+			}
 		}
+		
+		// Add home directory override mount
+		// Requirements: 1.5 - Mount at /home/mcp consistently
+		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", homeMount))
+		volumeName = "" // No volume name when using override
 	} else {
-		volumeName, err = volumeManager.CreateHomeVolume(serverName, containerRuntime)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to create home volume: %w", err)
+		// Use container volume (default behavior)
+		// Requirements: 1.1, 1.2, 1.5
+		volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+		
+		if config.EphemeralMode {
+			volumeName, err = volumeManager.CreateEphemeralVolume(serverName, containerRuntime)
+			if err != nil {
+				errorHandler := NewErrorHandler()
+				return nil, "", errorHandler.HandleVolumeError(err, "ephemeral volume creation")
+			}
+		} else {
+			volumeName, err = volumeManager.CreateHomeVolume(serverName, containerRuntime)
+			if err != nil {
+				errorHandler := NewErrorHandler()
+				return nil, "", errorHandler.HandleVolumeError(err, "home volume creation")
+			}
+		}
+		
+		// Add home volume mount - Requirements: 1.5
+		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", volumeName))
+	}
+	
+	// Add user-specified mounts from MCP_MOUNT with enhanced error handling
+	// Requirements: 7.1, 7.2, 7.3, 7.4, 7.8
+	userMountParser := NewUserMountParser()
+	userMounts, err := userMountParser.ParseUserMounts()
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return nil, "", errorHandler.HandleMountError(err, os.Getenv("MCP_MOUNT"))
+	}
+	
+	if len(userMounts) > 0 {
+		userMountArgs := userMountParser.GetMountArgs(userMounts)
+		containerArgs = append(containerArgs, userMountArgs...)
+	}
+	
+	// Add image
+	containerArgs = append(containerArgs, image)
+	
+	// Handle explicit runtime specification - Requirements: 5.1, 5.4 (backward compatibility)
+	if len(args) >= 2 && (args[0] == "python" || args[0] == "node" || args[0] == "nodejs") {
+		containerArgs = append(containerArgs, args[1:]...)
+	} else {
+		containerArgs = append(containerArgs, args...)
+	}
+
+	// Build final command using ProcessManager for consistent runtime handling
+	// This handles both single-word runtimes ("docker") and multi-word runtimes ("lima nerdctl")
+	parts := strings.Fields(containerRuntime)
+	if len(parts) > 1 {
+		// Multi-word runtime (e.g., "lima nerdctl")
+		finalArgs := append(parts[1:], containerArgs...)
+		return exec.Command(parts[0], finalArgs...), volumeName, nil
+	}
+	
+	// Single-word runtime (e.g., "docker", "podman")
+	return exec.Command(containerRuntime, containerArgs...), volumeName, nil
+}
+// createVolumeCommand creates the volume management command with subcommands
+// Requirements: 4.4, 4.5, 4.6, 4.8, 4.9, 4.13, 2.10
+func createVolumeCommand() *cobra.Command {
+	volumeCmd := &cobra.Command{
+		Use:   "volume",
+		Short: "Manage container volumes",
+		Long:  "Manage container volumes used by MCP servers for persistent home directories",
+	}
+
+	// Add subcommands
+	volumeCmd.AddCommand(createVolumeListCommand())
+	volumeCmd.AddCommand(createVolumeCleanCommand())
+	volumeCmd.AddCommand(createVolumePruneCommand())
+	volumeCmd.AddCommand(createVolumeInspectCommand())
+
+	return volumeCmd
+}
+
+// createVolumeListCommand creates the volume list subcommand
+// Requirements: 4.4, 4.5, 2.10
+func createVolumeListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List all managed volumes",
+		Long:  "List all container volumes managed by run-mcp with creation date and size information",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return listVolumes()
+		},
+	}
+}
+
+// createVolumeCleanCommand creates the volume clean subcommand
+// Requirements: 4.5, 4.9
+func createVolumeCleanCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "clean <server-name>",
+		Short: "Remove a specific volume",
+		Long:  "Remove the container volume for a specific MCP server",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cleanVolume(args[0])
+		},
+	}
+}
+
+// createVolumePruneCommand creates the volume prune subcommand
+// Requirements: 4.6, 4.9, 4.13
+func createVolumePruneCommand() *cobra.Command {
+	var force bool
+	
+	pruneCmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Remove all managed volumes",
+		Long:  "Remove all container volumes managed by run-mcp with user confirmation",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return pruneVolumes(force)
+		},
+	}
+	
+	pruneCmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompt")
+	
+	return pruneCmd
+}
+
+// createVolumeInspectCommand creates the volume inspect subcommand
+// Requirements: 4.8, 4.13
+func createVolumeInspectCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "inspect <server-name>",
+		Short: "Show volume details",
+		Long:  "Show detailed information about a specific volume including mount point and contents",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return inspectVolume(args[0])
+		},
+	}
+}
+
+// listVolumes lists all managed volumes with enhanced error handling
+// Requirements: 4.4, 4.5, 2.10
+func listVolumes() error {
+	// Detect container runtime
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleRuntimeError(err)
+	}
+	
+	// Create volume commander
+	commander := NewVolumeCommander(containerRuntime)
+	
+	// List volumes
+	volumes, err := commander.ListVolumes()
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleVolumeError(err, "volume listing")
+	}
+	
+	if len(volumes) == 0 {
+		fmt.Println("No managed volumes found.")
+		return nil
+	}
+	
+	fmt.Printf("Managed Volumes (Runtime: %s)\n", containerRuntime)
+	fmt.Println("================================")
+	
+	for _, vol := range volumes {
+		fmt.Printf("Name: %s\n", vol.Name)
+		if serverName, exists := vol.Labels["run-mcp.server"]; exists {
+			fmt.Printf("  Server: %s\n", serverName)
+		}
+		fmt.Printf("  Created: %s\n", vol.CreatedAt.Format("2006-01-02 15:04:05"))
+		if vol.Size != "" {
+			fmt.Printf("  Size: %s\n", vol.Size)
+		}
+		fmt.Printf("  Runtime: %s\n", vol.Runtime)
+		fmt.Println()
+	}
+	
+	return nil
+}
+
+// cleanVolume removes a specific volume with enhanced error handling
+// Requirements: 4.5, 4.9
+func cleanVolume(serverName string) error {
+	// Detect container runtime
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleRuntimeError(err)
+	}
+	
+	// Create volume commander
+	commander := NewVolumeCommander(containerRuntime)
+	
+	// Generate volume name from server name
+	volumeName := sanitizeVolumeName(strings.Fields(serverName))
+	
+	// Check if volume exists
+	exists, err := commander.VolumeExists(volumeName)
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleVolumeError(err, "volume existence check")
+	}
+	
+	if !exists {
+		fmt.Printf("Volume for server '%s' not found (expected volume name: %s)\n", serverName, volumeName)
+		return nil
+	}
+	
+	// Confirm deletion
+	if !promptConfirmation(fmt.Sprintf("Are you sure you want to remove volume '%s'? This will permanently delete all data", volumeName)) {
+		fmt.Println("Operation cancelled.")
+		return nil
+	}
+	
+	// Remove volume
+	if err := commander.RemoveVolume(volumeName); err != nil {
+		errorMsg := err.Error()
+		// Check if error indicates volume is in use
+		if strings.Contains(errorMsg, "volume is in use") || 
+		   strings.Contains(errorMsg, "device or resource busy") ||
+		   strings.Contains(errorMsg, "exit status 1") {
+			fmt.Printf("⚠️  Cannot remove volume '%s': currently in use by a running container\n", volumeName)
+			fmt.Println("\n💡 To resolve this:")
+			fmt.Println("   1. Find the running container: docker ps")
+			fmt.Println("   2. Stop the container: docker stop <container-id>")
+			fmt.Println("   3. Retry the volume removal")
+			return nil
+		} else {
+			errorHandler := NewErrorHandler()
+			return errorHandler.HandleVolumeError(err, "volume removal")
 		}
 	}
 	
-	// Add home volume mount
-	containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", volumeName))
+	fmt.Printf("✅ Volume '%s' removed successfully.\n", volumeName)
+	return nil
+}
+
+// pruneVolumes removes all managed volumes with enhanced error handling
+// Requirements: 4.6, 4.9, 4.13
+func pruneVolumes(force bool) error {
+	// Detect container runtime
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleRuntimeError(err)
+	}
+	
+	// Create volume commander
+	commander := NewVolumeCommander(containerRuntime)
+	
+	// List volumes
+	volumes, err := commander.ListVolumes()
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleVolumeError(err, "volume listing")
+	}
+	
+	if len(volumes) == 0 {
+		fmt.Println("No managed volumes found to prune.")
+		return nil
+	}
+	
+	// Show what will be removed
+	fmt.Printf("The following %d volume(s) will be removed:\n", len(volumes))
+	for _, vol := range volumes {
+		fmt.Printf("  - %s", vol.Name)
+		if serverName, exists := vol.Labels["run-mcp.server"]; exists {
+			fmt.Printf(" (server: %s)", serverName)
+		}
+		fmt.Println()
+	}
+	fmt.Println()
+	
+	// Confirm deletion unless force flag is used
+	if !force {
+		if !promptConfirmation("Are you sure you want to remove ALL managed volumes? This will permanently delete all data") {
+			fmt.Println("Operation cancelled.")
+			return nil
+		}
+	}
+	
+	// Remove all volumes
+	var errors []string
+	var inUseVolumes []string
+	successCount := 0
+	
+	for _, vol := range volumes {
+		if err := commander.RemoveVolume(vol.Name); err != nil {
+			errorMsg := err.Error()
+			// Check if error indicates volume is in use
+			if strings.Contains(errorMsg, "volume is in use") || 
+			   strings.Contains(errorMsg, "device or resource busy") ||
+			   strings.Contains(errorMsg, "exit status 1") {
+				inUseVolumes = append(inUseVolumes, vol.Name)
+				fmt.Printf("⚠️  Skipped volume (in use): %s\n", vol.Name)
+			} else {
+				errors = append(errors, fmt.Sprintf("%s: %v", vol.Name, err))
+				fmt.Printf("❌ Failed to remove volume: %s (%v)\n", vol.Name, err)
+			}
+		} else {
+			fmt.Printf("✅ Removed volume: %s\n", vol.Name)
+			successCount++
+		}
+	}
+	
+	// Print summary
+	totalFailed := len(errors) + len(inUseVolumes)
+	if totalFailed > 0 {
+		fmt.Printf("\nSummary: %d volume(s) removed successfully, %d could not be removed\n", successCount, totalFailed)
+		
+		if len(inUseVolumes) > 0 {
+			fmt.Printf("\n⚠️  %d volume(s) skipped (currently in use by running containers):\n", len(inUseVolumes))
+			for _, volName := range inUseVolumes {
+				fmt.Printf("  - %s\n", volName)
+			}
+			fmt.Println("\n💡 Tip: Stop running containers first, then retry:")
+			fmt.Println("   docker ps                    # List running containers")
+			fmt.Println("   docker stop <container-id>   # Stop specific container")
+			fmt.Println("   docker stop $(docker ps -q)  # Stop all running containers")
+		}
+		
+		if len(errors) > 0 {
+			fmt.Printf("\n❌ %d volume(s) failed with other errors:\n", len(errors))
+			for _, errMsg := range errors {
+				fmt.Printf("  - %s\n", errMsg)
+			}
+		}
+		
+		return nil // Don't return error to avoid double printing
+	}
+	
+	fmt.Printf("\n✅ Successfully removed all %d volume(s).\n", len(volumes))
+	return nil
+}
+
+// inspectVolume shows detailed information about a volume with enhanced error handling
+// Requirements: 4.8, 4.13
+func inspectVolume(serverName string) error {
+	// Detect container runtime
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleRuntimeError(err)
+	}
+	
+	// Create volume commander
+	commander := NewVolumeCommander(containerRuntime)
+	
+	// Generate volume name from server name
+	volumeName := sanitizeVolumeName(strings.Fields(serverName))
+	
+	// Inspect volume
+	details, err := commander.InspectVolume(volumeName)
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleVolumeError(err, "volume inspection")
+	}
+	
+	fmt.Printf("Volume Details: %s\n", details.Name)
+	fmt.Println("========================")
+	
+	if serverName, exists := details.Labels["run-mcp.server"]; exists {
+		fmt.Printf("Server: %s\n", serverName)
+	}
+	
+	fmt.Printf("Created: %s\n", details.CreatedAt.Format("2006-01-02 15:04:05"))
+	fmt.Printf("Runtime: %s\n", details.Runtime)
+	
+	if details.Size != "" {
+		fmt.Printf("Size: %s\n", details.Size)
+	}
+	
+	if details.MountPoint != "" {
+		fmt.Printf("Mount Point: %s\n", details.MountPoint)
+	}
+	
+	// Show labels
+	if len(details.Labels) > 0 {
+		fmt.Println("\nLabels:")
+		for key, value := range details.Labels {
+			fmt.Printf("  %s=%s\n", key, value)
+		}
+	}
+	
+	// Show options if available
+	if len(details.Options) > 0 {
+		fmt.Println("\nOptions:")
+		for key, value := range details.Options {
+			fmt.Printf("  %s=%s\n", key, value)
+		}
+	}
+	
+	return nil
+}
+
+// promptConfirmation prompts the user for confirmation
+// Requirements: 4.9, 4.13
+func promptConfirmation(message string) bool {
+	fmt.Printf("%s [y/N]: ", message)
+	var response string
+	fmt.Scanln(&response)
+	response = strings.ToLower(strings.TrimSpace(response))
+	return response == "y" || response == "yes"
+}
+// runDoctor performs system diagnostics and provides troubleshooting information
+// Requirements: 5.2, 5.3, 5.5
+func runDoctor() error {
+	fmt.Println("run-mcp System Diagnostics")
+	fmt.Println("=========================")
+	
+	errorHandler := NewErrorHandler()
+	var issues []string
+	var warnings []string
+	
+	// Check system requirements
+	fmt.Println("\n1. Checking system requirements...")
+	if err := errorHandler.ValidateSystemRequirements(); err != nil {
+		issues = append(issues, fmt.Sprintf("System requirements: %v", err))
+		fmt.Printf("   ❌ %v\n", err)
+	} else {
+		fmt.Println("   ✅ System requirements met")
+	}
+	
+	// Check container runtime
+	fmt.Println("\n2. Checking container runtime...")
+	detector := NewRuntimeDetector()
+	runtime, err := detector.Detect()
+	if err != nil {
+		issues = append(issues, fmt.Sprintf("Container runtime: %v", err))
+		fmt.Printf("   ❌ %v\n", err)
+		
+		// Show available runtimes
+		fmt.Println("\n   Available runtimes:")
+		availableRuntimes := detector.ListAvailableRuntimes()
+		if len(availableRuntimes) == 0 {
+			fmt.Println("     None found")
+		} else {
+			for _, rt := range availableRuntimes {
+				fmt.Printf("     ✅ %s (%s)\n", rt.Name, rt.Version)
+			}
+		}
+		
+		// Provide recovery guidance
+		fmt.Println("\n   Recovery guidance:")
+		guidance := errorHandler.ProvideRecoveryGuidance(err, "runtime_detection")
+		fmt.Println(guidance)
+	} else {
+		fmt.Printf("   ✅ Container runtime: %s\n", runtime)
+		
+		// Test runtime functionality
+		fmt.Println("   Testing runtime functionality...")
+		commander := NewVolumeCommander(runtime)
+		_, err := commander.ListVolumes()
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("Runtime test failed: %v", err))
+			fmt.Printf("   ⚠️  Runtime test failed: %v\n", err)
+		} else {
+			fmt.Println("   ✅ Runtime is functional")
+		}
+	}
+	
+	// Check configuration
+	fmt.Println("\n3. Checking configuration...")
+	config := loadConfig()
+	if err := config.Validate(); err != nil {
+		issues = append(issues, fmt.Sprintf("Configuration: %v", err))
+		fmt.Printf("   ❌ %v\n", err)
+		
+		// Provide recovery guidance for configuration issues
+		fmt.Println("\n   Recovery guidance:")
+		guidance := errorHandler.ProvideRecoveryGuidance(err, "filesystem_access")
+		fmt.Println(guidance)
+	} else {
+		fmt.Println("   ✅ Configuration is valid")
+		
+		// Check data directory permissions
+		fmt.Printf("   Data directory: %s\n", config.DataDir)
+		vm := NewVolumeManager(config)
+		if err := vm.ValidateDataDir(); err != nil {
+			warnings = append(warnings, fmt.Sprintf("Data directory: %v", err))
+			fmt.Printf("   ⚠️  %v\n", err)
+		} else {
+			fmt.Println("   ✅ Data directory is accessible and writable")
+		}
+	}
+	
+	// Check environment variables
+	fmt.Println("\n4. Checking environment configuration...")
+	envVars := GetEnvironmentVariables()
+	if len(envVars) > 0 {
+		fmt.Println("   Environment variables:")
+		for name, value := range envVars {
+			fmt.Printf("     %s=%s\n", name, value)
+		}
+	} else {
+		fmt.Println("   No MCP environment variables set (using defaults)")
+	}
+	
+	// Check mount configuration
+	fmt.Println("\n5. Checking mount configuration...")
+	if mountStr := os.Getenv("MCP_MOUNT"); mountStr != "" {
+		fmt.Printf("   MCP_MOUNT: %s\n", mountStr)
+		parser := NewUserMountParser()
+		mounts, err := parser.ParseUserMounts()
+		if err != nil {
+			issues = append(issues, fmt.Sprintf("Mount configuration: %v", err))
+			fmt.Printf("   ❌ %v\n", err)
+			
+			// Provide recovery guidance for mount issues
+			fmt.Println("\n   Recovery guidance:")
+			guidance := errorHandler.ProvideRecoveryGuidance(err, "mount_configuration")
+			fmt.Println(guidance)
+		} else {
+			fmt.Printf("   ✅ Mount configuration is valid (%d mounts)\n", len(mounts))
+			for _, mount := range mounts {
+				fmt.Printf("     %s -> %s", mount.Source, mount.Destination)
+				if mount.Options != "" {
+					fmt.Printf(" (%s)", mount.Options)
+				}
+				fmt.Println()
+			}
+		}
+	} else {
+		fmt.Println("   No custom mounts configured")
+	}
+	
+	// Check home directory overrides
+	if bindHome := os.Getenv("MCP_BIND_HOME"); bindHome != "" {
+		fmt.Printf("   MCP_BIND_HOME: %s\n", bindHome)
+	}
+	if homePath := os.Getenv("MCP_HOME_PATH"); homePath != "" {
+		fmt.Printf("   MCP_HOME_PATH: %s\n", homePath)
+		handler := NewHomeOverrideHandler()
+		if err := handler.ValidateCustomHomePath(homePath); err != nil {
+			warnings = append(warnings, fmt.Sprintf("Custom home path: %v", err))
+			fmt.Printf("   ⚠️  %v\n", err)
+		} else {
+			fmt.Println("   ✅ Custom home path is valid")
+		}
+	}
+	
+	// Perform comprehensive system diagnostics
+	fmt.Println("\n6. Running comprehensive diagnostics...")
+	systemIssues := errorHandler.DiagnoseSystemIssues()
+	for _, issue := range systemIssues {
+		if !containsIssue(issues, issue) && !containsIssue(warnings, issue) {
+			warnings = append(warnings, issue)
+			fmt.Printf("   ⚠️  %s\n", issue)
+		}
+	}
+	
+	if len(systemIssues) == 0 {
+		fmt.Println("   ✅ No additional issues detected")
+	}
+	
+	// Summary
+	fmt.Println("\n" + strings.Repeat("=", 50))
+	if len(issues) == 0 {
+		fmt.Println("✅ All checks passed! run-mcp should work correctly.")
+	} else {
+		fmt.Printf("❌ Found %d issue(s) that need attention:\n", len(issues))
+		for i, issue := range issues {
+			fmt.Printf("   %d. %s\n", i+1, issue)
+		}
+	}
+	
+	if len(warnings) > 0 {
+		fmt.Printf("\n⚠️  Found %d warning(s):\n", len(warnings))
+		for i, warning := range warnings {
+			fmt.Printf("   %d. %s\n", i+1, warning)
+		}
+	}
+	
+	if len(issues) > 0 || len(warnings) > 0 {
+		fmt.Println("\nFor help resolving these issues:")
+		fmt.Println("  - Review the recovery guidance above")
+		fmt.Println("  - Run: run-mcp --help")
+		fmt.Println("  - Check container runtime documentation")
+		fmt.Println("  - Visit project documentation")
+	}
+	
+	return nil
+}
+
+// containsIssue checks if an issue is already in the list
+func containsIssue(issues []string, issue string) bool {
+	for _, existing := range issues {
+		if strings.Contains(existing, issue) || strings.Contains(issue, existing) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildContainerCommandWithSignals constructs the container execution command with signal handling support
+// Requirements: 1.3, 1.4, 8.1, 8.2
+func buildContainerCommandWithSignals(config *Config, containerRuntime, language string, args []string) (*exec.Cmd, string, SignalHandler, error) {
+	// Get the appropriate image for the language
+	image, err := config.GetImageForLanguage(language)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// Create ProcessManager with container naming for signal forwarding
+	processManager := NewContainerProcessManager(containerRuntime, args)
+	
+	// Build base container command arguments
+	containerArgs := []string{"run", "-i", "--rm"}
+	
+	// Add unique container name for signal forwarding
+	containerArgs = append(containerArgs, "--name", processManager.GetContainerName())
+	
+	// Add environment variables (filtered to exclude MCP configuration variables)
+	envFilter := NewEnvFilter()
+	containerArgs = append(containerArgs, envFilter.GetFilteredEnvArgs()...)
+	
+	// Handle home directory override support first
+	homeOverrideHandler := NewHomeOverrideHandler()
+	homeMount := homeOverrideHandler.GetHomeMount(args)
+	
+	var volumeName string
+	serverName := strings.Join(args, " ")
+	
+	if homeMount != "" {
+		// Use home directory override (MCP_BIND_HOME or MCP_HOME_PATH)
+		bindHomeValue := os.Getenv("MCP_BIND_HOME")
+		if bindHomeValue != "" {
+			// Check if MCP_BIND_HOME is truthy
+			lower := strings.ToLower(strings.TrimSpace(bindHomeValue))
+			isTruthy := lower == "true" || lower == "1" || lower == "yes" || lower == "on"
+			
+			if isTruthy {
+				// Create bind home directory with enhanced error handling
+				volumeNameForBind := sanitizeVolumeName(args)
+				bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeNameForBind)
+				if err != nil {
+					errorHandler := NewErrorHandler()
+					return nil, "", nil, errorHandler.HandleFilesystemError(err, "~/.run-mcp/"+volumeNameForBind)
+				}
+				homeMount = bindPath
+			}
+		}
+		
+		// Add home directory override mount
+		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", homeMount))
+		volumeName = "" // No volume name when using override
+	} else {
+		// Use container volume (default behavior)
+		volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+		
+		if config.EphemeralMode {
+			volumeName, err = volumeManager.CreateEphemeralVolume(serverName, containerRuntime)
+			if err != nil {
+				errorHandler := NewErrorHandler()
+				return nil, "", nil, errorHandler.HandleVolumeError(err, "ephemeral volume creation")
+			}
+		} else {
+			volumeName, err = volumeManager.CreateHomeVolume(serverName, containerRuntime)
+			if err != nil {
+				errorHandler := NewErrorHandler()
+				return nil, "", nil, errorHandler.HandleVolumeError(err, "home volume creation")
+			}
+		}
+		
+		// Add home volume mount
+		containerArgs = append(containerArgs, "-v", fmt.Sprintf("%s:/home/mcp", volumeName))
+	}
+	
+	// Add user-specified mounts from MCP_MOUNT with enhanced error handling
+	userMountParser := NewUserMountParser()
+	userMounts, err := userMountParser.ParseUserMounts()
+	if err != nil {
+		errorHandler := NewErrorHandler()
+		return nil, "", nil, errorHandler.HandleMountError(err, os.Getenv("MCP_MOUNT"))
+	}
+	
+	if len(userMounts) > 0 {
+		userMountArgs := userMountParser.GetMountArgs(userMounts)
+		containerArgs = append(containerArgs, userMountArgs...)
+	}
 	
 	// Add image
 	containerArgs = append(containerArgs, image)
@@ -363,11 +1070,112 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 		containerArgs = append(containerArgs, args...)
 	}
 
-	// Handle lima nerdctl special case
-	if strings.HasPrefix(containerRuntime, "lima") {
-		parts := strings.Fields(containerRuntime)
-		return exec.Command(parts[0], append(parts[1:], containerArgs...)...), volumeName, nil
+	// Build final command using ProcessManager for consistent runtime handling
+	parts := strings.Fields(containerRuntime)
+	var containerCmd *exec.Cmd
+	if len(parts) > 1 {
+		// Multi-word runtime (e.g., "lima nerdctl")
+		finalArgs := append(parts[1:], containerArgs...)
+		containerCmd = exec.Command(parts[0], finalArgs...)
+	} else {
+		// Single-word runtime (e.g., "docker", "podman")
+		containerCmd = exec.Command(containerRuntime, containerArgs...)
 	}
+	
+	// Create signal handler
+	signalHandler := NewSignalHandler(processManager)
+	
+	return containerCmd, volumeName, signalHandler, nil
+}
 
-	return exec.Command(containerRuntime, containerArgs...), volumeName, nil
+// executeWithSignalHandling executes the container with signal-aware handling
+// Requirements: 1.3, 1.4, 8.1, 8.2
+func executeWithSignalHandling(containerCmd *exec.Cmd, signalHandler SignalHandler) error {
+	// Configure stdio passthrough
+	containerCmd.Stdin = os.Stdin
+	containerCmd.Stdout = os.Stdout
+	containerCmd.Stderr = os.Stderr
+	
+	// Get process manager from signal handler
+	processManager := signalHandler.GetProcessManager()
+	
+	// Start container (non-blocking)
+	if err := processManager.StartContainer(containerCmd); err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleContainerStartupError(err, "container", "")
+	}
+	
+	// Start signal handling
+	if err := signalHandler.Start(containerCmd); err != nil {
+		return fmt.Errorf("failed to start signal handling: %w", err)
+	}
+	
+	// Wait for completion and get exit code
+	exitCode, err := processManager.WaitForExit()
+	
+	// Stop signal handling
+	signalHandler.Stop()
+	
+	// Handle exit based on exit code and error
+	return handleExit(exitCode, err)
+}
+
+// executeWithSignalHandlingAndCleanup executes the container with signal-aware handling and ephemeral volume cleanup
+// Requirements: 1.3, 1.4, 5.5, 8.1, 8.2
+func executeWithSignalHandlingAndCleanup(containerCmd *exec.Cmd, signalHandler SignalHandler, config *Config, containerRuntime, volumeName string, ephemeralMode bool) error {
+	// Configure stdio passthrough
+	containerCmd.Stdin = os.Stdin
+	containerCmd.Stdout = os.Stdout
+	containerCmd.Stderr = os.Stderr
+	
+	// Get process manager from signal handler
+	processManager := signalHandler.GetProcessManager()
+	
+	// Start container (non-blocking)
+	if err := processManager.StartContainer(containerCmd); err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleContainerStartupError(err, "container", "")
+	}
+	
+	// Start signal handling
+	if err := signalHandler.Start(containerCmd); err != nil {
+		return fmt.Errorf("failed to start signal handling: %w", err)
+	}
+	
+	// Wait for completion and get exit code
+	exitCode, err := processManager.WaitForExit()
+	
+	// Stop signal handling
+	signalHandler.Stop()
+	
+	// Cleanup ephemeral volume if needed (AFTER container exits)
+	// Requirements: 5.5 - Volume cleanup occurs after container termination during signal handling
+	if ephemeralMode && volumeName != "" {
+		volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+		if cleanupErr := volumeManager.CleanupEphemeralVolume(volumeName); cleanupErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup ephemeral volume %s: %v\n", volumeName, cleanupErr)
+		}
+	}
+	
+	// Handle exit based on exit code and error
+	return handleExit(exitCode, err)
+}
+
+// handleExit processes the container exit code and error
+// Requirements: 1.4
+func handleExit(exitCode int, err error) error {
+	if err != nil {
+		// If there's an error but we have an exit code, prioritize the exit code
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+		return err
+	}
+	
+	// Exit with the same code as the container
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+	
+	return nil
 }
