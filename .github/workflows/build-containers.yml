@@ -89,6 +89,8 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
 
       - name: Cleanup old versions before building new ones
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: make cleanup-versions
         continue-on-error: true
 
@@ -125,6 +127,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push containers
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.event.inputs.build_matrix }}" == "true" ]]; then
             echo "Running complete container lifecycle with matrix builds AND latest tags"
