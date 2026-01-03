@@ -1,8 +1,9 @@
 # Multi-stage Node.js container for MCP servers
-# Uses node:lts-alpine as base image with multi-architecture support
+# Accept Node.js version as build argument
+ARG NODE_VERSION=22.11.0
 
 # Build stage - for dependency installation and compilation
-FROM node:lts-alpine AS builder
+FROM node:${NODE_VERSION}-alpine AS builder
 
 # Install build dependencies with proper version constraints
 RUN apk add --no-cache \
