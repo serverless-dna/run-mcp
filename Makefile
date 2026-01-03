@@ -201,7 +201,13 @@ build-run-mcp: ## Build run-mcp binary for current platform
 		exit 1; \
 	fi
 	@mkdir -p build
-	@cd cmd/run-mcp && go build -o ../../build/run-mcp .
+	@VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev"); \
+	VERSION=$${VERSION#v}; \
+	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
+	DATE=$$(date -u '+%Y-%m-%d %H:%M:%S UTC'); \
+	cd cmd/run-mcp && go build \
+		-ldflags "-X main.version=$$VERSION -X main.commit=$$COMMIT -X 'main.date=$$DATE'" \
+		-o ../../build/run-mcp .
 	@echo "$(GREEN)✓ Built build/run-mcp$(NC)"
 
 build-run-mcp-all: ## Build run-mcp binary for all platforms
@@ -211,12 +217,17 @@ build-run-mcp-all: ## Build run-mcp binary for all platforms
 		exit 1; \
 	fi
 	@mkdir -p build
-	@cd cmd/run-mcp && \
-		GOOS=windows GOARCH=amd64 go build -o ../../build/run-mcp-windows-amd64.exe . && \
-		GOOS=darwin GOARCH=amd64 go build -o ../../build/run-mcp-darwin-amd64 . && \
-		GOOS=darwin GOARCH=arm64 go build -o ../../build/run-mcp-darwin-arm64 . && \
-		GOOS=linux GOARCH=amd64 go build -o ../../build/run-mcp-linux-amd64 . && \
-		GOOS=linux GOARCH=arm64 go build -o ../../build/run-mcp-linux-arm64 .
+	@VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev"); \
+	VERSION=$${VERSION#v}; \
+	COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo "unknown"); \
+	DATE=$$(date -u '+%Y-%m-%d %H:%M:%S UTC'); \
+	LDFLAGS="-X main.version=$$VERSION -X main.commit=$$COMMIT -X 'main.date=$$DATE'"; \
+	cd cmd/run-mcp && \
+		GOOS=windows GOARCH=amd64 go build -ldflags "$$LDFLAGS" -o ../../build/run-mcp-windows-amd64.exe . && \
+		GOOS=darwin GOARCH=amd64 go build -ldflags "$$LDFLAGS" -o ../../build/run-mcp-darwin-amd64 . && \
+		GOOS=darwin GOARCH=arm64 go build -ldflags "$$LDFLAGS" -o ../../build/run-mcp-darwin-arm64 . && \
+		GOOS=linux GOARCH=amd64 go build -ldflags "$$LDFLAGS" -o ../../build/run-mcp-linux-amd64 . && \
+		GOOS=linux GOARCH=arm64 go build -ldflags "$$LDFLAGS" -o ../../build/run-mcp-linux-arm64 .
 	@echo "$(GREEN)✓ Built all platform binaries in build/$(NC)"
 	@ls -la build/run-mcp-*
 

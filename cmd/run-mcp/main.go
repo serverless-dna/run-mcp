@@ -15,6 +15,63 @@ var (
 	date    = "unknown"
 )
 
+// VersionInfo holds parsed version information
+type VersionInfo struct {
+	Full    string
+	Major   string
+	Minor   string
+	Patch   string
+	PreRelease string
+	BuildMetadata string
+}
+
+// parseVersion parses a semantic version string and extracts components
+func parseVersion(v string) VersionInfo {
+	info := VersionInfo{Full: v}
+	
+	// Handle git describe format (v1.2.3-4-g1234567 or v1.2.3)
+	// Strip leading 'v' if present
+	cleanVersion := v
+	if strings.HasPrefix(cleanVersion, "v") {
+		cleanVersion = cleanVersion[1:]
+	}
+	
+	// Split on '-' to separate version from git metadata
+	parts := strings.Split(cleanVersion, "-")
+	versionPart := parts[0]
+	
+	// Parse semantic version (major.minor.patch)
+	versionComponents := strings.Split(versionPart, ".")
+	if len(versionComponents) >= 1 {
+		info.Major = versionComponents[0]
+	}
+	if len(versionComponents) >= 2 {
+		info.Minor = versionComponents[1]
+	}
+	if len(versionComponents) >= 3 {
+		info.Patch = versionComponents[2]
+	}
+	
+	// Handle pre-release and build metadata from git describe
+	if len(parts) > 1 {
+		// Format: v1.2.3-4-g1234567 (commits since tag + git hash)
+		if len(parts) >= 3 && strings.HasPrefix(parts[2], "g") {
+			info.BuildMetadata = fmt.Sprintf("%s.%s", parts[1], parts[2])
+		} else {
+			// Other pre-release formats
+			info.PreRelease = strings.Join(parts[1:], "-")
+		}
+	}
+	
+	return info
+}
+
+// formatVersionString creates a formatted version string
+func formatVersionString() string {
+	// Version already has 'v' stripped by Makefile
+	return fmt.Sprintf("%s [commit: %s, built: %s]", version, commit, date)
+}
+
 func main() {
 	var ephemeralMode bool
 	
@@ -36,7 +93,7 @@ Examples:
   run-mcp config
   run-mcp info
   run-mcp doctor`,
-		Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
+		Version: formatVersionString(),
 		Args:    cobra.ArbitraryArgs, // Changed from MinimumNArgs(1) to allow subcommands
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMCP(cmd, args, ephemeralMode)
