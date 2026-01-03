@@ -95,6 +95,9 @@ Examples:
   run-mcp doctor`,
 		Version: formatVersionString(),
 		Args:    cobra.ArbitraryArgs, // Changed from MinimumNArgs(1) to allow subcommands
+		FParseErrWhitelist: cobra.FParseErrWhitelist{
+			UnknownFlags: true, // Allow unknown flags to be passed through to container
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMCP(cmd, args, ephemeralMode)
 		},

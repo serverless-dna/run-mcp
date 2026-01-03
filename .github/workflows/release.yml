@@ -1,0 +1,217 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+      update_changelog:
+        description: 'Update CHANGELOG.md'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  update-changelog:
+    name: Update Changelog
+    runs-on: ubuntu-latest
+    if: github.event.inputs.update_changelog == 'true' || github.event_name == 'release'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+      
+      - name: Generate and update changelog
+        run: |
+          # Determine version
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION=${VERSION#v}
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          
+          echo "Updating changelog for version: $VERSION"
+          
+          # Make script executable
+          chmod +x scripts/generate-changelog.sh
+          
+          # Generate new changelog entry
+          TEMP_FILE=$(mktemp)
+          echo "# Changelog" > "$TEMP_FILE"
+          echo "" >> "$TEMP_FILE"
+          echo "All notable changes to this project will be documented in this file." >> "$TEMP_FILE"
+          echo "" >> "$TEMP_FILE"
+          echo "The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)," >> "$TEMP_FILE"
+          echo "and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)." >> "$TEMP_FILE"
+          echo "" >> "$TEMP_FILE"
+          
+          # Add new version entry
+          bash scripts/generate-changelog.sh "$VERSION" >> "$TEMP_FILE"
+          echo "" >> "$TEMP_FILE"
+          
+          # Append existing changelog (skip header)
+          if [ -f "CHANGELOG.md" ]; then
+            tail -n +8 CHANGELOG.md >> "$TEMP_FILE"
+          fi
+          
+          # Replace changelog
+          mv "$TEMP_FILE" CHANGELOG.md
+          
+          echo "✅ Changelog updated"
+      
+      - name: Commit changelog changes
+        run: |
+          if git diff --quiet CHANGELOG.md; then
+            echo "No changes to commit"
+          else
+            git add CHANGELOG.md
+            if [ "${{ github.event_name }}" = "release" ]; then
+              VERSION="${{ github.event.release.tag_name }}"
+            else
+              VERSION="${{ github.event.inputs.version }}"
+            fi
+            git commit -m "docs: update changelog for ${VERSION}"
+            git push
+            echo "✅ Changelog committed and pushed"
+          fi
+
+  build-and-release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    needs: [update-changelog]
+    if: always() && (needs.update-changelog.result == 'success' || needs.update-changelog.result == 'skipped')
+    
+    permissions:
+      contents: write
+      packages: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Build all binaries
+        run: make build-run-mcp-all
+      
+      - name: Build and push containers
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Run complete container lifecycle
+          make containers
+          
+          # Also build matrix versions for releases
+          if [ "${{ github.event_name }}" = "release" ]; then
+            make containers-matrix
+          fi
+      
+      - name: Create release assets
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          
+          # Create release notes from changelog
+          if [ -f "CHANGELOG.md" ]; then
+            # Extract release notes for this version
+            awk "/^## \[$VERSION\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md > release-notes.md
+          else
+            echo "Release $VERSION" > release-notes.md
+            echo "" >> release-notes.md
+            echo "See [CHANGELOG.md](CHANGELOG.md) for details." >> release-notes.md
+          fi
+      
+      - name: Upload release assets (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.event.inputs.version }}
+          name: Release v${{ github.event.inputs.version }}
+          body_path: release-notes.md
+          files: build/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload release assets (release event)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test-release:
+    name: Test Release Assets
+    runs-on: ubuntu-latest
+    needs: [build-and-release]
+    if: always() && needs.build-and-release.result == 'success'
+    
+    strategy:
+      matrix:
+        platform: [linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, windows-amd64]
+    
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          path: build/
+      
+      - name: Test binary (Linux/macOS)
+        if: matrix.platform != 'windows-amd64'
+        run: |
+          BINARY="build/run-mcp-${{ matrix.platform }}"
+          if [ -f "$BINARY" ]; then
+            chmod +x "$BINARY"
+            "$BINARY" --version
+            "$BINARY" --help
+            echo "✅ Binary test passed for ${{ matrix.platform }}"
+          else
+            echo "❌ Binary not found: $BINARY"
+            exit 1
+          fi
+      
+      - name: Test binary (Windows)
+        if: matrix.platform == 'windows-amd64'
+        run: |
+          BINARY="build/run-mcp-${{ matrix.platform }}.exe"
+          if [ -f "$BINARY" ]; then
+            echo "✅ Windows binary found: $BINARY"
+            # Note: Can't execute Windows binary on Linux runner
+          else
+            echo "❌ Binary not found: $BINARY"
+            exit 1
+          fi

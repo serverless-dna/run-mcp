@@ -503,6 +503,56 @@ containers-matrix: ## Complete container lifecycle: cleanup → build → push (
 	@echo "$(GREEN)✅ Matrix container lifecycle completed$(NC)"
 
 # =============================================================================
+# CHANGELOG TARGETS
+# =============================================================================
+
+changelog: ## Generate changelog entry for current version
+	@echo "$(BLUE)Generating changelog entry...$(NC)"
+	@if [ ! -f "scripts/generate-changelog.sh" ]; then \
+		echo "$(RED)Error: scripts/generate-changelog.sh not found$(NC)"; \
+		exit 1; \
+	fi
+	@chmod +x scripts/generate-changelog.sh
+	@VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "unreleased"); \
+	VERSION=$${VERSION#v}; \
+	bash scripts/generate-changelog.sh "$$VERSION"
+
+changelog-version: ## Generate changelog entry for specific version (usage: make changelog-version VERSION=1.0.0)
+	@echo "$(BLUE)Generating changelog entry for version $(VERSION)...$(NC)"
+	@if [ -z "$(VERSION)" ]; then \
+		echo "$(RED)Error: VERSION not specified. Usage: make changelog-version VERSION=1.0.0$(NC)"; \
+		exit 1; \
+	fi
+	@if [ ! -f "scripts/generate-changelog.sh" ]; then \
+		echo "$(RED)Error: scripts/generate-changelog.sh not found$(NC)"; \
+		exit 1; \
+	fi
+	@chmod +x scripts/generate-changelog.sh
+	@bash scripts/generate-changelog.sh "$(VERSION)"
+
+update-changelog: ## Update CHANGELOG.md with new version entry
+	@echo "$(BLUE)Updating CHANGELOG.md...$(NC)"
+	@if [ ! -f "CHANGELOG.md" ]; then \
+		echo "$(RED)Error: CHANGELOG.md not found$(NC)"; \
+		exit 1; \
+	fi
+	@VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "unreleased"); \
+	VERSION=$${VERSION#v}; \
+	TEMP_FILE=$(mktemp); \
+	echo "# Changelog" > "$$TEMP_FILE"; \
+	echo "" >> "$$TEMP_FILE"; \
+	echo "All notable changes to this project will be documented in this file." >> "$$TEMP_FILE"; \
+	echo "" >> "$$TEMP_FILE"; \
+	echo "The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)," >> "$$TEMP_FILE"; \
+	echo "and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)." >> "$$TEMP_FILE"; \
+	echo "" >> "$$TEMP_FILE"; \
+	bash scripts/generate-changelog.sh "$$VERSION" >> "$$TEMP_FILE"; \
+	echo "" >> "$$TEMP_FILE"; \
+	tail -n +8 CHANGELOG.md >> "$$TEMP_FILE"; \
+	mv "$$TEMP_FILE" CHANGELOG.md; \
+	echo "$(GREEN)✓ CHANGELOG.md updated with version $$VERSION$(NC)"
+
+# =============================================================================
 # ALL-IN-ONE TARGETS
 # =============================================================================
 
