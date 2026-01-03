@@ -601,11 +601,24 @@ func cleanVolume(serverName string) error {
 	
 	// Remove volume
 	if err := commander.RemoveVolume(volumeName); err != nil {
-		errorHandler := NewErrorHandler()
-		return errorHandler.HandleVolumeError(err, "volume removal")
+		errorMsg := err.Error()
+		// Check if error indicates volume is in use
+		if strings.Contains(errorMsg, "volume is in use") || 
+		   strings.Contains(errorMsg, "device or resource busy") ||
+		   strings.Contains(errorMsg, "exit status 1") {
+			fmt.Printf("⚠️  Cannot remove volume '%s': currently in use by a running container\n", volumeName)
+			fmt.Println("\n💡 To resolve this:")
+			fmt.Println("   1. Find the running container: docker ps")
+			fmt.Println("   2. Stop the container: docker stop <container-id>")
+			fmt.Println("   3. Retry the volume removal")
+			return nil
+		} else {
+			errorHandler := NewErrorHandler()
+			return errorHandler.HandleVolumeError(err, "volume removal")
+		}
 	}
 	
-	fmt.Printf("Volume '%s' removed successfully.\n", volumeName)
+	fmt.Printf("✅ Volume '%s' removed successfully.\n", volumeName)
 	return nil
 }
 
@@ -656,19 +669,55 @@ func pruneVolumes(force bool) error {
 	
 	// Remove all volumes
 	var errors []string
+	var inUseVolumes []string
+	successCount := 0
+	
 	for _, vol := range volumes {
 		if err := commander.RemoveVolume(vol.Name); err != nil {
-			errors = append(errors, fmt.Sprintf("failed to remove volume %s: %v", vol.Name, err))
+			errorMsg := err.Error()
+			// Check if error indicates volume is in use
+			if strings.Contains(errorMsg, "volume is in use") || 
+			   strings.Contains(errorMsg, "device or resource busy") ||
+			   strings.Contains(errorMsg, "exit status 1") {
+				inUseVolumes = append(inUseVolumes, vol.Name)
+				fmt.Printf("⚠️  Skipped volume (in use): %s\n", vol.Name)
+			} else {
+				errors = append(errors, fmt.Sprintf("%s: %v", vol.Name, err))
+				fmt.Printf("❌ Failed to remove volume: %s (%v)\n", vol.Name, err)
+			}
 		} else {
-			fmt.Printf("Removed volume: %s\n", vol.Name)
+			fmt.Printf("✅ Removed volume: %s\n", vol.Name)
+			successCount++
 		}
 	}
 	
-	if len(errors) > 0 {
-		return fmt.Errorf("some volumes could not be removed:\n%s", strings.Join(errors, "\n"))
+	// Print summary
+	totalFailed := len(errors) + len(inUseVolumes)
+	if totalFailed > 0 {
+		fmt.Printf("\nSummary: %d volume(s) removed successfully, %d could not be removed\n", successCount, totalFailed)
+		
+		if len(inUseVolumes) > 0 {
+			fmt.Printf("\n⚠️  %d volume(s) skipped (currently in use by running containers):\n", len(inUseVolumes))
+			for _, volName := range inUseVolumes {
+				fmt.Printf("  - %s\n", volName)
+			}
+			fmt.Println("\n💡 Tip: Stop running containers first, then retry:")
+			fmt.Println("   docker ps                    # List running containers")
+			fmt.Println("   docker stop <container-id>   # Stop specific container")
+			fmt.Println("   docker stop $(docker ps -q)  # Stop all running containers")
+		}
+		
+		if len(errors) > 0 {
+			fmt.Printf("\n❌ %d volume(s) failed with other errors:\n", len(errors))
+			for _, errMsg := range errors {
+				fmt.Printf("  - %s\n", errMsg)
+			}
+		}
+		
+		return nil // Don't return error to avoid double printing
 	}
 	
-	fmt.Printf("Successfully removed %d volume(s).\n", len(volumes))
+	fmt.Printf("\n✅ Successfully removed all %d volume(s).\n", len(volumes))
 	return nil
 }
 

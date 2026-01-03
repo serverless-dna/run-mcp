@@ -81,21 +81,24 @@ func (dvc *DockerVolumeCommander) ListVolumes() ([]VolumeInfo, error) {
 		}
 		
 		var dockerVolume struct {
-			Name       string            `json:"Name"`
-			Labels     map[string]string `json:"Labels"`
-			CreatedAt  string            `json:"CreatedAt"`
-			Size       string            `json:"Size"`
+			Name       string `json:"Name"`
+			Labels     string `json:"Labels"`
+			Size       string `json:"Size"`
 		}
 		
 		if err := json.Unmarshal([]byte(line), &dockerVolume); err != nil {
 			continue // Skip malformed entries
 		}
 		
-		createdAt, _ := time.Parse(time.RFC3339, dockerVolume.CreatedAt)
+		// Parse labels string into map
+		labels := parseLabelsString(dockerVolume.Labels)
+		
+		// Use current time as CreatedAt since Docker volume ls doesn't provide it
+		createdAt := time.Now()
 		
 		volumes = append(volumes, VolumeInfo{
 			Name:      dockerVolume.Name,
-			Labels:    dockerVolume.Labels,
+			Labels:    labels,
 			CreatedAt: createdAt,
 			Size:      dockerVolume.Size,
 			Runtime:   dvc.runtime,
@@ -1379,6 +1382,34 @@ func checkVolumeStorageWarning(config *Config, volumeInfo VolumeInfo) string {
 // Requirements: 6.6
 func formatStorageWarningMessage(volumeName, volumeSize, sizeLimit string) string {
 	return fmt.Sprintf("Warning: Volume '%s' size (%s) exceeds configured limit (%s)", volumeName, volumeSize, sizeLimit)
+}
+
+// parseLabelsString parses a comma-separated labels string into a map
+// Format: "key1=value1,key2=value2,key3=value3"
+func parseLabelsString(labelsStr string) map[string]string {
+	labels := make(map[string]string)
+	if labelsStr == "" {
+		return labels
+	}
+	
+	// Split by comma
+	pairs := strings.Split(labelsStr, ",")
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		
+		// Split by first equals sign
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+			labels[key] = value
+		}
+	}
+	
+	return labels
 }
 
 // compareStorageSizes compares two storage size strings
