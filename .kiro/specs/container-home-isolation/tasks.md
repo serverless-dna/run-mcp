@@ -177,13 +177,13 @@ This implementation plan converts the container home isolation design into incre
   - **Property 10: Volume Persistence**
   - **Validates: Requirements 4.3, 6.1, 6.2**
 
-- [ ] 12. Implement error handling and recovery
+- [x] 12. Implement error handling and recovery
   - Add clear error messages for runtime unavailable scenarios
   - Implement fallback strategies for volume creation failures
   - Add filesystem error detection and suggestions
   - _Requirements: 5.2, 5.3, 5.5_
 
-- [ ] 12.1 Write unit tests for error scenarios
+- [x] 12.1 Write unit tests for error scenarios
   - Test runtime detection failures
   - Test volume creation error handling
   - _Requirements: 5.2, 5.3_

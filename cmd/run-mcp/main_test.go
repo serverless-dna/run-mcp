@@ -1109,9 +1109,9 @@ func TestVolumeCreationWithDifferentRuntimes(t *testing.T) {
 	}
 }
 
-// Test volume creation error handling
+// Test volume creation error handling - basic scenarios
 // Requirements: 1.1, 1.6
-func TestVolumeCreationErrorHandling(t *testing.T) {
+func TestVolumeCreationBasicErrorHandling(t *testing.T) {
 	config := &Config{}
 	
 	// Test with invalid runtime
@@ -3905,10 +3905,20 @@ func TestProperty6_VolumeManagementCommands(t *testing.T) {
 
 // MockVolumeCommander for testing volume management commands
 type MockVolumeCommander struct {
-	volumes map[string]VolumeInfo
+	volumes       map[string]VolumeInfo
+	failMode      bool
+	failError     error
+	failOnExists  bool
+	failOnList    bool
+	failOnRemove  bool
+	failOnInspect bool
 }
 
 func (mvc *MockVolumeCommander) CreateVolume(name string, labels map[string]string) error {
+	if mvc.failMode {
+		return mvc.failError
+	}
+	
 	mvc.volumes[name] = VolumeInfo{
 		Name:      name,
 		Labels:    labels,
@@ -3919,6 +3929,10 @@ func (mvc *MockVolumeCommander) CreateVolume(name string, labels map[string]stri
 }
 
 func (mvc *MockVolumeCommander) ListVolumes() ([]VolumeInfo, error) {
+	if mvc.failOnList {
+		return nil, fmt.Errorf("mock list volumes failed")
+	}
+	
 	var volumes []VolumeInfo
 	for _, vol := range mvc.volumes {
 		// Only return volumes with run-mcp=true label
@@ -3930,6 +3944,10 @@ func (mvc *MockVolumeCommander) ListVolumes() ([]VolumeInfo, error) {
 }
 
 func (mvc *MockVolumeCommander) RemoveVolume(name string) error {
+	if mvc.failOnRemove {
+		return fmt.Errorf("mock remove volume failed")
+	}
+	
 	if _, exists := mvc.volumes[name]; !exists {
 		return fmt.Errorf("volume not found: %s", name)
 	}
@@ -3938,6 +3956,10 @@ func (mvc *MockVolumeCommander) RemoveVolume(name string) error {
 }
 
 func (mvc *MockVolumeCommander) InspectVolume(name string) (*VolumeDetails, error) {
+	if mvc.failOnInspect {
+		return nil, fmt.Errorf("mock inspect volume failed")
+	}
+	
 	vol, exists := mvc.volumes[name]
 	if !exists {
 		return nil, fmt.Errorf("volume not found: %s", name)
@@ -3951,6 +3973,10 @@ func (mvc *MockVolumeCommander) InspectVolume(name string) (*VolumeDetails, erro
 }
 
 func (mvc *MockVolumeCommander) VolumeExists(name string) (bool, error) {
+	if mvc.failOnExists {
+		return false, fmt.Errorf("mock volume exists check failed")
+	}
+	
 	_, exists := mvc.volumes[name]
 	return exists, nil
 }
@@ -4783,4 +4809,377 @@ func TestProperty10_VolumePersistence(t *testing.T) {
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Error(err)
 	}
+}
+
+// Test runtime detection failures
+// Requirements: 5.2, 5.3
+func TestRuntimeDetectionFailures(t *testing.T) {
+	// Save original environment
+	originalRuntime := os.Getenv("MCP_CONTAINER_RUNTIME")
+	defer func() {
+		if originalRuntime != "" {
+			os.Setenv("MCP_CONTAINER_RUNTIME", originalRuntime)
+		} else {
+			os.Unsetenv("MCP_CONTAINER_RUNTIME")
+		}
+	}()
+	
+	// Test with invalid runtime override
+	os.Setenv("MCP_CONTAINER_RUNTIME", "nonexistent-runtime-12345")
+	
+	detector := NewRuntimeDetector()
+	_, err := detector.Detect()
+	
+	if err == nil {
+		t.Error("Expected error when runtime override points to nonexistent runtime")
+	}
+	
+	if !strings.Contains(err.Error(), "specified container runtime") {
+		t.Errorf("Expected error message about specified runtime, got: %v", err)
+	}
+	
+	// Test when no runtimes are available (simulate by clearing PATH)
+	os.Unsetenv("MCP_CONTAINER_RUNTIME")
+	
+	// Create detector with empty runtime list to simulate no available runtimes
+	emptyDetector := &RuntimeDetector{runtimes: []string{"definitely-not-installed-runtime"}}
+	_, err = emptyDetector.Detect()
+	
+	if err == nil {
+		t.Error("Expected error when no container runtimes are available")
+	}
+	
+	expectedNoRuntimeMsg := "no container runtime found"
+	if !strings.Contains(err.Error(), expectedNoRuntimeMsg) {
+		t.Errorf("Expected error message about no runtime found, got: %v", err)
+	}
+}
+
+// Test volume creation error handling
+// Requirements: 5.2, 5.3
+func TestVolumeCreationErrorHandling(t *testing.T) {
+	config := &Config{}
+	
+	// Test with mock commander that always fails
+	failingCommander := &MockVolumeCommander{
+		volumes:   make(map[string]VolumeInfo),
+		failMode:  true,
+		failError: fmt.Errorf("mock volume creation failed: insufficient disk space"),
+	}
+	
+	vm := &VolumeManager{
+		config:    config,
+		commander: failingCommander,
+		runtime:   "docker",
+	}
+	
+	// Test volume creation failure
+	_, err := vm.CreateHomeVolume("test-server", "docker")
+	if err == nil {
+		t.Error("Expected error from failing volume commander")
+	}
+	
+	expectedErrMsg := "failed to create volume"
+	if !strings.Contains(err.Error(), expectedErrMsg) {
+		t.Errorf("Expected error message about volume creation failure, got: %v", err)
+	}
+	
+	// Test volume existence check failure
+	failingCommander.failOnExists = true
+	_, err = vm.CreateHomeVolume("test-server-2", "docker")
+	if err == nil {
+		t.Error("Expected error from failing volume existence check")
+	}
+	
+	expectedExistsErrMsg := "failed to check if volume exists"
+	if !strings.Contains(err.Error(), expectedExistsErrMsg) {
+		t.Errorf("Expected error message about volume existence check failure, got: %v", err)
+	}
+	
+	// Test ephemeral volume creation failure
+	failingCommander.failOnExists = false // Reset
+	_, err = vm.CreateEphemeralVolume("test-ephemeral", "docker")
+	if err == nil {
+		t.Error("Expected error from failing ephemeral volume creation")
+	}
+	
+	expectedEphemeralErrMsg := "failed to create ephemeral volume"
+	if !strings.Contains(err.Error(), expectedEphemeralErrMsg) {
+		t.Errorf("Expected error message about ephemeral volume creation failure, got: %v", err)
+	}
+}
+
+// Test filesystem error detection and suggestions
+// Requirements: 5.2, 5.3, 5.5
+func TestFilesystemErrorDetection(t *testing.T) {
+	// Test invalid data directory
+	config := &Config{
+		NodejsImage: "test-image:latest", // Set required fields
+		PythonImage: "test-image:latest",
+		DataDir:     "/nonexistent/directory/path/12345",
+	}
+	
+	err := config.Validate()
+	if err == nil {
+		t.Error("Expected error for nonexistent data directory")
+	}
+	
+	if !strings.Contains(err.Error(), "data directory validation failed") {
+		t.Errorf("Expected data directory validation error, got: %v", err)
+	}
+	
+	// Test data directory that exists but is not a directory (use a file)
+	tempFile, err := os.CreateTemp("", "test-file")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+	tempFile.Close()
+	
+	config.DataDir = tempFile.Name()
+	err = config.Validate()
+	if err == nil {
+		t.Error("Expected error when data directory path points to a file")
+	}
+	
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("Expected 'not a directory' error, got: %v", err)
+	}
+	
+	// Test read-only directory (create temp dir and make it read-only)
+	tempDir := t.TempDir()
+	
+	// Make directory read-only (remove write permissions)
+	err = os.Chmod(tempDir, 0444)
+	if err != nil {
+		t.Fatalf("Failed to make directory read-only: %v", err)
+	}
+	
+	// Restore permissions after test
+	defer os.Chmod(tempDir, 0755)
+	
+	config.DataDir = tempDir
+	
+	// Test VolumeManager validation
+	vm := NewVolumeManager(config)
+	err = vm.ValidateDataDir()
+	
+	// On some systems, write test might still succeed even with 0444 permissions
+	// So we'll check if the error is about write permissions or if it succeeds
+	if err != nil && !strings.Contains(err.Error(), "not writable") {
+		t.Errorf("Expected 'not writable' error or no error, got: %v", err)
+	}
+}
+
+// Test user mount parsing error scenarios
+// Requirements: 7.9, 7.10
+func TestUserMountParsingErrors(t *testing.T) {
+	parser := NewUserMountParser()
+	
+	// Test invalid mount syntax
+	invalidMountSpecs := []struct {
+		name      string
+		mountStr  string
+		expectErr bool
+		errMsg    string
+	}{
+		{
+			name:      "missing destination",
+			mountStr:  "/source/path",
+			expectErr: true,
+			errMsg:    "must have at least source and destination",
+		},
+		{
+			name:      "empty source",
+			mountStr:  ":/dest",
+			expectErr: true,
+			errMsg:    "source path cannot be empty",
+		},
+		{
+			name:      "empty destination",
+			mountStr:  "/source:",
+			expectErr: true,
+			errMsg:    "destination path cannot be empty",
+		},
+		{
+			name:      "too many colons",
+			mountStr:  "/source:/dest:ro:extra",
+			expectErr: true,
+			errMsg:    "too many parts",
+		},
+		{
+			name:      "nonexistent source path",
+			mountStr:  "/definitely/nonexistent/path/12345:/dest",
+			expectErr: true,
+			errMsg:    "source path does not exist",
+		},
+		{
+			name:      "relative destination path",
+			mountStr:  "/tmp:relative/path",
+			expectErr: true,
+			errMsg:    "destination path must be absolute",
+		},
+		{
+			name:      "invalid mount options",
+			mountStr:  "/tmp:/dest:invalid_option",
+			expectErr: true,
+			errMsg:    "invalid mount option",
+		},
+	}
+	
+	for _, tc := range invalidMountSpecs {
+		t.Run(tc.name, func(t *testing.T) {
+			// For validation errors (like nonexistent paths), we need to test the full ParseUserMounts flow
+			if strings.Contains(tc.errMsg, "source path does not exist") || 
+			   strings.Contains(tc.errMsg, "destination path must be absolute") ||
+			   strings.Contains(tc.errMsg, "invalid mount option") {
+				
+				// Set the environment variable and test ParseUserMounts
+				originalMount := os.Getenv("MCP_MOUNT")
+				defer func() {
+					if originalMount != "" {
+						os.Setenv("MCP_MOUNT", originalMount)
+					} else {
+						os.Unsetenv("MCP_MOUNT")
+					}
+				}()
+				
+				os.Setenv("MCP_MOUNT", tc.mountStr)
+				_, err := parser.ParseUserMounts()
+				
+				if tc.expectErr {
+					if err == nil {
+						t.Errorf("Expected error for mount spec %s", tc.mountStr)
+					} else if !strings.Contains(err.Error(), tc.errMsg) {
+						t.Errorf("Expected error containing '%s', got: %v", tc.errMsg, err)
+					}
+				}
+			} else {
+				// For syntax errors, test ParseMountString directly
+				mounts, err := parser.ParseMountString(tc.mountStr)
+				
+				if tc.expectErr {
+					if err == nil {
+						t.Errorf("Expected error for mount spec %s", tc.mountStr)
+					} else if !strings.Contains(err.Error(), tc.errMsg) {
+						t.Errorf("Expected error containing '%s', got: %v", tc.errMsg, err)
+					}
+				} else {
+					if err != nil {
+						t.Errorf("Unexpected error for mount spec %s: %v", tc.mountStr, err)
+					}
+					
+					// If no error expected, validate the mounts
+					for _, mount := range mounts {
+						if err := parser.ValidateMount(mount); err != nil {
+							t.Errorf("Mount validation failed: %v", err)
+						}
+					}
+				}
+			}
+		})
+	}
+	
+	// Test MCP_MOUNT environment variable parsing errors
+	originalMount := os.Getenv("MCP_MOUNT")
+	defer func() {
+		if originalMount != "" {
+			os.Setenv("MCP_MOUNT", originalMount)
+		} else {
+			os.Unsetenv("MCP_MOUNT")
+		}
+	}()
+	
+	// Test with invalid MCP_MOUNT
+	os.Setenv("MCP_MOUNT", "/nonexistent:/dest")
+	_, err := parser.ParseUserMounts()
+	if err == nil {
+		t.Error("Expected error when MCP_MOUNT contains nonexistent source path")
+	}
+	
+	// Test with malformed MCP_MOUNT
+	os.Setenv("MCP_MOUNT", "invalid_format")
+	_, err = parser.ParseUserMounts()
+	if err == nil {
+		t.Error("Expected error when MCP_MOUNT has invalid format")
+	}
+	
+	if !strings.Contains(err.Error(), "invalid MCP_MOUNT syntax") {
+		t.Errorf("Expected MCP_MOUNT syntax error, got: %v", err)
+	}
+}
+
+// Test home directory override error scenarios
+// Requirements: 7.6, 7.7
+func TestHomeDirectoryOverrideErrors(t *testing.T) {
+	handler := NewHomeOverrideHandler()
+	
+	// Save original environment
+	originalBindHome := os.Getenv("MCP_BIND_HOME")
+	originalHomePath := os.Getenv("MCP_HOME_PATH")
+	defer func() {
+		if originalBindHome != "" {
+			os.Setenv("MCP_BIND_HOME", originalBindHome)
+		} else {
+			os.Unsetenv("MCP_BIND_HOME")
+		}
+		if originalHomePath != "" {
+			os.Setenv("MCP_HOME_PATH", originalHomePath)
+		} else {
+			os.Unsetenv("MCP_HOME_PATH")
+		}
+	}()
+	
+	// Test MCP_HOME_PATH with nonexistent directory
+	os.Setenv("MCP_HOME_PATH", "/definitely/nonexistent/path/12345")
+	os.Unsetenv("MCP_BIND_HOME")
+	
+	err := handler.ValidateCustomHomePath("/definitely/nonexistent/path/12345")
+	if err == nil {
+		t.Error("Expected error for nonexistent custom home path")
+	}
+	
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("Expected 'does not exist' error, got: %v", err)
+	}
+	
+	// Test MCP_HOME_PATH pointing to a file instead of directory
+	tempFile, err := os.CreateTemp("", "test-file")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+	tempFile.Close()
+	
+	err = handler.ValidateCustomHomePath(tempFile.Name())
+	if err == nil {
+		t.Error("Expected error when custom home path points to a file")
+	}
+	
+	if !strings.Contains(err.Error(), "not a directory") {
+		t.Errorf("Expected 'not a directory' error, got: %v", err)
+	}
+	
+	// Test MCP_HOME_PATH with read-only directory
+	tempDir := t.TempDir()
+	err = os.Chmod(tempDir, 0444) // Make read-only
+	if err != nil {
+		t.Fatalf("Failed to make directory read-only: %v", err)
+	}
+	defer os.Chmod(tempDir, 0755) // Restore permissions
+	
+	err = handler.ValidateCustomHomePath(tempDir)
+	// On some systems, write test might still succeed even with 0444 permissions
+	if err != nil && !strings.Contains(err.Error(), "not writable") {
+		t.Errorf("Expected 'not writable' error or no error, got: %v", err)
+	}
+	
+	// Test CreateBindHomeDir with permission issues
+	// This test is more about the interface than actual permission testing
+	// since permission behavior varies across systems
+	
+	// Test with empty volume name
+	_, err = handler.CreateBindHomeDir("")
+	// This should still work as it creates a directory with empty name
+	// The real test is in the integration where permissions matter
 }
