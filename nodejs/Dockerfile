@@ -24,7 +24,7 @@ RUN npm install --only=production && \
     npm cache clean --force
 
 # Runtime stage - minimal production image
-FROM node:lts-alpine AS runtime
+FROM node:${NODE_VERSION}-alpine AS runtime
 
 # Install security updates and create non-root user
 RUN apk update && \
