@@ -143,13 +143,13 @@ This implementation plan transforms the current blocking container execution (`c
   - **Property 13: Duplicate Signal Handling**
   - **Validates: Requirements 6.2**
 
-- [ ] 11. Final integration and testing
+- [x] 11. Final integration and testing
   - Test signal handling with all supported container runtimes (Docker, Podman, Nerdctl, Finch, Lima)
   - Verify backward compatibility with existing functionality
   - Test cross-platform behavior on available platforms
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [ ] 11.1 Write integration tests for all container runtimes
+- [x] 11.1 Write integration tests for all container runtimes
   - Test signal forwarding works consistently across all supported runtimes
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 

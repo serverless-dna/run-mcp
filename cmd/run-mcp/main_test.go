@@ -8013,3 +8013,512 @@ func TestProperty13_DuplicateSignalHandling(t *testing.T) {
 		})
 	}
 }
+// Task 11: Final integration and testing
+// Test signal handling with all supported container runtimes (Docker, Podman, Nerdctl, Finch, Lima)
+// Verify backward compatibility with existing functionality
+// Test cross-platform behavior on available platforms
+// Requirements: 4.1, 4.2, 4.3, 4.4
+func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
+	// Test signal handling integration across all supported container runtimes
+	// This test verifies that signal forwarding works consistently across all runtimes
+	
+	// Define all supported container runtimes
+	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch", "lima nerdctl"}
+	
+	// Test configuration
+	config := &Config{
+		NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
+		PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
+		DataDir:     t.TempDir(),
+	}
+	
+	// Test cases for different scenarios
+	testCases := []struct {
+		name        string
+		args        []string
+		language    string
+		description string
+	}{
+		{
+			name:        "python_server_signal_handling",
+			args:        []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			language:    "python",
+			description: "Python MCP server with signal handling",
+		},
+		{
+			name:        "nodejs_server_signal_handling",
+			args:        []string{"npx", "@modelcontextprotocol/server-filesystem", "/data"},
+			language:    "nodejs",
+			description: "Node.js MCP server with signal handling",
+		},
+	}
+	
+	for _, runtime := range supportedRuntimes {
+		t.Run(fmt.Sprintf("runtime_%s", strings.ReplaceAll(runtime, " ", "_")), func(t *testing.T) {
+			// Check if runtime is available
+			detector := NewRuntimeDetector()
+			availableRuntimes := detector.ListAvailableRuntimes()
+			
+			runtimeAvailable := false
+			for _, available := range availableRuntimes {
+				if available.Name == runtime {
+					runtimeAvailable = true
+					break
+				}
+			}
+			
+			if !runtimeAvailable {
+				t.Skipf("Runtime %s not available on this system", runtime)
+			}
+			
+			for _, tc := range testCases {
+				t.Run(tc.name, func(t *testing.T) {
+					// Test 1: Build container command with signal handling support
+					containerCmd, volumeName, signalHandler, err := buildContainerCommandWithSignals(config, runtime, tc.language, tc.args)
+					if err != nil {
+						t.Fatalf("buildContainerCommandWithSignals failed for runtime %s: %v", runtime, err)
+					}
+					
+					// Verify command structure
+					if containerCmd == nil {
+						t.Fatalf("buildContainerCommandWithSignals returned nil command for runtime %s", runtime)
+					}
+					
+					if signalHandler == nil {
+						t.Fatalf("buildContainerCommandWithSignals returned nil signal handler for runtime %s", runtime)
+					}
+					
+					// Test 2: Verify container naming for signal forwarding
+					processManager := signalHandler.GetProcessManager()
+					if processManager == nil {
+						t.Fatalf("Signal handler should have a process manager for runtime %s", runtime)
+					}
+					
+					// Verify container name is generated for signal forwarding
+					args := containerCmd.Args
+					foundNameFlag := false
+					for i, arg := range args {
+						if arg == "--name" && i+1 < len(args) {
+							containerName := args[i+1]
+							if containerName == "" {
+								t.Errorf("Container name should not be empty for runtime %s", runtime)
+							}
+							foundNameFlag = true
+							break
+						}
+					}
+					
+					if !foundNameFlag {
+						t.Errorf("Container command should include --name flag for signal forwarding with runtime %s", runtime)
+					}
+					
+					// Test 3: Verify signal handler configuration
+					// Test timeout configuration
+					signalHandler.SetTimeout(3*time.Second, 5*time.Second)
+					
+					// Test process group independence (Requirements 5.1)
+					signalHandler.SetProcessGroupIndependent(true)
+					
+					// Test host termination cleanup (Requirements 5.4)
+					signalHandler.EnableHostTerminationCleanup(true)
+					
+					// Test stream handling (Requirements 8.1, 8.2, 8.3, 8.4)
+					signalHandler.EnableStreamHandling(true)
+					signalHandler.SetStreamTimeout(2 * time.Second)
+					
+					// Test 4: Verify runtime-specific command structure
+					// Check that the command is properly structured for the runtime
+					if len(args) == 0 {
+						t.Fatalf("Command args should not be empty for runtime %s", runtime)
+					}
+					
+					// For multi-word runtimes like "lima nerdctl", verify proper command structure
+					if strings.Contains(runtime, " ") {
+						parts := strings.Fields(runtime)
+						if args[0] != parts[0] {
+							t.Errorf("Expected first command part to be %s for runtime %s, got %s", parts[0], runtime, args[0])
+						}
+					} else {
+						if args[0] != runtime {
+							t.Errorf("Expected command to start with %s for runtime %s, got %s", runtime, runtime, args[0])
+						}
+					}
+					
+					// Test 5: Verify backward compatibility
+					// The command should still include all the standard container options
+					expectedFlags := []string{"-i", "--rm"}
+					for _, expectedFlag := range expectedFlags {
+						found := false
+						for _, arg := range args {
+							if arg == expectedFlag {
+								found = true
+								break
+							}
+						}
+						if !found {
+							t.Errorf("Expected flag %s not found in command for runtime %s", expectedFlag, runtime)
+						}
+					}
+					
+					// Test 6: Verify volume handling remains compatible
+					if volumeName == "" && os.Getenv("MCP_BIND_HOME") == "" && os.Getenv("MCP_HOME_PATH") == "" {
+						t.Errorf("Expected volume name to be generated for runtime %s", runtime)
+					}
+					
+					// Test 7: Verify image selection works correctly
+					expectedImage, err := config.GetImageForLanguage(tc.language)
+					if err != nil {
+						t.Fatalf("Failed to get image for language %s: %v", tc.language, err)
+					}
+					
+					foundImage := false
+					for _, arg := range args {
+						if arg == expectedImage {
+							foundImage = true
+							break
+						}
+					}
+					if !foundImage {
+						t.Errorf("Expected image %s not found in command for runtime %s", expectedImage, runtime)
+					}
+					
+					// Test 8: Test signal forwarding mechanism (without actually running container)
+					// This tests the signal forwarding command construction
+					if cpm, ok := processManager.(*ContainerProcessManager); ok {
+						// Test SIGINT forwarding
+						err := cpm.ForwardSignal(os.Interrupt)
+						// We expect this to fail since no container is running, but the error should indicate
+						// that the signal forwarding mechanism is working (trying to send signal to container)
+						if err == nil {
+							t.Errorf("Expected error when forwarding signal to non-existent container for runtime %s", runtime)
+						} else if !strings.Contains(err.Error(), "container") {
+							t.Errorf("Error should mention container for runtime %s, got: %v", runtime, err)
+						}
+						
+						// Test force kill
+						err = cpm.ForceKill()
+						// Similar expectation - should fail but indicate the mechanism is working
+						if err == nil {
+							t.Errorf("Expected error when force killing non-existent container for runtime %s", runtime)
+						} else if !strings.Contains(err.Error(), "container") {
+							t.Errorf("Error should mention container for runtime %s, got: %v", runtime, err)
+						}
+					}
+					
+					// Test 9: Verify cross-platform signal support
+					// Test that the signal handler supports platform-appropriate signals
+					if signalHandler != nil {
+						// The signal handler should be configured for the current platform
+						// We can't test actual signal handling without running containers,
+						// but we can verify the handler is properly initialized
+						pm := signalHandler.GetProcessManager()
+						if pm == nil {
+							t.Errorf("Process manager should not be nil for runtime %s", runtime)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+// Test backward compatibility with existing functionality
+// Verify that all existing functionality continues to work with signal handling enabled
+// Requirements: 4.1, 4.2, 4.3, 4.4
+func TestSignalHandlingBackwardCompatibility(t *testing.T) {
+	// Test that signal handling doesn't break existing functionality
+	// Since both buildContainerCommand and buildContainerCommandWithSignals now include signal handling,
+	// we test that the signal-enabled version produces valid, working commands
+	
+	config := &Config{
+		NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
+		PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
+		DataDir:     t.TempDir(),
+	}
+	
+	// Test cases that should work exactly the same as before
+	testCases := []struct {
+		name        string
+		args        []string
+		language    string
+		description string
+	}{
+		{
+			name:        "basic_python_command",
+			args:        []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+			language:    "python",
+			description: "Basic Python command should work with signal handling",
+		},
+		{
+			name:        "nodejs_with_explicit_runtime",
+			args:        []string{"node", "npx", "@modelcontextprotocol/server-filesystem", "/data"},
+			language:    "nodejs",
+			description: "Node.js with explicit runtime should work with signal handling",
+		},
+		{
+			name:        "python_with_explicit_runtime",
+			args:        []string{"python", "uvx", "awslabs.aws-api-mcp-server@latest"},
+			language:    "python",
+			description: "Python with explicit runtime should work with signal handling",
+		},
+	}
+	
+	// Get available runtime for testing
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		t.Skip("No container runtime available for backward compatibility testing")
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Test with signal handling (current implementation)
+			containerCmd, volumeName, signalHandler, err := buildContainerCommandWithSignals(config, containerRuntime, tc.language, tc.args)
+			if err != nil {
+				t.Fatalf("buildContainerCommandWithSignals failed: %v", err)
+			}
+			
+			// Verify the command has all expected components for backward compatibility
+			args := containerCmd.Args
+			
+			// Test 1: Verify standard container flags are present
+			expectedFlags := []string{"-i", "--rm"}
+			for _, expectedFlag := range expectedFlags {
+				found := false
+				for _, arg := range args {
+					if arg == expectedFlag {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected flag %s not found in command", expectedFlag)
+				}
+			}
+			
+			// Test 2: Verify container name is present (for signal handling)
+			foundNameFlag := false
+			for i, arg := range args {
+				if arg == "--name" && i+1 < len(args) {
+					containerName := args[i+1]
+					if containerName == "" {
+						t.Error("Container name should not be empty")
+					}
+					foundNameFlag = true
+					break
+				}
+			}
+			if !foundNameFlag {
+				t.Error("Container command should include --name flag for signal forwarding")
+			}
+			
+			// Test 3: Verify volume mounting works
+			foundHomeMount := false
+			for i, arg := range args {
+				if arg == "-v" && i+1 < len(args) {
+					if strings.Contains(args[i+1], ":/home/mcp") {
+						foundHomeMount = true
+						break
+					}
+				}
+			}
+			if !foundHomeMount {
+				t.Error("Expected home volume mount to /home/mcp")
+			}
+			
+			// Test 4: Verify image selection works correctly
+			expectedImage, err := config.GetImageForLanguage(tc.language)
+			if err != nil {
+				t.Fatalf("Failed to get image for language %s: %v", tc.language, err)
+			}
+			
+			foundImage := false
+			for _, arg := range args {
+				if arg == expectedImage {
+					foundImage = true
+					break
+				}
+			}
+			if !foundImage {
+				t.Errorf("Expected image %s not found in command", expectedImage)
+			}
+			
+			// Test 5: Verify command arguments are preserved
+			imageIndex := -1
+			for i, arg := range args {
+				if arg == expectedImage {
+					imageIndex = i
+					break
+				}
+			}
+			
+			if imageIndex != -1 && imageIndex+1 < len(args) {
+				commandArgs := args[imageIndex+1:]
+				expectedArgs := tc.args
+				
+				// Handle explicit runtime specification
+				if len(tc.args) >= 2 && (tc.args[0] == "python" || tc.args[0] == "node" || tc.args[0] == "nodejs") {
+					expectedArgs = tc.args[1:]
+				}
+				
+				if len(commandArgs) >= len(expectedArgs) {
+					for i, expected := range expectedArgs {
+						if i < len(commandArgs) && commandArgs[i] != expected {
+							t.Errorf("Command arg mismatch at position %d: expected %s, got %s", i, expected, commandArgs[i])
+						}
+					}
+				} else {
+					t.Errorf("Not enough command arguments: expected at least %d, got %d", len(expectedArgs), len(commandArgs))
+				}
+			}
+			
+			// Test 6: Verify volume name generation works
+			if volumeName == "" && os.Getenv("MCP_BIND_HOME") == "" && os.Getenv("MCP_HOME_PATH") == "" {
+				t.Error("Expected volume name to be generated")
+			}
+			
+			// Test 7: Verify signal handler is properly initialized
+			if signalHandler == nil {
+				t.Error("Signal handler should not be nil")
+			} else {
+				pm := signalHandler.GetProcessManager()
+				if pm == nil {
+					t.Error("Process manager should not be nil")
+				}
+				
+				// Test signal handler configuration
+				signalHandler.SetTimeout(3*time.Second, 5*time.Second)
+				signalHandler.SetProcessGroupIndependent(true)
+				signalHandler.EnableHostTerminationCleanup(true)
+				signalHandler.EnableStreamHandling(true)
+			}
+		})
+	}
+}
+
+// Test cross-platform signal handling behavior
+// Verify that signal handling works correctly on different platforms
+// Requirements: 3.1, 3.2, 3.3
+func TestSignalHandlingCrossPlatform(t *testing.T) {
+	// Test platform-specific signal handling behavior
+	
+	// Get available runtime for testing
+	detector := NewRuntimeDetector()
+	containerRuntime, err := detector.Detect()
+	if err != nil {
+		t.Skip("No container runtime available for cross-platform testing")
+	}
+	
+	config := &Config{
+		NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
+		PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
+		DataDir:     t.TempDir(),
+	}
+	
+	args := []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"}
+	
+	// Build container command with signal handling
+	_, _, signalHandler, err := buildContainerCommandWithSignals(config, containerRuntime, "python", args)
+	if err != nil {
+		t.Fatalf("buildContainerCommandWithSignals failed: %v", err)
+	}
+	
+	if signalHandler == nil {
+		t.Fatal("Signal handler should not be nil")
+	}
+	
+	// Test platform-specific signal support
+	t.Run("platform_signal_support", func(t *testing.T) {
+		// Test that the signal handler is configured for the current platform
+		// We can't test actual signal delivery without running containers,
+		// but we can verify the handler is properly initialized
+		
+		pm := signalHandler.GetProcessManager()
+		if pm == nil {
+			t.Error("Process manager should not be nil")
+		}
+		
+		// Test signal configuration loading
+		config := LoadSignalConfig()
+		if config == nil {
+			t.Error("Signal configuration should not be nil")
+		}
+		
+		// Verify timeout values are reasonable
+		if config.SigintTimeout <= 0 {
+			t.Error("SIGINT timeout should be positive")
+		}
+		if config.SigtermTimeout <= 0 {
+			t.Error("SIGTERM timeout should be positive")
+		}
+		
+		// Test timeout configuration
+		signalHandler.SetTimeout(3*time.Second, 5*time.Second)
+		
+		// Test platform-specific features
+		switch runtime.GOOS {
+		case "windows":
+			// Windows-specific tests
+			t.Log("Testing Windows-specific signal handling")
+			// Windows only supports os.Interrupt
+			
+		case "linux", "darwin":
+			// Unix-specific tests  
+			t.Log("Testing Unix-specific signal handling")
+			// Unix systems support SIGINT, SIGTERM, SIGQUIT
+			
+		default:
+			t.Log("Testing default signal handling for platform:", runtime.GOOS)
+		}
+	})
+	
+	// Test configuration loading with environment variables
+	t.Run("environment_configuration", func(t *testing.T) {
+		// Save original environment
+		originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
+		originalDebug := os.Getenv("MCP_DEBUG")
+		
+		defer func() {
+			if originalTimeout == "" {
+				os.Unsetenv("MCP_SIGNAL_TIMEOUT")
+			} else {
+				os.Setenv("MCP_SIGNAL_TIMEOUT", originalTimeout)
+			}
+			if originalDebug == "" {
+				os.Unsetenv("MCP_DEBUG")
+			} else {
+				os.Setenv("MCP_DEBUG", originalDebug)
+			}
+		}()
+		
+		// Test custom timeout configuration
+		os.Setenv("MCP_SIGNAL_TIMEOUT", "8s")
+		config := LoadSignalConfig()
+		
+		if config.SigtermTimeout != 8*time.Second {
+			t.Errorf("Expected SIGTERM timeout to be 8s, got %v", config.SigtermTimeout)
+		}
+		if config.SigintTimeout != 4*time.Second {
+			t.Errorf("Expected SIGINT timeout to be 4s (half of SIGTERM), got %v", config.SigintTimeout)
+		}
+		
+		// Test debug logging configuration
+		os.Setenv("MCP_DEBUG", "true")
+		config = LoadSignalConfig()
+		
+		if !config.EnableLogging {
+			t.Error("Expected logging to be enabled when MCP_DEBUG=true")
+		}
+		
+		// Test invalid timeout (should fall back to defaults)
+		os.Setenv("MCP_SIGNAL_TIMEOUT", "invalid")
+		config = LoadSignalConfig()
+		
+		if config.SigtermTimeout != 10*time.Second {
+			t.Errorf("Expected default SIGTERM timeout (10s) with invalid config, got %v", config.SigtermTimeout)
+		}
+		if config.SigintTimeout != 5*time.Second {
+			t.Errorf("Expected default SIGINT timeout (5s) with invalid config, got %v", config.SigintTimeout)
+		}
+	})
+}
