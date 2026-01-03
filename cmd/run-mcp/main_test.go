@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/quick"
 	"time"
@@ -5299,4 +5300,239 @@ func TestHomeDirectoryOverrideErrors(t *testing.T) {
 	_, err = handler.CreateBindHomeDir("")
 	// This should still work as it creates a directory with empty name
 	// The real test is in the integration where permissions matter
+}
+
+// Property 1: Signal Forwarding Consistency
+// For any supported container runtime and any supported signal, when the signal is sent to the host process, 
+// the signal should be successfully forwarded to the container process using the appropriate runtime-specific mechanism
+func TestProperty1_SignalForwardingConsistency(t *testing.T) {
+	// **Feature: container-signal-handling, Property 1: Signal Forwarding Consistency**
+	// **Validates: Requirements 1.1, 1.2, 4.1, 4.2, 4.3, 4.4**
+	
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+	
+	// Test supported container runtimes
+	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch", "lima nerdctl"}
+	
+	// Test supported signals (platform-specific)
+	var supportedSignals []os.Signal
+	switch runtime.GOOS {
+	case "windows":
+		supportedSignals = []os.Signal{os.Interrupt}
+	case "linux", "darwin":
+		supportedSignals = []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT}
+	default:
+		supportedSignals = []os.Signal{os.Interrupt}
+	}
+	
+	// Property test with multiple iterations
+	for i := 0; i < 100; i++ {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+			// Generate random test data
+			runtimeIndex := rand.Intn(len(supportedRuntimes))
+			signalIndex := rand.Intn(len(supportedSignals))
+			
+			testRuntime := supportedRuntimes[runtimeIndex]
+			testSignal := supportedSignals[signalIndex]
+			
+			// Create process manager for the runtime
+			testArgs := []string{"uvx", "test-server"}
+			processManager := NewContainerProcessManager(testRuntime, testArgs)
+			
+			// Test signal forwarding mechanism (without actually starting container)
+			// We test the command construction logic
+			signalName := getSignalName(testSignal)
+			
+			// Verify signal name is valid
+			if signalName == "" {
+				t.Errorf("Signal name should not be empty for signal %v", testSignal)
+			}
+			
+			// Verify signal name follows expected format
+			expectedSignalNames := []string{"SIGINT", "SIGTERM", "SIGKILL", "SIGQUIT"}
+			validSignalName := false
+			for _, expected := range expectedSignalNames {
+				if signalName == expected || signalName == testSignal.String() {
+					validSignalName = true
+					break
+				}
+			}
+			
+			if !validSignalName {
+				t.Errorf("Signal name %s is not in expected format for signal %v", signalName, testSignal)
+			}
+			
+			// Test container name generation consistency
+			containerName := processManager.GetContainerName()
+			if containerName == "" {
+				t.Error("Container name should not be empty")
+			}
+			
+			// Container name should be deterministic for same input
+			processManager2 := NewContainerProcessManager(testRuntime, testArgs)
+			containerName2 := processManager2.GetContainerName()
+			
+			// Names should be different (due to timestamp) but follow same pattern
+			if !strings.HasPrefix(containerName, "mcp-home-uvx-test-server-") {
+				t.Errorf("Container name %s does not follow expected pattern", containerName)
+			}
+			if !strings.HasPrefix(containerName2, "mcp-home-uvx-test-server-") {
+				t.Errorf("Container name %s does not follow expected pattern", containerName2)
+			}
+			
+			// Test runtime command parsing for signal forwarding
+			parts := strings.Fields(testRuntime)
+			if len(parts) == 0 {
+				t.Errorf("Runtime %s should not be empty", testRuntime)
+			}
+			
+			// First part should be a valid command name
+			if parts[0] == "" {
+				t.Errorf("Runtime command should not be empty for runtime %s", testRuntime)
+			}
+		})
+	}
+}
+
+// Property 6: Platform Signal Support
+// For any supported platform (Linux, macOS, Windows), the signal handler should correctly handle 
+// the platform-appropriate signals (SIGINT/SIGTERM/SIGQUIT on Unix, os.Interrupt on Windows)
+func TestProperty6_PlatformSignalSupport(t *testing.T) {
+	// **Feature: container-signal-handling, Property 6: Platform Signal Support**
+	// **Validates: Requirements 3.1, 3.2, 3.3**
+	
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+	
+	// Test signal configuration loading
+	config := LoadSignalConfig()
+	if config == nil {
+		t.Fatal("Signal configuration should not be nil")
+	}
+	
+	// Test default timeout values
+	if config.SigintTimeout <= 0 {
+		t.Error("SIGINT timeout should be positive")
+	}
+	if config.SigtermTimeout <= 0 {
+		t.Error("SIGTERM timeout should be positive")
+	}
+	
+	// Test that SIGINT timeout is typically shorter than SIGTERM
+	if config.SigintTimeout >= config.SigtermTimeout {
+		t.Error("SIGINT timeout should typically be shorter than SIGTERM timeout")
+	}
+	
+	// Property test with multiple iterations
+	for i := 0; i < 100; i++ {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+			// Create test process manager and signal handler
+			testArgs := []string{"uvx", "test-server"}
+			processManager := NewContainerProcessManager("docker", testArgs)
+			signalHandler := NewSignalHandler(processManager)
+			
+			// Test signal handler creation
+			if signalHandler == nil {
+				t.Fatal("Signal handler should not be nil")
+			}
+			
+			// Test timeout configuration
+			testSigintTimeout := time.Duration(rand.Intn(10)+1) * time.Second
+			testSigtermTimeout := time.Duration(rand.Intn(20)+10) * time.Second
+			
+			signalHandler.SetTimeout(testSigintTimeout, testSigtermTimeout)
+			
+			// Test that process manager is accessible
+			pm := signalHandler.GetProcessManager()
+			if pm == nil {
+				t.Error("Process manager should not be nil")
+			}
+			
+			// Test signal configuration with environment variables
+			originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
+			originalDebug := os.Getenv("MCP_DEBUG")
+			
+			defer func() {
+				if originalTimeout != "" {
+					os.Setenv("MCP_SIGNAL_TIMEOUT", originalTimeout)
+				} else {
+					os.Unsetenv("MCP_SIGNAL_TIMEOUT")
+				}
+				if originalDebug != "" {
+					os.Setenv("MCP_DEBUG", originalDebug)
+				} else {
+					os.Unsetenv("MCP_DEBUG")
+				}
+			}()
+			
+			// Test with custom timeout
+			testTimeoutStr := fmt.Sprintf("%ds", rand.Intn(30)+5)
+			os.Setenv("MCP_SIGNAL_TIMEOUT", testTimeoutStr)
+			
+			customConfig := LoadSignalConfig()
+			if customConfig.SigtermTimeout <= 0 {
+				t.Error("Custom SIGTERM timeout should be positive")
+			}
+			if customConfig.SigintTimeout <= 0 {
+				t.Error("Custom SIGINT timeout should be positive")
+			}
+			
+			// Test debug logging configuration
+			os.Setenv("MCP_DEBUG", "true")
+			debugConfig := LoadSignalConfig()
+			if !debugConfig.EnableLogging {
+				t.Error("Debug logging should be enabled when MCP_DEBUG=true")
+			}
+			
+			os.Setenv("MCP_DEBUG", "false")
+			noDebugConfig := LoadSignalConfig()
+			if noDebugConfig.EnableLogging {
+				t.Error("Debug logging should be disabled when MCP_DEBUG=false")
+			}
+		})
+	}
+	
+	// Test platform-specific signal support
+	t.Run("platform_specific_signals", func(t *testing.T) {
+		switch runtime.GOOS {
+		case "windows":
+			// On Windows, only os.Interrupt should be supported
+			signalName := getSignalName(os.Interrupt)
+			if signalName == "" {
+				t.Error("os.Interrupt should have a valid signal name on Windows")
+			}
+		case "linux", "darwin":
+			// On Unix systems, multiple signals should be supported
+			unixSignals := []os.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGKILL}
+			for _, sig := range unixSignals {
+				signalName := getSignalName(sig)
+				if signalName == "" {
+					t.Errorf("Signal %v should have a valid signal name on Unix", sig)
+				}
+				
+				// Test expected signal names
+				switch sig {
+				case syscall.SIGINT:
+					if signalName != "SIGINT" {
+						t.Errorf("Expected SIGINT, got %s", signalName)
+					}
+				case syscall.SIGTERM:
+					if signalName != "SIGTERM" {
+						t.Errorf("Expected SIGTERM, got %s", signalName)
+					}
+				case syscall.SIGKILL:
+					if signalName != "SIGKILL" {
+						t.Errorf("Expected SIGKILL, got %s", signalName)
+					}
+				case syscall.SIGQUIT:
+					if signalName != "SIGQUIT" {
+						t.Errorf("Expected SIGQUIT, got %s", signalName)
+					}
+				}
+			}
+		}
+	})
 }

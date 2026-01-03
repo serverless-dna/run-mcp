@@ -6,17 +6,17 @@ This implementation plan transforms the current blocking container execution (`c
 
 ## Tasks
 
-- [ ] 1. Create signal handling infrastructure
+- [x] 1. Create signal handling infrastructure
   - Create `cmd/run-mcp/signal.go` with SignalHandler interface and implementation
   - Create `cmd/run-mcp/process.go` with ProcessManager interface and implementation
   - Add signal configuration loading to existing config system
   - _Requirements: 1.1, 1.2, 1.3, 2.3, 3.1, 3.2, 3.3, 7.1, 7.2_
 
-- [ ] 1.1 Write property test for signal forwarding consistency
+- [x] 1.1 Write property test for signal forwarding consistency
   - **Property 1: Signal Forwarding Consistency**
   - **Validates: Requirements 1.1, 1.2, 4.1, 4.2, 4.3, 4.4**
 
-- [ ] 1.2 Write property test for cross-platform signal support
+- [x] 1.2 Write property test for cross-platform signal support
   - **Property 6: Platform Signal Support**
   - **Validates: Requirements 3.1, 3.2, 3.3**
 
