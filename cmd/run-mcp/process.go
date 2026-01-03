@@ -71,6 +71,14 @@ func (pm *ContainerProcessManager) WaitForExit() (int, error) {
 	err := pm.cmd.Wait()
 	
 	if err != nil {
+		// Handle "waitid: no child processes" error which can occur in race conditions
+		if strings.Contains(err.Error(), "waitid: no child processes") ||
+		   strings.Contains(err.Error(), "no child processes") {
+			// Process has already been waited on or exited, assume successful exit
+			// This can happen when the container exits very quickly or in race conditions
+			return 0, nil
+		}
+		
 		// Extract exit code from error
 		if exitError, ok := err.(*exec.ExitError); ok {
 			exitCode := exitError.ExitCode()

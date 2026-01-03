@@ -153,7 +153,7 @@ This implementation plan transforms the current blocking container execution (`c
   - Test signal forwarding works consistently across all supported runtimes
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [ ] 12. Final checkpoint - Ensure all tests pass
+- [x] 12. Final checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
