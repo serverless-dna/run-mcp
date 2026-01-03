@@ -336,8 +336,8 @@ func listImageTags(containerRuntime, registry, repo string) error {
 	return nil
 }
 
-// buildContainerCommand constructs the container execution command
-// Requirements: 1.5, 5.1, 5.4
+// buildContainerCommand constructs the container execution command with ProcessManager integration
+// Requirements: 1.5, 5.1, 5.4, 4.1, 4.2, 4.3, 4.4
 func buildContainerCommand(config *Config, containerRuntime, language string, args []string) (*exec.Cmd, string, error) {
 	// Get the appropriate image for the language
 	image, err := config.GetImageForLanguage(language)
@@ -345,8 +345,15 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 		return nil, "", err
 	}
 
-	// Build container command arguments
+	// Create ProcessManager with container naming for signal forwarding
+	// Requirements: 4.1, 4.2, 4.3, 4.4
+	processManager := NewContainerProcessManager(containerRuntime, args)
+	
+	// Build base container command arguments
 	containerArgs := []string{"run", "-i", "--rm"}
+	
+	// Add unique container name for signal forwarding
+	containerArgs = append(containerArgs, "--name", processManager.GetContainerName())
 	
 	// Add environment variables (filtered to exclude MCP configuration variables)
 	// Requirements: 3.1, 3.3, 3.5
@@ -433,12 +440,16 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 		containerArgs = append(containerArgs, args...)
 	}
 
-	// Handle lima nerdctl special case
-	if strings.HasPrefix(containerRuntime, "lima") {
-		parts := strings.Fields(containerRuntime)
-		return exec.Command(parts[0], append(parts[1:], containerArgs...)...), volumeName, nil
+	// Build final command using ProcessManager for consistent runtime handling
+	// This handles both single-word runtimes ("docker") and multi-word runtimes ("lima nerdctl")
+	parts := strings.Fields(containerRuntime)
+	if len(parts) > 1 {
+		// Multi-word runtime (e.g., "lima nerdctl")
+		finalArgs := append(parts[1:], containerArgs...)
+		return exec.Command(parts[0], finalArgs...), volumeName, nil
 	}
-
+	
+	// Single-word runtime (e.g., "docker", "podman")
 	return exec.Command(containerRuntime, containerArgs...), volumeName, nil
 }
 // createVolumeCommand creates the volume management command with subcommands

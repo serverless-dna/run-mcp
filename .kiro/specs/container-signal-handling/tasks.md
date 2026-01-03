@@ -20,13 +20,13 @@ This implementation plan transforms the current blocking container execution (`c
   - **Property 6: Platform Signal Support**
   - **Validates: Requirements 3.1, 3.2, 3.3**
 
-- [ ] 2. Implement container naming strategy
+- [x] 2. Implement container naming strategy
   - Modify `buildContainerCommand` to use ProcessManager with container naming
   - Add `--name` flag generation using existing `sanitizeVolumeName` function
   - Update container command building to include unique container names
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [ ] 2.1 Write property test for configuration loading
+- [x] 2.1 Write property test for configuration loading
   - **Property 5: Configuration Loading**
   - **Validates: Requirements 2.3**
 

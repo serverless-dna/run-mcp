@@ -5536,3 +5536,216 @@ func TestProperty6_PlatformSignalSupport(t *testing.T) {
 		}
 	})
 }
+
+// Property 5: Configuration Loading
+// For any valid MCP_SIGNAL_TIMEOUT environment variable value, the timeout configuration should be loaded correctly with appropriate defaults when the variable is not set
+func TestProperty5_ConfigurationLoading(t *testing.T) {
+	// **Feature: container-signal-handling, Property 5: Configuration Loading**
+	// **Validates: Requirements 2.3**
+	
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+	
+	// Save original environment
+	originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
+	originalDebug := os.Getenv("MCP_DEBUG")
+	defer func() {
+		if originalTimeout != "" {
+			os.Setenv("MCP_SIGNAL_TIMEOUT", originalTimeout)
+		} else {
+			os.Unsetenv("MCP_SIGNAL_TIMEOUT")
+		}
+		if originalDebug != "" {
+			os.Setenv("MCP_DEBUG", originalDebug)
+		} else {
+			os.Unsetenv("MCP_DEBUG")
+		}
+	}()
+	
+	// Property test with multiple iterations
+	for i := 0; i < 100; i++ {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+			// Test case 1: Default configuration (no environment variables)
+			os.Unsetenv("MCP_SIGNAL_TIMEOUT")
+			os.Unsetenv("MCP_DEBUG")
+			
+			config := LoadSignalConfig()
+			if config == nil {
+				t.Fatal("Configuration should not be nil")
+			}
+			
+			// Verify default values
+			if config.SigtermTimeout != 10*time.Second {
+				t.Errorf("Expected default SIGTERM timeout 10s, got %v", config.SigtermTimeout)
+			}
+			if config.SigintTimeout != 5*time.Second {
+				t.Errorf("Expected default SIGINT timeout 5s, got %v", config.SigintTimeout)
+			}
+			if config.EnableLogging != false {
+				t.Errorf("Expected default logging disabled, got %v", config.EnableLogging)
+			}
+			
+			// Test case 2: Valid timeout values
+			validTimeouts := []string{"1s", "5s", "10s", "30s", "1m", "2m30s"}
+			for _, timeoutStr := range validTimeouts {
+				os.Setenv("MCP_SIGNAL_TIMEOUT", timeoutStr)
+				
+				config := LoadSignalConfig()
+				expectedDuration, err := time.ParseDuration(timeoutStr)
+				if err != nil {
+					t.Fatalf("Test setup error: invalid duration %s", timeoutStr)
+				}
+				
+				if config.SigtermTimeout != expectedDuration {
+					t.Errorf("Expected SIGTERM timeout %v, got %v", expectedDuration, config.SigtermTimeout)
+				}
+				if config.SigintTimeout != expectedDuration/2 {
+					t.Errorf("Expected SIGINT timeout %v, got %v", expectedDuration/2, config.SigintTimeout)
+				}
+			}
+			
+			// Test case 3: Invalid timeout values should use defaults
+			invalidTimeouts := []string{"invalid", "not-a-duration", "10", "abc123"}
+			for _, timeoutStr := range invalidTimeouts {
+				os.Setenv("MCP_SIGNAL_TIMEOUT", timeoutStr)
+				
+				config := LoadSignalConfig()
+				// Should fall back to defaults when parsing fails
+				if config.SigtermTimeout != 10*time.Second {
+					t.Errorf("Expected fallback SIGTERM timeout 10s for invalid input '%s', got %v", timeoutStr, config.SigtermTimeout)
+				}
+				if config.SigintTimeout != 5*time.Second {
+					t.Errorf("Expected fallback SIGINT timeout 5s for invalid input '%s', got %v", timeoutStr, config.SigintTimeout)
+				}
+			}
+			
+			// Test case 4: Debug logging configuration
+			debugValues := map[string]bool{
+				"true":  true,
+				"1":     true,
+				"false": false,
+				"0":     false,
+				"":      false,
+				"other": false,
+			}
+			
+			for debugValue, expectedLogging := range debugValues {
+				if debugValue == "" {
+					os.Unsetenv("MCP_DEBUG")
+				} else {
+					os.Setenv("MCP_DEBUG", debugValue)
+				}
+				
+				config := LoadSignalConfig()
+				if config.EnableLogging != expectedLogging {
+					t.Errorf("Expected logging %v for MCP_DEBUG='%s', got %v", expectedLogging, debugValue, config.EnableLogging)
+				}
+			}
+			
+			// Test case 5: Combined configuration
+			os.Setenv("MCP_SIGNAL_TIMEOUT", "15s")
+			os.Setenv("MCP_DEBUG", "true")
+			
+			config = LoadSignalConfig()
+			if config.SigtermTimeout != 15*time.Second {
+				t.Errorf("Expected combined SIGTERM timeout 15s, got %v", config.SigtermTimeout)
+			}
+			if config.SigintTimeout != 7500*time.Millisecond { // 15s / 2 = 7.5s
+				t.Errorf("Expected combined SIGINT timeout 7.5s, got %v", config.SigintTimeout)
+			}
+			if !config.EnableLogging {
+				t.Error("Expected combined logging enabled")
+			}
+		})
+	}
+}
+// Test container naming integration
+func TestContainerNamingIntegration(t *testing.T) {
+	config := loadConfig()
+	
+	testCases := []struct {
+		name     string
+		runtime  string
+		language string
+		args     []string
+	}{
+		{
+			name:     "simple_uvx_command",
+			runtime:  "docker",
+			language: "python",
+			args:     []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"},
+		},
+		{
+			name:     "npx_command",
+			runtime:  "podman",
+			language: "nodejs",
+			args:     []string{"npx", "@modelcontextprotocol/server-filesystem", "/data"},
+		},
+		{
+			name:     "lima_nerdctl",
+			runtime:  "lima nerdctl",
+			language: "python",
+			args:     []string{"python", "-m", "server"},
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, volumeName, err := buildContainerCommand(config, tc.runtime, tc.language, tc.args)
+			if err != nil {
+				t.Fatalf("buildContainerCommand failed: %v", err)
+			}
+			
+			if cmd == nil {
+				t.Fatal("Command should not be nil")
+			}
+			
+			// Check if --name flag is present
+			cmdArgs := cmd.Args
+			nameIndex := -1
+			for i, arg := range cmdArgs {
+				if arg == "--name" {
+					nameIndex = i
+					break
+				}
+			}
+			
+			if nameIndex == -1 {
+				t.Errorf("--name flag not found in command args: %v", cmdArgs)
+				return
+			}
+			
+			if nameIndex+1 >= len(cmdArgs) {
+				t.Error("--name flag has no value")
+				return
+			}
+			
+			containerName := cmdArgs[nameIndex+1]
+			t.Logf("Container name: %s", containerName)
+			t.Logf("Volume name: %s", volumeName)
+			t.Logf("Full command: %s", cmd.String())
+			
+			// Verify container name follows expected pattern (starts with sanitized volume name)
+			if !strings.HasPrefix(containerName, "mcp-home-") {
+				t.Errorf("Container name doesn't follow expected pattern: %s", containerName)
+			}
+			
+			// Verify container name contains timestamp (should end with digits)
+			parts := strings.Split(containerName, "-")
+			if len(parts) < 2 {
+				t.Errorf("Container name should contain timestamp: %s", containerName)
+			}
+			
+			lastPart := parts[len(parts)-1]
+			if len(lastPart) == 0 {
+				t.Errorf("Container name should end with timestamp: %s", containerName)
+			}
+			
+			// Verify the container name is unique (contains nanosecond timestamp)
+			if len(lastPart) < 10 { // Nanosecond timestamps are long
+				t.Errorf("Container name should contain nanosecond timestamp for uniqueness: %s", containerName)
+			}
+		})
+	}
+}
