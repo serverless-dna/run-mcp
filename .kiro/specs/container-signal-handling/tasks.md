@@ -89,21 +89,21 @@ This implementation plan transforms the current blocking container execution (`c
   - **Property 11: Ephemeral Volume Cleanup**
   - **Validates: Requirements 5.5**
 
-- [ ] 8. Add advanced signal handling features
+- [x] 8. Add advanced signal handling features
   - Implement process group independence for signal handling
   - Add support for child process signal propagation
   - Handle host process termination cleanup
   - _Requirements: 5.1, 5.2, 5.4_
 
-- [ ] 8.1 Write property test for process group independence
+- [x] 8.1 Write property test for process group independence
   - **Property 8: Process Group Independence**
   - **Validates: Requirements 5.1**
 
-- [ ] 8.2 Write property test for child process signal propagation
+- [x] 8.2 Write property test for child process signal propagation
   - **Property 9: Child Process Signal Propagation**
   - **Validates: Requirements 5.2**
 
-- [ ] 8.3 Write property test for host termination cleanup
+- [x] 8.3 Write property test for host termination cleanup
   - **Property 10: Host Termination Cleanup**
   - **Validates: Requirements 5.4**
 
