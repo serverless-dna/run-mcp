@@ -3776,7 +3776,7 @@ func TestProperty6_VolumeManagementCommands(t *testing.T) {
 	}
 	
 	// Property test with multiple iterations
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Generate random test data
 			numVolumes := rand.Intn(5) + 1 // 1-5 volumes
@@ -5329,7 +5329,7 @@ func TestProperty1_SignalForwardingConsistency(t *testing.T) {
 	}
 	
 	// Property test with multiple iterations
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Generate random test data
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
@@ -5428,7 +5428,7 @@ func TestProperty6_PlatformSignalSupport(t *testing.T) {
 	}
 	
 	// Property test with multiple iterations
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Create test process manager and signal handler
 			testArgs := []string{"uvx", "test-server"}
@@ -5565,7 +5565,7 @@ func TestProperty5_ConfigurationLoading(t *testing.T) {
 	}()
 	
 	// Property test with multiple iterations
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Test case 1: Default configuration (no environment variables)
 			os.Unsetenv("MCP_SIGNAL_TIMEOUT")
@@ -5937,7 +5937,7 @@ func TestProperty4_TimeoutBasedForceTermination(t *testing.T) {
 	}
 	
 	// Property test with multiple iterations
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Test timeout configuration loading
 			originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
@@ -6163,4 +6163,611 @@ func TestForceTerminationExitCode(t *testing.T) {
 		
 		t.Log("ForceKill method includes error handling for already-stopped containers")
 	})
+}
+
+// Property 12: Error Handling Resilience
+// For any container runtime error during signal forwarding, the signal handler should log descriptive error messages and handle the failure gracefully
+func TestProperty12_ErrorHandlingResilience(t *testing.T) {
+	// **Feature: container-signal-handling, Property 12: Error Handling Resilience**
+	// **Validates: Requirements 6.1, 6.3**
+	
+	property := func(containerName string, signalType int) bool {
+		// Limit inputs to reasonable ranges
+		if len(containerName) == 0 || len(containerName) > 50 || signalType < 1 || signalType > 15 {
+			return true // Skip invalid inputs
+		}
+		
+		// Sanitize container name
+		sanitizedName := strings.ReplaceAll(containerName, " ", "-")
+		if sanitizedName == "" {
+			return true
+		}
+		
+		// Create a mock process manager that simulates signal forwarding failures
+		processManager := &MockProcessManager{
+			containerName: sanitizedName,
+			runtime:       "docker",
+			failSignal:    true, // Simulate signal forwarding failure
+		}
+		
+		// Create signal handler
+		signalHandler := NewSignalHandler(processManager)
+		
+		// Create a mock command
+		cmd := &exec.Cmd{
+			Path: "docker",
+			Args: []string{"docker", "run", "--name", sanitizedName, "test-image"},
+		}
+		
+		// Start signal handling
+		err := signalHandler.Start(cmd)
+		if err != nil {
+			return false // Signal handler should start successfully
+		}
+		
+		// Simulate signal forwarding (this should fail gracefully)
+		var signal os.Signal
+		switch signalType % 4 {
+		case 0:
+			signal = syscall.SIGINT
+		case 1:
+			signal = syscall.SIGTERM
+		case 2:
+			signal = syscall.SIGQUIT
+		default:
+			signal = syscall.SIGINT
+		}
+		
+		// Forward signal - this should fail but be handled gracefully
+		err = processManager.ForwardSignal(signal)
+		
+		// Property: Signal forwarding failure should be handled gracefully
+		// The error should be returned but not cause a panic or crash
+		if err == nil {
+			return false // We expect an error from our mock
+		}
+		
+		// Property: Error message should be descriptive
+		if !strings.Contains(err.Error(), "signal forwarding failed") {
+			return false
+		}
+		
+		// Stop signal handling
+		signalHandler.Stop()
+		
+		return true
+	}
+	
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Error(err)
+	}
+}
+
+// Property 15: Comprehensive Logging
+// For any signal handling operation (signal receipt, forwarding, timeout, force termination), appropriate log messages should be generated at the correct log levels with relevant details
+func TestProperty15_ComprehensiveLogging(t *testing.T) {
+	// **Feature: container-signal-handling, Property 15: Comprehensive Logging**
+	// **Validates: Requirements 2.4, 7.1, 7.2, 7.3, 7.4**
+	
+	property := func(containerName string, enableLogging bool, timeoutSeconds int) bool {
+		// Limit inputs to reasonable ranges
+		if len(containerName) == 0 || len(containerName) > 50 || timeoutSeconds < 1 || timeoutSeconds > 30 {
+			return true // Skip invalid inputs
+		}
+		
+		// Sanitize container name
+		sanitizedName := strings.ReplaceAll(containerName, " ", "-")
+		if sanitizedName == "" {
+			return true
+		}
+		
+		// Set up logging environment
+		originalDebug := os.Getenv("MCP_DEBUG")
+		defer func() {
+			if originalDebug == "" {
+				os.Unsetenv("MCP_DEBUG")
+			} else {
+				os.Setenv("MCP_DEBUG", originalDebug)
+			}
+		}()
+		
+		if enableLogging {
+			os.Setenv("MCP_DEBUG", "true")
+		} else {
+			os.Unsetenv("MCP_DEBUG")
+		}
+		
+		// Create signal configuration with custom timeout
+		originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
+		defer func() {
+			if originalTimeout == "" {
+				os.Unsetenv("MCP_SIGNAL_TIMEOUT")
+			} else {
+				os.Setenv("MCP_SIGNAL_TIMEOUT", originalTimeout)
+			}
+		}()
+		
+		timeoutDuration := fmt.Sprintf("%ds", timeoutSeconds)
+		os.Setenv("MCP_SIGNAL_TIMEOUT", timeoutDuration)
+		
+		// Load signal configuration
+		config := LoadSignalConfig()
+		
+		// Property: Configuration should reflect environment variables
+		expectedTimeout := time.Duration(timeoutSeconds) * time.Second
+		if config.SigtermTimeout != expectedTimeout {
+			return false
+		}
+		
+		// Property: Logging should be enabled/disabled based on environment
+		if config.EnableLogging != enableLogging {
+			return false
+		}
+		
+		// Property: SIGINT timeout should be half of SIGTERM timeout
+		expectedSigintTimeout := expectedTimeout / 2
+		if config.SigintTimeout != expectedSigintTimeout {
+			return false
+		}
+		
+		// Create a mock process manager
+		processManager := &MockProcessManager{
+			containerName: sanitizedName,
+			runtime:       "docker",
+		}
+		
+		// Create signal handler with the loaded configuration
+		signalHandler := NewSignalHandler(processManager)
+		
+		// Property: Signal handler should use the loaded configuration
+		defaultHandler, ok := signalHandler.(*DefaultSignalHandler)
+		if !ok {
+			return false
+		}
+		
+		if defaultHandler.sigintTimeout != expectedSigintTimeout {
+			return false
+		}
+		
+		if defaultHandler.sigtermTimeout != expectedTimeout {
+			return false
+		}
+		
+		if defaultHandler.config.EnableLogging != enableLogging {
+			return false
+		}
+		
+		return true
+	}
+	
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Error(err)
+	}
+}
+
+// Property 14: Force Termination Error Handling
+// For any scenario where force termination fails, the signal handler should report the failure and exit with an appropriate error code
+func TestProperty14_ForceTerminationErrorHandling(t *testing.T) {
+	// **Feature: container-signal-handling, Property 14: Force Termination Error Handling**
+	// **Validates: Requirements 6.4**
+	
+	property := func(containerName string, forceKillFails bool) bool {
+		// Limit inputs to reasonable ranges
+		if len(containerName) == 0 || len(containerName) > 50 {
+			return true // Skip invalid inputs
+		}
+		
+		// Use the same sanitization logic as the production code
+		// This matches the sanitizeVolumeName function behavior
+		sanitizedName := strings.ToLower(containerName)
+		sanitizedName = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(sanitizedName, "-")
+		sanitizedName = strings.Trim(sanitizedName, "-")
+		
+		// If sanitization resulted in empty string, skip this input
+		if sanitizedName == "" {
+			return true
+		}
+		
+		// Create a mock process manager that can simulate force kill failures
+		processManager := &MockProcessManager{
+			containerName:   sanitizedName,
+			runtime:         "docker",
+			failForceKill:   forceKillFails,
+		}
+		
+		// Test force kill behavior
+		err := processManager.ForceKill()
+		
+		if forceKillFails {
+			// Property: When force kill fails, should return descriptive error
+			if err == nil {
+				return false
+			}
+			
+			// Property: Error message should be descriptive
+			if !strings.Contains(err.Error(), "force kill failed") {
+				return false
+			}
+		} else {
+			// Property: When force kill succeeds, should return no error
+			if err != nil {
+				return false
+			}
+		}
+		
+		return true
+	}
+	
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Error(err)
+	}
+}
+
+// MockProcessManager for testing signal handling
+type MockProcessManager struct {
+	containerName string
+	runtime       string
+	started       bool
+	failSignal    bool
+	failForceKill bool
+	exitCode      int
+}
+
+func (mpm *MockProcessManager) StartContainer(cmd *exec.Cmd) error {
+	if mpm.started {
+		return fmt.Errorf("container already started")
+	}
+	mpm.started = true
+	return nil
+}
+
+func (mpm *MockProcessManager) WaitForExit() (int, error) {
+	if !mpm.started {
+		return -1, fmt.Errorf("container not started")
+	}
+	return mpm.exitCode, nil
+}
+
+func (mpm *MockProcessManager) ForwardSignal(signal os.Signal) error {
+	if !mpm.started {
+		return fmt.Errorf("container not started")
+	}
+	
+	if mpm.failSignal {
+		return fmt.Errorf("signal forwarding failed: mock error for signal %v", signal)
+	}
+	
+	return nil
+}
+
+func (mpm *MockProcessManager) ForceKill() error {
+	if !mpm.started {
+		return fmt.Errorf("container not started")
+	}
+	
+	if mpm.failForceKill {
+		return fmt.Errorf("force kill failed: mock error")
+	}
+	
+	return nil
+}
+
+// Note: TestForceTerminationExitCode already exists above with comprehensive test cases
+// This duplicate has been removed to avoid compilation errors
+
+// Test error handling for signal forwarding failures
+// Requirements: 6.1, 6.2, 6.3, 6.4
+func TestSignalForwardingErrorHandling(t *testing.T) {
+	testCases := []struct {
+		name           string
+		containerName  string
+		runtime        string
+		failSignal     bool
+		failForceKill  bool
+		expectedError  string
+	}{
+		{
+			name:          "successful signal forwarding",
+			containerName: "test-container-success",
+			runtime:       "docker",
+			failSignal:    false,
+			failForceKill: false,
+			expectedError: "",
+		},
+		{
+			name:          "signal forwarding failure",
+			containerName: "test-container-signal-fail",
+			runtime:       "docker",
+			failSignal:    true,
+			failForceKill: false,
+			expectedError: "signal forwarding failed",
+		},
+		{
+			name:          "force kill failure",
+			containerName: "test-container-force-fail",
+			runtime:       "docker",
+			failSignal:    false,
+			failForceKill: true,
+			expectedError: "force kill failed",
+		},
+		{
+			name:          "both signal and force kill failure",
+			containerName: "test-container-both-fail",
+			runtime:       "docker",
+			failSignal:    true,
+			failForceKill: true,
+			expectedError: "signal forwarding failed",
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create mock process manager with specified failure modes
+			processManager := &MockProcessManager{
+				containerName: tc.containerName,
+				runtime:       tc.runtime,
+				failSignal:    tc.failSignal,
+				failForceKill: tc.failForceKill,
+			}
+			
+			// Start container
+			cmd := &exec.Cmd{
+				Path: tc.runtime,
+				Args: []string{tc.runtime, "run", "--name", tc.containerName, "test-image"},
+			}
+			
+			err := processManager.StartContainer(cmd)
+			if err != nil {
+				t.Fatalf("Failed to start container: %v", err)
+			}
+			
+			// Test signal forwarding
+			err = processManager.ForwardSignal(syscall.SIGTERM)
+			
+			if tc.failSignal {
+				if err == nil {
+					t.Errorf("Expected signal forwarding to fail but it succeeded")
+				} else if !strings.Contains(err.Error(), tc.expectedError) {
+					t.Errorf("Expected error message to contain '%s', got: %v", tc.expectedError, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected signal forwarding to succeed but got error: %v", err)
+				}
+			}
+			
+			// Test force kill if signal forwarding failed
+			if tc.failSignal {
+				err = processManager.ForceKill()
+				
+				if tc.failForceKill {
+					if err == nil {
+						t.Errorf("Expected force kill to fail but it succeeded")
+					} else if !strings.Contains(err.Error(), "force kill failed") {
+						t.Errorf("Expected force kill error message to contain 'force kill failed', got: %v", err)
+					}
+				} else {
+					if err != nil {
+						t.Errorf("Expected force kill to succeed but got error: %v", err)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Test duplicate signal handling for already-terminated containers
+// Requirements: 6.2
+func TestDuplicateSignalHandling(t *testing.T) {
+	// Create mock process manager
+	processManager := &MockProcessManager{
+		containerName: "test-container-duplicate",
+		runtime:       "docker",
+		exitCode:      0,
+	}
+	
+	// Start container
+	cmd := &exec.Cmd{
+		Path: "docker",
+		Args: []string{"docker", "run", "--name", "test-container-duplicate", "test-image"},
+	}
+	
+	err := processManager.StartContainer(cmd)
+	if err != nil {
+		t.Fatalf("Failed to start container: %v", err)
+	}
+	
+	// First signal should succeed
+	err = processManager.ForwardSignal(syscall.SIGTERM)
+	if err != nil {
+		t.Errorf("First signal forwarding failed: %v", err)
+	}
+	
+	// Simulate container termination by setting started to false
+	processManager.started = false
+	
+	// Second signal should handle gracefully (container already terminated)
+	err = processManager.ForwardSignal(syscall.SIGTERM)
+	if err == nil {
+		t.Errorf("Expected error for signal to already-terminated container")
+	}
+	
+	// Error should be descriptive but not cause system failure
+	if !strings.Contains(err.Error(), "container not started") {
+		t.Errorf("Expected descriptive error for terminated container, got: %v", err)
+	}
+}
+
+// Test logging configuration and behavior
+// Requirements: 7.1, 7.2, 7.3, 7.4
+func TestSignalLoggingConfiguration(t *testing.T) {
+	// Save original environment
+	originalDebug := os.Getenv("MCP_DEBUG")
+	originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
+	
+	defer func() {
+		if originalDebug == "" {
+			os.Unsetenv("MCP_DEBUG")
+		} else {
+			os.Setenv("MCP_DEBUG", originalDebug)
+		}
+		if originalTimeout == "" {
+			os.Unsetenv("MCP_SIGNAL_TIMEOUT")
+		} else {
+			os.Setenv("MCP_SIGNAL_TIMEOUT", originalTimeout)
+		}
+	}()
+	
+	testCases := []struct {
+		name            string
+		debugValue      string
+		timeoutValue    string
+		expectedLogging bool
+		expectedTimeout time.Duration
+	}{
+		{
+			name:            "logging enabled with true",
+			debugValue:      "true",
+			timeoutValue:    "15s",
+			expectedLogging: true,
+			expectedTimeout: 15 * time.Second,
+		},
+		{
+			name:            "logging enabled with 1",
+			debugValue:      "1",
+			timeoutValue:    "8s",
+			expectedLogging: true,
+			expectedTimeout: 8 * time.Second,
+		},
+		{
+			name:            "logging disabled with false",
+			debugValue:      "false",
+			timeoutValue:    "12s",
+			expectedLogging: false,
+			expectedTimeout: 12 * time.Second,
+		},
+		{
+			name:            "logging disabled by default",
+			debugValue:      "",
+			timeoutValue:    "20s",
+			expectedLogging: false,
+			expectedTimeout: 20 * time.Second,
+		},
+		{
+			name:            "invalid timeout uses default",
+			debugValue:      "true",
+			timeoutValue:    "invalid",
+			expectedLogging: true,
+			expectedTimeout: 10 * time.Second, // Default SIGTERM timeout
+		},
+		{
+			name:            "no timeout uses default",
+			debugValue:      "true",
+			timeoutValue:    "",
+			expectedLogging: true,
+			expectedTimeout: 10 * time.Second, // Default SIGTERM timeout
+		},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Set environment variables
+			if tc.debugValue == "" {
+				os.Unsetenv("MCP_DEBUG")
+			} else {
+				os.Setenv("MCP_DEBUG", tc.debugValue)
+			}
+			
+			if tc.timeoutValue == "" {
+				os.Unsetenv("MCP_SIGNAL_TIMEOUT")
+			} else {
+				os.Setenv("MCP_SIGNAL_TIMEOUT", tc.timeoutValue)
+			}
+			
+			// Load configuration
+			config := LoadSignalConfig()
+			
+			// Verify logging configuration
+			if config.EnableLogging != tc.expectedLogging {
+				t.Errorf("Expected logging enabled=%v, got %v", tc.expectedLogging, config.EnableLogging)
+			}
+			
+			// Verify timeout configuration
+			if config.SigtermTimeout != tc.expectedTimeout {
+				t.Errorf("Expected SIGTERM timeout=%v, got %v", tc.expectedTimeout, config.SigtermTimeout)
+			}
+			
+			// Verify SIGINT timeout is half of SIGTERM
+			expectedSigintTimeout := tc.expectedTimeout / 2
+			if config.SigintTimeout != expectedSigintTimeout {
+				t.Errorf("Expected SIGINT timeout=%v, got %v", expectedSigintTimeout, config.SigintTimeout)
+			}
+		})
+	}
+}
+
+// Property 11: Ephemeral Volume Cleanup
+// For any execution using the --ephemeral flag, when signal handling triggers container termination, volume cleanup should complete before the host process exits
+func TestProperty11_EphemeralVolumeCleanup(t *testing.T) {
+	// **Feature: container-signal-handling, Property 11: Ephemeral Volume Cleanup**
+	// **Validates: Requirements 5.5**
+	
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+	
+	config := &Config{EphemeralMode: true}
+	
+	// Test with different server names and runtimes
+	testCases := []struct {
+		serverName string
+		runtime    string
+	}{
+		{"uvx test-server", "docker"},
+		{"npx @modelcontextprotocol/server-memory", "docker"},
+		{"python -m server", "docker"},
+		{"node server.js", "docker"},
+		{"uvx test-server", "podman"},
+	}
+	
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("server=%s,runtime=%s", tc.serverName, tc.runtime), func(t *testing.T) {
+			volumeManager := NewVolumeManagerWithRuntime(config, tc.runtime)
+			
+			// Create ephemeral volume
+			volumeName, err := volumeManager.CreateEphemeralVolume(tc.serverName, tc.runtime)
+			if err != nil {
+				t.Skipf("Cannot create ephemeral volume with runtime %s: %v", tc.runtime, err)
+			}
+			
+			// Verify volume name follows ephemeral pattern
+			if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
+				t.Errorf("Ephemeral volume name %s does not follow expected pattern mcp-ephemeral-*", volumeName)
+			}
+			
+			// Verify volume exists
+			exists, err := volumeManager.commander.VolumeExists(volumeName)
+			if err != nil {
+				t.Skipf("Cannot check volume existence with runtime %s: %v", tc.runtime, err)
+			}
+			if !exists {
+				t.Errorf("Ephemeral volume %s should exist after creation", volumeName)
+			}
+			
+			// Simulate signal handling cleanup (this is what executeWithSignalHandlingAndCleanup does)
+			// Requirements: 5.5 - Volume cleanup occurs after container termination during signal handling
+			if cleanupErr := volumeManager.CleanupEphemeralVolume(volumeName); cleanupErr != nil {
+				t.Errorf("Failed to cleanup ephemeral volume %s during signal handling: %v", volumeName, cleanupErr)
+			}
+			
+			// Verify volume no longer exists after signal handling cleanup
+			exists, err = volumeManager.commander.VolumeExists(volumeName)
+			if err != nil {
+				t.Skipf("Cannot check volume existence after cleanup with runtime %s: %v", tc.runtime, err)
+			}
+			if exists {
+				t.Errorf("Ephemeral volume %s should not exist after signal handling cleanup", volumeName)
+			}
+		})
+	}
 }

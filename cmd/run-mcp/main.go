@@ -97,18 +97,8 @@ func runMCP(cmd *cobra.Command, args []string, ephemeralMode bool) error {
 		return errorHandler.FormatUserFriendlyError(err, "container")
 	}
 	
-	// Set up cleanup for ephemeral volumes (AFTER container exits)
-	defer func() {
-		if ephemeralMode && volumeName != "" {
-			volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
-			if cleanupErr := volumeManager.CleanupEphemeralVolume(volumeName); cleanupErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup ephemeral volume %s: %v\n", volumeName, cleanupErr)
-			}
-		}
-	}()
-	
-	// Execute with signal-aware execution
-	return executeWithSignalHandling(containerCmd, signalHandler)
+	// Execute with signal-aware execution and ephemeral volume cleanup
+	return executeWithSignalHandlingAndCleanup(containerCmd, signalHandler, config, containerRuntime, volumeName, ephemeralMode)
 }
 
 func createDoctorCommand() *cobra.Command {
@@ -1125,6 +1115,47 @@ func executeWithSignalHandling(containerCmd *exec.Cmd, signalHandler SignalHandl
 	
 	// Stop signal handling
 	signalHandler.Stop()
+	
+	// Handle exit based on exit code and error
+	return handleExit(exitCode, err)
+}
+
+// executeWithSignalHandlingAndCleanup executes the container with signal-aware handling and ephemeral volume cleanup
+// Requirements: 1.3, 1.4, 5.5, 8.1, 8.2
+func executeWithSignalHandlingAndCleanup(containerCmd *exec.Cmd, signalHandler SignalHandler, config *Config, containerRuntime, volumeName string, ephemeralMode bool) error {
+	// Configure stdio passthrough
+	containerCmd.Stdin = os.Stdin
+	containerCmd.Stdout = os.Stdout
+	containerCmd.Stderr = os.Stderr
+	
+	// Get process manager from signal handler
+	processManager := signalHandler.GetProcessManager()
+	
+	// Start container (non-blocking)
+	if err := processManager.StartContainer(containerCmd); err != nil {
+		errorHandler := NewErrorHandler()
+		return errorHandler.HandleContainerStartupError(err, "container", "")
+	}
+	
+	// Start signal handling
+	if err := signalHandler.Start(containerCmd); err != nil {
+		return fmt.Errorf("failed to start signal handling: %w", err)
+	}
+	
+	// Wait for completion and get exit code
+	exitCode, err := processManager.WaitForExit()
+	
+	// Stop signal handling
+	signalHandler.Stop()
+	
+	// Cleanup ephemeral volume if needed (AFTER container exits)
+	// Requirements: 5.5 - Volume cleanup occurs after container termination during signal handling
+	if ephemeralMode && volumeName != "" {
+		volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+		if cleanupErr := volumeManager.CleanupEphemeralVolume(volumeName); cleanupErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup ephemeral volume %s: %v\n", volumeName, cleanupErr)
+		}
+	}
 	
 	// Handle exit based on exit code and error
 	return handleExit(exitCode, err)

@@ -58,34 +58,34 @@ This implementation plan transforms the current blocking container execution (`c
   - Test that force termination exits with code 130
   - _Requirements: 2.5_
 
-- [ ] 5. Add comprehensive error handling and logging
+- [x] 5. Add comprehensive error handling and logging
   - Implement error handling for signal forwarding failures
   - Add debug and warning level logging for signal operations
   - Handle duplicate signals gracefully for already-terminated containers
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 7.1, 7.2, 7.3, 7.4_
 
-- [ ] 5.1 Write property test for error handling resilience
+- [x] 5.1 Write property test for error handling resilience
   - **Property 12: Error Handling Resilience**
   - **Validates: Requirements 6.1, 6.3**
 
-- [ ] 5.2 Write property test for comprehensive logging
+- [x] 5.2 Write property test for comprehensive logging
   - **Property 15: Comprehensive Logging**
   - **Validates: Requirements 2.4, 7.1, 7.2, 7.3, 7.4**
 
-- [ ] 5.3 Write property test for force termination error handling
+- [x] 5.3 Write property test for force termination error handling
   - **Property 14: Force Termination Error Handling**
   - **Validates: Requirements 6.4**
 
-- [ ] 6. Checkpoint - Ensure all tests pass
+- [x] 6. Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 7. Integrate with existing volume management
+- [x] 7. Integrate with existing volume management
   - Ensure ephemeral volume cleanup works correctly with signal handling
   - Update volume cleanup to occur after container termination during signal handling
   - Test integration with existing `--ephemeral` flag functionality
   - _Requirements: 5.5_
 
-- [ ] 7.1 Write property test for ephemeral volume cleanup
+- [x] 7.1 Write property test for ephemeral volume cleanup
   - **Property 11: Ephemeral Volume Cleanup**
   - **Validates: Requirements 5.5**
 
