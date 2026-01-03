@@ -73,7 +73,19 @@ func (pm *ContainerProcessManager) WaitForExit() (int, error) {
 	if err != nil {
 		// Extract exit code from error
 		if exitError, ok := err.(*exec.ExitError); ok {
-			return exitError.ExitCode(), nil
+			exitCode := exitError.ExitCode()
+			
+			// Check if this was a force termination (SIGKILL = 9, exit code 128+9=137)
+			// or interrupted by signal (SIGINT = 2, exit code 128+2=130)
+			if exitCode == 137 {
+				// Force terminated with SIGKILL - return 130 as per requirements
+				return 130, nil
+			} else if exitCode >= 128 && exitCode <= 165 {
+				// Signal-based termination, preserve the exit code
+				return exitCode, nil
+			}
+			
+			return exitCode, nil
 		}
 		return -1, err
 	}
@@ -107,7 +119,22 @@ func (pm *ContainerProcessManager) ForceKill() error {
 	parts := strings.Fields(pm.runtime)
 	args := append(parts[1:], "kill", "--signal", "SIGKILL", pm.containerName)
 	cmd := exec.Command(parts[0], args...)
-	return cmd.Run()
+	
+	// Execute the force kill command
+	if err := cmd.Run(); err != nil {
+		// Check if the error is because the container is already stopped
+		if strings.Contains(err.Error(), "no such container") || 
+		   strings.Contains(err.Error(), "container not found") ||
+		   strings.Contains(err.Error(), "is not running") {
+			// Container already stopped, this is not an error
+			return nil
+		}
+		
+		// Return the actual error for other cases
+		return fmt.Errorf("failed to force kill container %s: %w", pm.containerName, err)
+	}
+	
+	return nil
 }
 
 // GetContainerName returns the container name for this process

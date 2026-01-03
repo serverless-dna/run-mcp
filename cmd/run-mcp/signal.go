@@ -129,7 +129,7 @@ func (sh *DefaultSignalHandler) handleSignals() {
 	}
 }
 
-// handleSignal processes a single signal
+// handleSignal processes a single signal with progressive timeout handling
 func (sh *DefaultSignalHandler) handleSignal(sig os.Signal) {
 	if sh.config.EnableLogging {
 		fmt.Fprintf(os.Stderr, "[DEBUG] Received signal: %v at %s\n", sig, time.Now().Format(time.RFC3339))
@@ -145,26 +145,57 @@ func (sh *DefaultSignalHandler) handleSignal(sig os.Signal) {
 		fmt.Fprintf(os.Stderr, "[DEBUG] Forwarded signal %v to container at %s\n", sig, time.Now().Format(time.RFC3339))
 	}
 	
-	// Start timeout for graceful shutdown
+	// Implement progressive timeout handling (graceful → force → absolute)
+	sh.startProgressiveTimeout(sig)
+}
+
+// startProgressiveTimeout implements progressive timeout handling
+func (sh *DefaultSignalHandler) startProgressiveTimeout(sig os.Signal) {
 	timeout := sh.getTimeoutForSignal(sig)
-	timer := time.AfterFunc(timeout, func() {
+	
+	// Phase 1: Graceful shutdown timeout
+	gracefulTimer := time.AfterFunc(timeout, func() {
 		if sh.stopped {
 			return
 		}
 		
-		fmt.Fprintf(os.Stderr, "[WARN] Signal timeout exceeded (%v), forcing termination at %s\n", timeout, time.Now().Format(time.RFC3339))
+		if sh.config.EnableLogging {
+			fmt.Fprintf(os.Stderr, "[WARN] Signal timeout exceeded (%v), forcing termination at %s\n", timeout, time.Now().Format(time.RFC3339))
+		}
+		
+		// Phase 2: Force termination with SIGKILL
 		if err := sh.processManager.ForceKill(); err != nil {
 			fmt.Fprintf(os.Stderr, "[ERROR] Force kill failed: %v\n", err)
+			
+			// Phase 3: Absolute timeout - if force kill fails, exit with error
+			absoluteTimer := time.AfterFunc(5*time.Second, func() {
+				if sh.stopped {
+					return
+				}
+				fmt.Fprintf(os.Stderr, "[ERROR] Absolute timeout reached, force termination failed\n")
+				// Exit with error code indicating force termination failure
+				os.Exit(128 + int(syscall.SIGKILL))
+			})
+			
+			// Cancel absolute timeout if process exits
+			go func() {
+				select {
+				case <-sh.done:
+					absoluteTimer.Stop()
+				case <-time.After(6 * time.Second):
+					// Absolute timeout already fired
+				}
+			}()
 		}
 	})
 	
-	// Cancel timeout if process exits gracefully
+	// Cancel graceful timeout if process exits gracefully
 	go func() {
 		select {
 		case <-sh.done:
-			timer.Stop()
-		case <-time.After(timeout + time.Second):
-			// Timeout already fired, nothing to do
+			gracefulTimer.Stop()
+		case <-time.After(timeout + 10*time.Second):
+			// Timeout handling already completed
 		}
 	}()
 }
@@ -198,10 +229,11 @@ func LoadSignalConfig() *SignalConfig {
 	
 	// Load timeout from MCP_SIGNAL_TIMEOUT environment variable
 	if timeoutStr := os.Getenv("MCP_SIGNAL_TIMEOUT"); timeoutStr != "" {
-		if duration, err := time.ParseDuration(timeoutStr); err == nil {
+		if duration, err := time.ParseDuration(timeoutStr); err == nil && duration > 0 {
 			config.SigtermTimeout = duration
 			config.SigintTimeout = duration / 2 // SIGINT is faster
 		}
+		// Invalid or non-positive durations fall back to defaults (already set above)
 	}
 	
 	// Enable debug logging if requested

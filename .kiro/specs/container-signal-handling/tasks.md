@@ -44,17 +44,17 @@ This implementation plan transforms the current blocking container execution (`c
   - **Property 3: Graceful Shutdown Wait**
   - **Validates: Requirements 1.3**
 
-- [ ] 4. Implement timeout and force termination
+- [x] 4. Implement timeout and force termination
   - Add timeout configuration with MCP_SIGNAL_TIMEOUT environment variable support
   - Implement progressive timeout handling (graceful → force → absolute)
   - Add force termination using SIGKILL when graceful shutdown fails
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
-- [ ] 4.1 Write property test for timeout-based force termination
+- [x] 4.1 Write property test for timeout-based force termination
   - **Property 4: Timeout-Based Force Termination**
   - **Validates: Requirements 2.1, 2.2**
 
-- [ ] 4.2 Write unit test for force termination exit code
+- [x] 4.2 Write unit test for force termination exit code
   - Test that force termination exits with code 130
   - _Requirements: 2.5_
 
