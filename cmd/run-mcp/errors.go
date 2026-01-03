@@ -109,6 +109,17 @@ Suggested solutions:
 4. Use force removal if safe: docker volume rm --force <volume-name>`, err)
 	}
 	
+	// Handle volume not found during inspection
+	if strings.Contains(errMsg, "failed to inspect volume") && (strings.Contains(errMsg, "exit status 1") || strings.Contains(errMsg, "volume not found")) {
+		return fmt.Errorf(`volume inspection failed: %w
+
+Suggested solutions:
+1. Check if the volume exists: run-mcp volume list
+2. Verify the server name is correct
+3. Create the volume by running the MCP server first
+4. Use the exact server command as specified in your MCP configuration`, err)
+	}
+	
 	// Handle disk space issues
 	if strings.Contains(errMsg, "no space left") || strings.Contains(errMsg, "disk full") {
 		return fmt.Errorf(`insufficient disk space: %w
