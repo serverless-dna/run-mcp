@@ -22,7 +22,7 @@ jobs:
   update-changelog:
     name: Update Changelog
     runs-on: ubuntu-latest
-    if: github.event.inputs.update_changelog == 'true' || github.event_name == 'release'
+    if: github.event.inputs.update_changelog == 'true'
     
     steps:
       - name: Checkout repository
@@ -30,6 +30,7 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref }}
       
       - name: Configure Git
         run: |
@@ -87,7 +88,7 @@ jobs:
               VERSION="${{ github.event.inputs.version }}"
             fi
             git commit -m "docs: update changelog for ${VERSION}"
-            git push
+            git push origin ${{ github.ref_name }}
             echo "✅ Changelog committed and pushed"
           fi
 
