@@ -17,8 +17,6 @@ on:
       - 'go.sum'
       - '.github/workflows/build-run-mcp.yml'
       - 'Makefile'
-  release:
-    types: [ published ]
   workflow_dispatch:
 
 env:
