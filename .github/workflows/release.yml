@@ -127,6 +127,12 @@ jobs:
       - name: Build all binaries
         run: make build-run-mcp-all
       
+      - name: Upload binaries as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-mcp-binaries
+          path: build/run-mcp-*
+      
       - name: Build and push containers
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -187,9 +193,10 @@ jobs:
         platform: [linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, windows-amd64]
     
     steps:
-      - name: Download release assets
+      - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
+          name: run-mcp-binaries
           path: build/
       
       - name: Test binary (Linux/macOS)

@@ -74,6 +74,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      actions: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
