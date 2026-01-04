@@ -605,7 +605,13 @@ func (eh *ErrorHandler) DiagnoseSystemIssues() []string {
 	}
 	
 	// Check disk space in common locations
-	locations := []string{"/tmp", homeDir}
+	locations := []string{homeDir}
+	
+	// Add temp directory based on OS
+	if tempDir := os.TempDir(); tempDir != "" {
+		locations = append(locations, tempDir)
+	}
+	
 	for _, location := range locations {
 		if location != "" {
 			if err := eh.checkDiskSpace(location); err != nil {
