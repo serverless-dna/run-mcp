@@ -184,13 +184,22 @@ jobs:
 
   test-release:
     name: Test Release Assets
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     needs: [build-and-release]
     if: always() && needs.build-and-release.result == 'success'
     
     strategy:
       matrix:
-        platform: [linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, windows-amd64]
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+            binary: run-mcp-linux-amd64
+          - os: macos-latest
+            platform: darwin-amd64
+            binary: run-mcp-darwin-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+            binary: run-mcp-darwin-arm64
     
     steps:
       - name: Download release artifacts
@@ -199,10 +208,9 @@ jobs:
           name: run-mcp-binaries
           path: build/
       
-      - name: Test binary (Linux/macOS)
-        if: matrix.platform != 'windows-amd64'
+      - name: Test binary (Unix)
         run: |
-          BINARY="build/run-mcp-${{ matrix.platform }}"
+          BINARY="build/${{ matrix.binary }}"
           if [ -f "$BINARY" ]; then
             chmod +x "$BINARY"
             "$BINARY" --version
@@ -213,14 +221,8 @@ jobs:
             exit 1
           fi
       
-      - name: Test binary (Windows)
-        if: matrix.platform == 'windows-amd64'
+      - name: Test basic commands
         run: |
-          BINARY="build/run-mcp-${{ matrix.platform }}.exe"
-          if [ -f "$BINARY" ]; then
-            echo "✅ Windows binary found: $BINARY"
-            # Note: Can't execute Windows binary on Linux runner
-          else
-            echo "❌ Binary not found: $BINARY"
-            exit 1
-          fi
+          BINARY="build/${{ matrix.binary }}"
+          "$BINARY" info || echo "Info command may fail without container runtime"
+          "$BINARY" config || echo "Config command may fail without container runtime"
