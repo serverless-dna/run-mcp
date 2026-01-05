@@ -1820,25 +1820,27 @@ func TestMountParsingEdgeCases(t *testing.T) {
 	for _, tc := range missingPathCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mounts, err := parser.ParseMountString(tc.mountString)
-			if err != nil {
-				t.Errorf("ParseMountString failed: %v", err)
-				return
-			}
-			
-			if len(mounts) != 1 {
-				t.Errorf("Expected 1 mount, got %d", len(mounts))
-				return
-			}
-			
-			err = parser.ValidateMount(mounts[0])
 			
 			if tc.expectError {
+				// With the fix, validation now happens in ParseMountString
 				if err == nil {
-					t.Errorf("Expected validation error for nonexistent path")
+					t.Errorf("Expected ParseMountString to fail for nonexistent path")
 				} else if !strings.Contains(err.Error(), "does not exist") {
 					t.Errorf("Expected 'does not exist' error, got: %s", err.Error())
 				}
 			} else {
+				if err != nil {
+					t.Errorf("ParseMountString failed: %v", err)
+					return
+				}
+				
+				if len(mounts) != 1 {
+					t.Errorf("Expected 1 mount, got %d", len(mounts))
+					return
+				}
+				
+				// ValidateMount should still pass for other validations
+				err = parser.ValidateMount(mounts[0])
 				if err != nil {
 					t.Errorf("Unexpected validation error: %v", err)
 				}
@@ -3341,7 +3343,9 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 			for i, arg := range args {
 				if arg == "-v" && i+1 < len(args) {
 					mountSpec := args[i+1]
-					if strings.Contains(mountSpec, ":/home/mcp") {
+					// Check for exact mount to /home/mcp (not subdirectories)
+					parts := strings.Split(mountSpec, ":")
+					if len(parts) >= 2 && parts[1] == "/home/mcp" {
 						homeMountCount++
 						homeMountSpec = mountSpec
 					}
@@ -3413,7 +3417,24 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 				t.Errorf("Expected image %s not found in container args for %s", expectedImage, tc.description)
 			}
 			
-			// Test 6: Verify no conflicting mounts to /home directory
+			// Test 6: Verify MCP_DATA_DIR mount is present
+			dataMountFound := false
+			for i, arg := range args {
+				if arg == "-v" && i+1 < len(args) {
+					mountSpec := args[i+1]
+					parts := strings.Split(mountSpec, ":")
+					if len(parts) >= 2 && parts[1] == "/data" {
+						dataMountFound = true
+						break
+					}
+				}
+			}
+			
+			if !dataMountFound {
+				t.Errorf("Expected MCP_DATA_DIR mount to /data not found for %s", tc.description)
+			}
+			
+			// Test 7: Verify no conflicting mounts to /home directory
 			for i, arg := range args {
 				if arg == "-v" && i+1 < len(args) {
 					mountSpec := args[i+1]
@@ -3421,14 +3442,15 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 					if len(parts) >= 2 {
 						mountPoint := parts[1]
 						// Check for conflicting mounts to /home or subdirectories other than /home/mcp
-						if strings.HasPrefix(mountPoint, "/home/") && mountPoint != "/home/mcp" {
+						// Allow credential mounts to /home/mcp/.* (subdirectories of /home/mcp)
+						if strings.HasPrefix(mountPoint, "/home/") && mountPoint != "/home/mcp" && !strings.HasPrefix(mountPoint, "/home/mcp/") {
 							t.Errorf("Found conflicting mount to /home directory for %s: %s", tc.description, mountSpec)
 						}
 					}
 				}
 			}
 			
-			// Test 7: Verify mount consistency across runtime variations
+			// Test 8: Verify mount consistency across runtime variations
 			t.Run("runtime_consistency", func(t *testing.T) {
 				// Test with different runtime commands to ensure consistency
 				runtimes := []string{"docker", "podman", "nerdctl", "finch"}

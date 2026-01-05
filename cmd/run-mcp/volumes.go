@@ -1087,6 +1087,11 @@ func (ump *UserMountParser) parseSingleMount(spec string) (Mount, error) {
 	// Expand tilde in source path (Requirement 7.3)
 	expandedSource := ump.ExpandTildePath(source)
 	
+	// Validate the original source path BEFORE conversion (Requirement 7.9)
+	if _, err := os.Stat(expandedSource); os.IsNotExist(err) {
+		return Mount{}, fmt.Errorf("mount source path does not exist: %s", expandedSource)
+	}
+	
 	// Convert Windows paths (Requirement 7.4)
 	normalizedSource := ump.ConvertWindowsPath(expandedSource)
 	
@@ -1180,10 +1185,7 @@ func (ump *UserMountParser) ConvertWindowsPath(path string) string {
 // ValidateMount validates a mount configuration
 // Requirements: 7.9, 7.10
 func (ump *UserMountParser) ValidateMount(mount Mount) error {
-	// Check if source path exists (Requirement 7.9)
-	if _, err := os.Stat(mount.Source); os.IsNotExist(err) {
-		return fmt.Errorf("mount source path does not exist: %s", mount.Source)
-	}
+	// Note: Source path validation is now done in parseSingleMount before path conversion
 	
 	// Validate destination path format
 	if !strings.HasPrefix(mount.Destination, "/") {

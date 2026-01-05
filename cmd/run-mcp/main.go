@@ -471,6 +471,11 @@ func buildContainerCommand(config *Config, containerRuntime, language string, ar
 		containerArgs = append(containerArgs, userMountArgs...)
 	}
 	
+	// Mount standard volumes (MCP_DATA_DIR and credentials)
+	volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+	standardMounts := volumeManager.GetVolumeMounts()
+	containerArgs = append(containerArgs, standardMounts...)
+	
 	// Add image
 	containerArgs = append(containerArgs, image)
 	
@@ -1119,6 +1124,11 @@ func buildContainerCommandWithSignals(config *Config, containerRuntime, language
 		userMountArgs := userMountParser.GetMountArgs(userMounts)
 		containerArgs = append(containerArgs, userMountArgs...)
 	}
+	
+	// Mount standard volumes (MCP_DATA_DIR and credentials)
+	volumeManager := NewVolumeManagerWithRuntime(config, containerRuntime)
+	standardMounts := volumeManager.GetVolumeMounts()
+	containerArgs = append(containerArgs, standardMounts...)
 	
 	// Add image
 	containerArgs = append(containerArgs, image)
