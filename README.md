@@ -281,7 +281,7 @@ Invoke-WebRequest -Uri "https://github.com/owner/mcp-containers/releases/latest/
 # Move to a directory in your PATH
 ```
 
-**Package Managers:**
+**Package Managers (Future):**
 ```bash
 # macOS (Homebrew)
 brew install owner/tap/run-mcp
