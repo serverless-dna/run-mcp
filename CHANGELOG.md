@@ -5,11 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Generating changelog for version v1.0.2 (since v1.0.1)
 ## [v1.0.2] - 2026-01-05
 
-### Changed
-- Fix Drive mounting to containers (#10)
+### Fixed
+- Fix MCP_DATA_DIR and credential directories not being mounted to containers (#6)
+  - Added missing `volumeManager.GetVolumeMounts()` calls to container command builders
+  - MCP_DATA_DIR now properly mounts to `/data` in containers as documented
+  - Credential directories (~/.aws, ~/.config) now mount correctly to container home directory
+  
+- Fix MCP_MOUNT validation failing on Windows due to incorrect path conversion order (#7)
+  - Path validation now occurs before Windows path conversion in `parseSingleMount`
+  - Windows users can now use forward slashes in MCP_MOUNT paths (e.g., `C:/Users/...`)
+  - Fixes "mount source path does not exist" errors on Windows with valid paths
 
 ### Binary Releases
 - Windows (AMD64): run-mcp-windows-amd64.exe
