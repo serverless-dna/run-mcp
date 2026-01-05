@@ -1820,25 +1820,27 @@ func TestMountParsingEdgeCases(t *testing.T) {
 	for _, tc := range missingPathCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mounts, err := parser.ParseMountString(tc.mountString)
-			if err != nil {
-				t.Errorf("ParseMountString failed: %v", err)
-				return
-			}
-			
-			if len(mounts) != 1 {
-				t.Errorf("Expected 1 mount, got %d", len(mounts))
-				return
-			}
-			
-			err = parser.ValidateMount(mounts[0])
 			
 			if tc.expectError {
+				// With the fix, validation now happens in ParseMountString
 				if err == nil {
-					t.Errorf("Expected validation error for nonexistent path")
+					t.Errorf("Expected ParseMountString to fail for nonexistent path")
 				} else if !strings.Contains(err.Error(), "does not exist") {
 					t.Errorf("Expected 'does not exist' error, got: %s", err.Error())
 				}
 			} else {
+				if err != nil {
+					t.Errorf("ParseMountString failed: %v", err)
+					return
+				}
+				
+				if len(mounts) != 1 {
+					t.Errorf("Expected 1 mount, got %d", len(mounts))
+					return
+				}
+				
+				// ValidateMount should still pass for other validations
+				err = parser.ValidateMount(mounts[0])
 				if err != nil {
 					t.Errorf("Unexpected validation error: %v", err)
 				}
