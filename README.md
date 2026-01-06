@@ -1,5 +1,7 @@
 # Run MCP
 
+![Run MCP](assets/run-mcp.png)
+
 Managed runtime containers for local MCP Servers.
 
 This repository provides pre-built container images for running MCP (Model Context Protocol) servers without requiring local development tools. The system automatically builds and publishes language-specific container images to GitHub Container Registry.
@@ -281,7 +283,7 @@ Invoke-WebRequest -Uri "https://github.com/owner/mcp-containers/releases/latest/
 # Move to a directory in your PATH
 ```
 
-**Package Managers:**
+**Package Managers (Future):**
 ```bash
 # macOS (Homebrew)
 brew install owner/tap/run-mcp
