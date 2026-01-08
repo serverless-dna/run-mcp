@@ -553,6 +553,78 @@ update-changelog: ## Update CHANGELOG.md with new version entry
 	echo "$(GREEN)✓ CHANGELOG.md updated with version $$VERSION$(NC)"
 
 # =============================================================================
+# HOMEBREW TARGETS
+# =============================================================================
+
+update-homebrew-github: ## Update homebrew formula from GitHub Actions with downloaded binaries
+	@echo "$(BLUE)Updating homebrew formula from GitHub Actions...$(NC)"
+	@if [ -z "$(VERSION)" ]; then \
+		echo "$(RED)Error: VERSION not specified. Usage: make update-homebrew-github VERSION=1.0.0 TAG=v1.0.0$(NC)"; \
+		exit 1; \
+	fi
+	@if [ -z "$(TAG)" ]; then \
+		echo "$(RED)Error: TAG not specified. Usage: make update-homebrew-github VERSION=1.0.0 TAG=v1.0.0$(NC)"; \
+		exit 1; \
+	fi
+	@if [ ! -d "homebrew-tap" ]; then \
+		echo "$(RED)Error: homebrew-tap directory not found$(NC)"; \
+		exit 1; \
+	fi
+	@if [ ! -d "build" ]; then \
+		echo "$(RED)Error: build directory not found$(NC)"; \
+		exit 1; \
+	fi
+	@echo "Updating formula for homebrew version: $(VERSION) (from git tag: $(TAG))"
+	@# Calculate SHA256 for each binary
+	@SHA_DARWIN_ARM64=$$(sha256sum build/run-mcp-darwin-arm64 | cut -d' ' -f1); \
+	SHA_DARWIN_AMD64=$$(sha256sum build/run-mcp-darwin-amd64 | cut -d' ' -f1); \
+	SHA_LINUX_AMD64=$$(sha256sum build/run-mcp-linux-amd64 | cut -d' ' -f1); \
+	SHA_LINUX_ARM64=$$(sha256sum build/run-mcp-linux-arm64 | cut -d' ' -f1); \
+	echo "SHA256 checksums:"; \
+	echo "  Darwin ARM64: $$SHA_DARWIN_ARM64"; \
+	echo "  Darwin AMD64: $$SHA_DARWIN_AMD64"; \
+	echo "  Linux AMD64:  $$SHA_LINUX_AMD64"; \
+	echo "  Linux ARM64:  $$SHA_LINUX_ARM64"; \
+	cat > homebrew-tap/Formula/run-mcp.rb << EOF; \
+class RunMcp < Formula; \
+  desc "Cross-platform binary for running MCP servers in containers"; \
+  homepage "https://github.com/serverless-dna/run-mcp"; \
+  version "$(VERSION)"; \
+  license "MIT"; \
+  ; \
+  on_macos do; \
+    if Hardware::CPU.arm?; \
+      url "https://github.com/serverless-dna/run-mcp/releases/download/$(TAG)/run-mcp-darwin-arm64"; \
+      sha256 "$$SHA_DARWIN_ARM64"; \
+    else; \
+      url "https://github.com/serverless-dna/run-mcp/releases/download/$(TAG)/run-mcp-darwin-amd64"; \
+      sha256 "$$SHA_DARWIN_AMD64"; \
+    end; \
+  end; \
+  ; \
+  on_linux do; \
+    if Hardware::CPU.arm?; \
+      url "https://github.com/serverless-dna/run-mcp/releases/download/$(TAG)/run-mcp-linux-arm64"; \
+      sha256 "$$SHA_LINUX_ARM64"; \
+    else; \
+      url "https://github.com/serverless-dna/run-mcp/releases/download/$(TAG)/run-mcp-linux-amd64"; \
+      sha256 "$$SHA_LINUX_AMD64"; \
+    end; \
+  end; \
+  ; \
+  def install; \
+    bin.install Dir["*"].first => "run-mcp"; \
+  end; \
+  ; \
+  test do; \
+    assert_match version.to_s, shell_output("#{bin}/run-mcp --version"); \
+    assert_match "Show this help message", shell_output("#{bin}/run-mcp --help"); \
+  end; \
+end; \
+EOF
+	@echo "$(GREEN)✅ Homebrew formula updated successfully$(NC)"
+
+# =============================================================================
 # ALL-IN-ONE TARGETS
 # =============================================================================
 
