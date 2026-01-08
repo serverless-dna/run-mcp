@@ -246,7 +246,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: serverless-dna/homebrew-tap
-          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           path: homebrew-tap
       
       - name: Download release artifacts
