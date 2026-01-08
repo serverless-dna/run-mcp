@@ -1,6 +1,6 @@
 # Run MCP
 
-![Run MCP](assets/run-mcp.png)
+<img src="assets/run-mcp.png" alt="Run MCP" width="350">
 
 Managed runtime containers for local MCP Servers.
 
