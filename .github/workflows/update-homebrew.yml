@@ -23,6 +23,8 @@ jobs:
     permissions:
       contents: write
       actions: read
+      metadata: read
+      pull-requests: write
     
     steps:
       - name: Checkout main repository
@@ -34,7 +36,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: serverless-dna/homebrew-tap
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
           path: homebrew-tap
       
       - name: Download release artifacts from GitHub
@@ -64,7 +66,7 @@ jobs:
       
       - name: Commit and push formula
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
         run: |
           cd homebrew-tap
           git config user.name "GitHub Action"
