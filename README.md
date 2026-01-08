@@ -286,7 +286,7 @@ Invoke-WebRequest -Uri "https://github.com/owner/mcp-containers/releases/latest/
 **Package Managers (Future):**
 ```bash
 # macOS (Homebrew)
-brew install owner/tap/run-mcp
+brew install serverless-dna/tap/run-mcp
 
 # Windows (Chocolatey)
 choco install run-mcp
