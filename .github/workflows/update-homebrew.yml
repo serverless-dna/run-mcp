@@ -1,0 +1,80 @@
+name: Update Homebrew Formula
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to update (e.g., 1.0.0)'
+        required: true
+        type: string
+      tag:
+        description: 'Git tag (e.g., v1.0.0)'
+        required: true
+        type: string
+
+env:
+  GO_VERSION: '1.21'
+
+jobs:
+  update-homebrew:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+      actions: read
+    
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: serverless-dna/homebrew-tap
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+      
+      - name: Download release artifacts from GitHub
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="${{ github.event.inputs.tag }}"
+          
+          echo "Downloading release artifacts for $TAG..."
+          mkdir -p build
+          
+          # Download each binary
+          curl -L -f -o build/run-mcp-darwin-amd64 "https://github.com/serverless-dna/run-mcp/releases/download/$TAG/run-mcp-darwin-amd64"
+          curl -L -f -o build/run-mcp-darwin-arm64 "https://github.com/serverless-dna/run-mcp/releases/download/$TAG/run-mcp-darwin-arm64"
+          curl -L -f -o build/run-mcp-linux-amd64 "https://github.com/serverless-dna/run-mcp/releases/download/$TAG/run-mcp-linux-amd64"
+          curl -L -f -o build/run-mcp-linux-arm64 "https://github.com/serverless-dna/run-mcp/releases/download/$TAG/run-mcp-linux-arm64"
+          
+          echo "✅ Downloaded all release artifacts"
+          ls -la build/
+      
+      - name: Update formula using Makefile
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="${{ github.event.inputs.tag }}"
+          
+          echo "Updating homebrew formula for version: $VERSION (from tag: $TAG)"
+          make update-homebrew-github VERSION="$VERSION" TAG="$TAG"
+      
+      - name: Commit and push formula
+        run: |
+          cd homebrew-tap
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          
+          TAG="${{ github.event.inputs.tag }}"
+          
+          git add Formula/run-mcp.rb
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update run-mcp to $TAG"
+            git push
+            echo "✅ Formula committed and pushed"
+          fi

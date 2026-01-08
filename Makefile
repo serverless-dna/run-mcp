@@ -319,7 +319,7 @@ push-python-matrix: ## Push all Python matrix images to registry
 # TESTING TARGETS
 # =============================================================================
 
-test: test-scripts test-containers test-workflows test-run-mcp test-homebrew-formula ## Run all tests
+test: test-scripts test-containers test-workflows test-run-mcp ## Run all tests
 
 test-scripts: ## Run shell script tests with Bats
 	@echo "$(BLUE)Running shell script tests...$(NC)"
@@ -624,40 +624,6 @@ end; \
 EOF
 	@echo "$(GREEN)✅ Homebrew formula updated successfully$(NC)"
 
-test-homebrew-formula: ## Test homebrew formula locally
-	@echo "$(BLUE)Testing homebrew formula...$(NC)"
-	@if [ ! -f "../homebrew-tap/Formula/run-mcp.rb" ]; then \
-		echo "$(RED)Error: homebrew-tap repository not found at ../homebrew-tap$(NC)"; \
-		exit 1; \
-	fi
-	@echo "$(YELLOW)Testing formula syntax...$(NC)"
-	@if command -v brew >/dev/null 2>&1; then \
-		cd ../homebrew-tap && brew audit --strict Formula/run-mcp.rb || echo "Audit warnings are normal for development"; \
-	else \
-		echo "$(YELLOW)Homebrew not installed, skipping syntax validation$(NC)"; \
-	fi
-	@echo "$(GREEN)✓ Homebrew formula test completed$(NC)"
-
-test-homebrew-github: ## Test homebrew GitHub Actions integration (requires build artifacts)
-	@echo "$(BLUE)Testing homebrew GitHub Actions integration...$(NC)"
-	@if [ ! -d "build" ] || [ ! -f "build/run-mcp-darwin-amd64" ]; then \
-		echo "$(RED)Error: Build artifacts not found. Run 'make build-run-mcp-all' first$(NC)"; \
-		exit 1; \
-	fi
-	@if [ ! -d "../homebrew-tap" ]; then \
-		echo "$(RED)Error: homebrew-tap directory not found at ../homebrew-tap$(NC)"; \
-		exit 1; \
-	fi
-	@# Create a temporary copy for testing
-	@cp -r ../homebrew-tap homebrew-tap-test
-	@$(MAKE) update-homebrew-github VERSION=1.0.0-test TAG=v1.0.0-test HOMEBREW_TAP_DIR=homebrew-tap-test
-	@echo "$(YELLOW)Testing generated formula...$(NC)"
-	@if command -v brew >/dev/null 2>&1; then \
-		brew audit --strict homebrew-tap-test/Formula/run-mcp.rb || echo "Audit warnings are normal for development"; \
-	fi
-	@rm -rf homebrew-tap-test
-	@echo "$(GREEN)✓ Homebrew GitHub Actions integration test completed$(NC)"
-
 # =============================================================================
 # ALL-IN-ONE TARGETS
 # =============================================================================
@@ -687,16 +653,3 @@ release-matrix: ## Full release process with matrix builds (CI → cleanup → b
 	$(MAKE) containers-matrix
 	$(MAKE) build-run-mcp-all
 	@echo "$(GREEN)✅ Matrix release process completed$(NC)"
-
-release-homebrew: ## Full release process (homebrew updated automatically by GitHub Actions)
-	@echo "$(BLUE)Running full release process...$(NC)"
-	@echo "$(YELLOW)Note: Homebrew formula will be updated automatically by GitHub Actions$(NC)"
-	@if [ -z "$(VERSION)" ]; then \
-		echo "$(RED)Error: VERSION not specified. Usage: make release-homebrew VERSION=1.0.0$(NC)"; \
-		exit 1; \
-	fi
-	$(MAKE) ci
-	$(MAKE) containers
-	$(MAKE) build-run-mcp-all
-	@echo "$(GREEN)✅ Release process completed$(NC)"
-	@echo "$(YELLOW)Homebrew formula will be updated automatically when GitHub release is created$(NC)"
