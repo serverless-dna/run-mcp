@@ -23,7 +23,6 @@ jobs:
     permissions:
       contents: write
       actions: read
-      metadata: read
       pull-requests: write
     
     steps:

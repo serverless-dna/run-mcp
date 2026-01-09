@@ -10,6 +10,13 @@ if ! make lint-makefile; then
     exit 1
 fi
 
+# Check GitHub Actions workflows
+echo "Checking GitHub Actions workflows..."
+if ! make lint-workflows; then
+    echo "❌ Workflow linting failed"
+    exit 1
+fi
+
 # Run Go tests for run-mcp
 echo "Running Go tests..."
 if ! make test-run-mcp; then

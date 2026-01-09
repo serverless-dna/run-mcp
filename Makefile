@@ -60,7 +60,7 @@ NC := \033[0m # No Color
 
 .PHONY: help test test-dev clean build push login setup-dev lint validate check-upstream check-upstream-force build-run-mcp install-run-mcp
 .PHONY: push-matrix build-and-push build-and-push-matrix push-nodejs push-nodejs-matrix push-python push-python-matrix
-.PHONY: test-scripts test-workflows test-containers test-run-mcp test-run-mcp-full lint-makefile validate-dockerfiles check-tools
+.PHONY: test-scripts test-workflows test-containers test-run-mcp test-run-mcp-full lint-makefile lint-workflows validate-dockerfiles check-tools
 .PHONY: ci ci-build ci-matrix info containers containers-matrix changelog changelog-version update-changelog
 .PHONY: all all-matrix release release-matrix update-homebrew-github
 
@@ -397,13 +397,24 @@ test-run-mcp-full: ## Test the run-mcp binary (full integration tests)
 # VALIDATION TARGETS
 # =============================================================================
 
-lint: validate-dockerfiles lint-makefile ## Run all linting checks
+lint: validate-dockerfiles lint-makefile lint-workflows ## Run all linting checks
 
 lint-makefile: ## Lint Makefile syntax
 	@echo "$(BLUE)Linting Makefile...$(NC)"
 	@make -n help >/dev/null 2>&1 && echo "$(GREEN)✓ Makefile syntax is valid$(NC)" || exit 1
 	@if command -v checkmake >/dev/null 2>&1; then \
 		checkmake --config=checkmake.ini Makefile; \
+	fi
+
+lint-workflows: ## Lint GitHub Actions workflows
+	@echo "$(BLUE)Linting GitHub Actions workflows...$(NC)"
+	@if command -v actionlint >/dev/null 2>&1; then \
+		echo "$(YELLOW)Running actionlint...$(NC)"; \
+		actionlint; \
+		echo "$(GREEN)✓ Workflow linting passed$(NC)"; \
+	else \
+		echo "$(YELLOW)actionlint not found, skipping workflow linting$(NC)"; \
+		echo "$(YELLOW)Install with: go install github.com/rhysd/actionlint/cmd/actionlint@latest$(NC)"; \
 	fi
 
 validate-dockerfiles: ## Validate Dockerfiles with hadolint
