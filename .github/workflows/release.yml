@@ -292,3 +292,74 @@ jobs:
             git push
             echo "✅ Formula committed and pushed"
           fi
+
+  update-winget:
+    name: Update Winget Package
+    runs-on: ubuntu-latest
+    needs: [build-and-release]
+    if: always() && needs.build-and-release.result == 'success'
+    
+    permissions:
+      contents: write
+      actions: read
+    
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Checkout winget-pkgs repository
+        uses: actions/checkout@v4
+        with:
+          repository: serverless-dna/winget-pkgs
+          token: ${{ secrets.WINGET_GITHUB_TOKEN }}
+          path: winget-pkgs
+      
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: run-mcp-binaries
+          path: build/
+      
+      - name: Update winget manifest
+        run: |
+          # Determine version
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="v${{ github.event.inputs.version }}"
+          fi
+          # Remove 'v' prefix for winget version (winget versions are just numbers)
+          WINGET_VERSION=${VERSION#v}
+          
+          echo "Updating winget manifest for version: $WINGET_VERSION (from tag: $VERSION)"
+          
+          # Use the makefile target to update the manifest
+          make update-winget-github VERSION="$WINGET_VERSION" TAG="$VERSION"
+      
+      - name: Commit and push manifest
+        run: |
+          cd winget-pkgs
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          
+          # Determine version for commit message
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            WINGET_VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="v${{ github.event.inputs.version }}"
+            WINGET_VERSION="${{ github.event.inputs.version }}"
+          fi
+          # Remove 'v' prefix for winget version
+          WINGET_VERSION=${WINGET_VERSION#v}
+          
+          git add manifests/s/ServerlessDNA/RunMCP/$WINGET_VERSION/
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add ServerlessDNA.RunMCP version $WINGET_VERSION"
+            git push
+            echo "✅ Winget manifest committed and pushed"
+          fi
