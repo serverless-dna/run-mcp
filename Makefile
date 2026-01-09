@@ -426,6 +426,8 @@ validate-dockerfiles: ## Validate Dockerfiles with hadolint
 # =============================================================================
 
 setup-dev: ## Set up development environment
+	@echo "$(BLUE)Setting up development environment...$(NC)"
+	@echo "$(YELLOW)Installing required tools...$(NC)"
 	@chmod +x scripts/setup-dev.sh
 	@bash scripts/setup-dev.sh
 
