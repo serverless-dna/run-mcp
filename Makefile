@@ -58,7 +58,11 @@ YELLOW := \033[0;33m
 BLUE := \033[0;34m
 NC := \033[0m # No Color
 
-.PHONY: help test clean build push login setup-dev lint validate check-upstream check-upstream-force build-run-mcp install-run-mcp
+.PHONY: help test test-dev clean build push login setup-dev lint validate check-upstream check-upstream-force build-run-mcp install-run-mcp
+.PHONY: push-matrix build-and-push build-and-push-matrix push-nodejs push-nodejs-matrix push-python push-python-matrix
+.PHONY: test-scripts test-workflows test-containers test-run-mcp test-run-mcp-full lint-makefile validate-dockerfiles check-tools
+.PHONY: ci ci-build ci-matrix info containers containers-matrix changelog changelog-version update-changelog
+.PHONY: all all-matrix release release-matrix update-homebrew-github
 
 # Default target
 help: ## Show this help message
@@ -319,7 +323,9 @@ push-python-matrix: ## Push all Python matrix images to registry
 # TESTING TARGETS
 # =============================================================================
 
-test: test-scripts test-containers test-workflows test-run-mcp ## Run all tests
+test: test-scripts test-containers test-workflows test-run-mcp-full ## Run all tests (CI/CD mode)
+
+test-dev: test-scripts test-containers test-workflows test-run-mcp ## Run development tests (fast mode with unit + container tests)
 
 test-scripts: ## Run shell script tests with Bats
 	@echo "$(BLUE)Running shell script tests...$(NC)"
@@ -369,11 +375,36 @@ test-run-mcp: ## Test the run-mcp binary
 	fi
 	@echo "$(GREEN)✓ run-mcp tests passed$(NC)"
 
+test-run-mcp-dev: ## Test the run-mcp binary (fast mode for development)
+	@echo "$(BLUE)Testing run-mcp binary (dev mode)...$(NC)"
+	@if [ -d "cmd/run-mcp" ]; then \
+		cd cmd/run-mcp && go test -short .; \
+	else \
+		echo "$(YELLOW)No run-mcp tests found$(NC)"; \
+	fi
+	@echo "$(GREEN)✓ run-mcp dev tests passed$(NC)"
+
+test-run-mcp-full: ## Test the run-mcp binary (full integration tests)
+	@echo "$(BLUE)Testing run-mcp binary (full mode)...$(NC)"
+	@if [ -d "cmd/run-mcp" ]; then \
+		cd cmd/run-mcp && go test -v .; \
+	else \
+		echo "$(YELLOW)No run-mcp tests found$(NC)"; \
+	fi
+	@echo "$(GREEN)✓ run-mcp full tests passed$(NC)"
+
 # =============================================================================
 # VALIDATION TARGETS
 # =============================================================================
 
-lint: validate-dockerfiles ## Run all linting checks
+lint: validate-dockerfiles lint-makefile ## Run all linting checks
+
+lint-makefile: ## Lint Makefile syntax
+	@echo "$(BLUE)Linting Makefile...$(NC)"
+	@make -n help >/dev/null 2>&1 && echo "$(GREEN)✓ Makefile syntax is valid$(NC)" || exit 1
+	@if command -v checkmake >/dev/null 2>&1; then \
+		checkmake --config=checkmake.ini Makefile; \
+	fi
 
 validate-dockerfiles: ## Validate Dockerfiles with hadolint
 	$(call check_docker)
@@ -395,21 +426,8 @@ validate-dockerfiles: ## Validate Dockerfiles with hadolint
 # =============================================================================
 
 setup-dev: ## Set up development environment
-	@echo "$(BLUE)Setting up development environment...$(NC)"
-	@echo "$(YELLOW)Installing required tools...$(NC)"
-	@if ! command -v bats >/dev/null 2>&1; then \
-		echo "Installing bats..."; \
-		sudo apt-get update && sudo apt-get install -y bats; \
-	fi
-	@if ! command -v jq >/dev/null 2>&1; then \
-		echo "Installing jq..."; \
-		sudo apt-get install -y jq; \
-	fi
-	@if ! command -v curl >/dev/null 2>&1; then \
-		echo "Installing curl..."; \
-		sudo apt-get install -y curl; \
-	fi
-	@echo "$(GREEN)✓ Development environment setup complete$(NC)"
+	@chmod +x scripts/setup-dev.sh
+	@bash scripts/setup-dev.sh
 
 check-tools: ## Check if required tools are installed
 	@echo "$(BLUE)Checking required tools...$(NC)"
@@ -566,67 +584,8 @@ update-homebrew-github: ## Update homebrew formula from GitHub Actions with down
 		echo "$(RED)Error: TAG not specified. Usage: make update-homebrew-github VERSION=1.0.0 TAG=v1.0.0$(NC)"; \
 		exit 1; \
 	fi
-	@if [ ! -d "homebrew-tap" ]; then \
-		echo "$(RED)Error: homebrew-tap directory not found$(NC)"; \
-		exit 1; \
-	fi
-	@if [ ! -d "build" ]; then \
-		echo "$(RED)Error: build directory not found$(NC)"; \
-		exit 1; \
-	fi
-	@echo "Updating formula for homebrew version: $(VERSION) (from git tag: $(TAG))"
-	@# Calculate SHA256 for each binary
-	@SHA_DARWIN_ARM64=$$(sha256sum build/run-mcp-darwin-arm64 | cut -d' ' -f1) && \
-	SHA_DARWIN_AMD64=$$(sha256sum build/run-mcp-darwin-amd64 | cut -d' ' -f1) && \
-	SHA_LINUX_AMD64=$$(sha256sum build/run-mcp-linux-amd64 | cut -d' ' -f1) && \
-	SHA_LINUX_ARM64=$$(sha256sum build/run-mcp-linux-arm64 | cut -d' ' -f1) && \
-	echo "SHA256 checksums:" && \
-	echo "  Darwin ARM64: $$SHA_DARWIN_ARM64" && \
-	echo "  Darwin AMD64: $$SHA_DARWIN_AMD64" && \
-	echo "  Linux AMD64:  $$SHA_LINUX_AMD64" && \
-	echo "  Linux ARM64:  $$SHA_LINUX_ARM64" && \
-	cat > homebrew-tap/Formula/run-mcp.rb << 'EOF'
-class RunMcp < Formula
-  desc "Cross-platform binary for running MCP servers in containers"
-  homepage "https://github.com/serverless-dna/run-mcp"
-  version "$(VERSION)"
-  license "MIT"
-  
-  on_macos do
-    if Hardware::CPU.arm?
-      url "https://github.com/serverless-dna/run-mcp/releases/download/$(TAG)/run-mcp-darwin-arm64"
-      sha256 "SHA_DARWIN_ARM64_PLACEHOLDER"
-    else
-      url "https://github.com/serverless-dna/run-mcp/releases/download/$(TAG)/run-mcp-darwin-amd64"
-      sha256 "SHA_DARWIN_AMD64_PLACEHOLDER"
-    end
-  end
-  
-  on_linux do
-    if Hardware::CPU.arm?
-      url "https://github.com/serverless-dna/run-mcp/releases/download/$(TAG)/run-mcp-linux-arm64"
-      sha256 "SHA_LINUX_ARM64_PLACEHOLDER"
-    else
-      url "https://github.com/serverless-dna/run-mcp/releases/download/$(TAG)/run-mcp-linux-amd64"
-      sha256 "SHA_LINUX_AMD64_PLACEHOLDER"
-    end
-  end
-  
-  def install
-    bin.install Dir["*"].first => "run-mcp"
-  end
-  
-  test do
-    assert_match version.to_s, shell_output("#{bin}/run-mcp --version")
-    assert_match "Show this help message", shell_output("#{bin}/run-mcp --help")
-  end
-end
-EOF
-	@# Replace placeholders with actual SHA256 values
-	@sed -i "s/SHA_DARWIN_ARM64_PLACEHOLDER/$$SHA_DARWIN_ARM64/" homebrew-tap/Formula/run-mcp.rb && \
-	sed -i "s/SHA_DARWIN_AMD64_PLACEHOLDER/$$SHA_DARWIN_AMD64/" homebrew-tap/Formula/run-mcp.rb && \
-	sed -i "s/SHA_LINUX_ARM64_PLACEHOLDER/$$SHA_LINUX_ARM64/" homebrew-tap/Formula/run-mcp.rb && \
-	sed -i "s/SHA_LINUX_AMD64_PLACEHOLDER/$$SHA_LINUX_AMD64/" homebrew-tap/Formula/run-mcp.rb
+	@chmod +x scripts/update-homebrew-formula-github.sh
+	@./scripts/update-homebrew-formula-github.sh "$(VERSION)" "$(TAG)"
 	@echo "$(GREEN)✅ Homebrew formula updated successfully$(NC)"
 
 # =============================================================================
