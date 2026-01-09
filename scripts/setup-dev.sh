@@ -35,4 +35,14 @@ if ! command -v checkmake >/dev/null 2>&1; then
     fi
 fi
 
+# Setup git hooks
+echo "Setting up git hooks..."
+if [ -f ".githooks/pre-commit" ]; then
+    cp .githooks/pre-commit .git/hooks/pre-commit
+    chmod +x .git/hooks/pre-commit
+    echo -e "\033[0;32m✓ Pre-commit hook installed\033[0m"
+else
+    echo -e "\033[0;33mWarning: .githooks/pre-commit not found\033[0m"
+fi
+
 echo -e "\033[0;32m✓ Development environment setup complete\033[0m"
