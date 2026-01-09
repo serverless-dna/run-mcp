@@ -1,0 +1,20 @@
+#!/bin/bash
+set -e
+
+echo "🔍 Running pre-commit quality checks..."
+
+# Check Makefile syntax
+echo "Checking Makefile syntax..."
+if ! make lint-makefile; then
+    echo "❌ Makefile linting failed"
+    exit 1
+fi
+
+# Run Go tests for run-mcp
+echo "Running Go tests..."
+if ! make test-run-mcp; then
+    echo "❌ Go tests failed"
+    exit 1
+fi
+
+echo "✅ All pre-commit checks passed!"
