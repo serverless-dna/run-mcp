@@ -1,0 +1,81 @@
+project_name: run-mcp
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    dir: cmd/run-mcp
+    binary: run-mcp
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X 'main.date={{.Date}}'
+
+archives:
+  - format: tar.gz
+    # this name template makes the OS and Arch compatible with the results of uname.
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    # use zip for windows archives
+    format_overrides:
+    - goos: windows
+      format: zip
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+winget:
+  - name: run-mcp
+    publisher: ServerlessDNA
+    license: MIT
+    homepage: https://github.com/modelcontextprotocol/mcp-container-images
+    description: "Run MCP servers in containers with automatic runtime detection"
+    short_description: "Container runtime for MCP servers"
+    tags:
+      - mcp
+      - containers
+      - docker
+      - development
+    repository:
+      owner: serverless-dna
+      name: winget-pkgs
+      branch: "{{.ProjectName}}-{{.Version}}"
+      pull_request:
+        enabled: true
+        draft: false
+        base:
+          owner: serverless-dna
+          name: winget-pkgs
+          branch: main
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "{{ .ProjectName }}: {{ .Tag }}"
+    goamd64: v1
