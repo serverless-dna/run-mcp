@@ -517,7 +517,7 @@ containers: ## Complete container lifecycle: cleanup → build → push (latest 
 	@echo "$(BLUE)Running complete container lifecycle...$(NC)"
 	@echo "$(YELLOW)Step 1: Cleaning up old versions$(NC)"
 	$(MAKE) cleanup-versions
-	@echo "$(YELLOW)Step 2: Building latest versions$(NC)"
+	@echo "$(YELLOW)Step 2: 	ing latest versions$(NC)"
 	$(MAKE) build
 	@echo "$(YELLOW)Step 3: Pushing to registry$(NC)"
 	$(MAKE) push
