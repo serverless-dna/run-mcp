@@ -35,6 +35,17 @@ if ! command -v checkmake >/dev/null 2>&1; then
     fi
 fi
 
+# Install actionlint
+if ! command -v actionlint >/dev/null 2>&1; then
+    echo "Installing actionlint..."
+    if command -v go >/dev/null 2>&1; then
+        go install github.com/rhysd/actionlint/cmd/actionlint@latest
+    else
+        echo -e "\033[0;33mGo not available, skipping actionlint installation\033[0m"
+        echo -e "\033[0;33mInstall manually: go install github.com/rhysd/actionlint/cmd/actionlint@latest\033[0m"
+    fi
+fi
+
 # Setup git hooks
 echo "Setting up git hooks..."
 if [ -f ".githooks/pre-commit" ]; then
