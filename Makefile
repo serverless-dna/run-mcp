@@ -601,20 +601,6 @@ update-homebrew-github: ## Update homebrew formula from GitHub Actions with down
 	@./scripts/update-homebrew-formula-github.sh "$(VERSION)" "$(TAG)"
 	@echo "$(GREEN)✅ Homebrew formula updated successfully$(NC)"
 
-update-winget-github: ## Update winget manifest from GitHub Actions with downloaded binaries
-	@echo "$(BLUE)Updating winget manifest from GitHub Actions...$(NC)"
-	@if [ -z "$(VERSION)" ]; then \
-		echo "$(RED)Error: VERSION not specified. Usage: make update-winget-github VERSION=1.0.0 TAG=v1.0.0$(NC)"; \
-		exit 1; \
-	fi
-	@if [ -z "$(TAG)" ]; then \
-		echo "$(RED)Error: TAG not specified. Usage: make update-winget-github VERSION=1.0.0 TAG=v1.0.0$(NC)"; \
-		exit 1; \
-	fi
-	@chmod +x scripts/update-winget-manifest-github.sh
-	@./scripts/update-winget-manifest-github.sh "$(VERSION)" "$(TAG)"
-	@echo "$(GREEN)✅ Winget manifest updated successfully$(NC)"
-
 # =============================================================================
 # ALL-IN-ONE TARGETS
 # =============================================================================
