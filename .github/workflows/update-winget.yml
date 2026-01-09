@@ -47,7 +47,7 @@ jobs:
           mkdir -p build
           
           # Download Windows binary (only need Windows for winget)
-          curl -L -f -o build/run-mcp-windows-amd64.exe "https://github.com/modelcontextprotocol/mcp-container-images/releases/download/$TAG/run-mcp-windows-amd64.exe"
+          curl -L -f -o build/run-mcp-windows-amd64.exe "https://github.com/serverless-dna/run-mcp/releases/download/$TAG/run-mcp-windows-amd64.exe"
           
           echo "✅ Downloaded Windows release artifact"
           ls -la build/
