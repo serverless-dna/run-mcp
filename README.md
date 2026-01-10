@@ -143,5 +143,5 @@ MIT
 
 ## Links
 
-- [Blog Post](https://serverlessdna.com/projects/run-mcp)
+- [Blog Post](https://serverlessdna.com/strands/projects/introducing-run-mcp)
 - [Container Images](https://github.com/orgs/serverless-dna/packages)
