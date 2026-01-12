@@ -1,0 +1,125 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! Please provide as much detail as possible to help us reproduce and fix the issue.
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Pre-flight Checklist
+      description: Please confirm you've completed these steps before submitting
+      options:
+        - label: I have searched existing issues to ensure this bug hasn't been reported
+          required: true
+        - label: I have read the [troubleshooting guide](./docs/troubleshooting.md)
+          required: true
+        - label: I am using a supported container runtime (Docker, Podman)
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug
+      placeholder: Tell us what you see
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: Tell us what you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Install run-mcp with '...'
+        2. Configure MCP server with '...'
+        3. Run command '...'
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: MCP Configuration
+      description: Please share your MCP server configuration (remove any sensitive data)
+      render: json
+      placeholder: |
+        {
+          "mcpServers": {
+            "example": {
+              "command": "run-mcp",
+              "args": ["..."],
+              "env": {
+                "MCP_DATA_DIR": "..."
+              }
+            }
+          }
+        }
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What operating system are you using?
+      options:
+        - macOS
+        - Linux (Ubuntu/Debian)
+        - Linux (RHEL/CentOS/Fedora)
+        - Linux (Other)
+        - Windows (WSL2)
+        - Windows (Native)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: container-runtime
+    attributes:
+      label: Container Runtime
+      description: Which container runtime are you using?
+      options:
+        - Docker Desktop
+        - Docker Engine
+        - Podman
+        - Other (please specify in additional context)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: run-mcp Version
+      description: What version of run-mcp are you using? (run `run-mcp --version`)
+      placeholder: "v1.0.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and Error Messages
+      description: Please include any relevant log output or error messages
+      render: shell
+      placeholder: Paste any error messages or logs here
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context about the problem here
+      placeholder: Any additional information that might help us understand the issue

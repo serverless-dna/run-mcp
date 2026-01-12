@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 Private Security Report
+    url: https://github.com/serverless-dna/run-mcp/security/advisories/new
+    about: Report sensitive security vulnerabilities privately
+  - name: 💬 Discussions
+    url: https://github.com/serverless-dna/run-mcp/discussions
+    about: Ask questions, share ideas, or get help from the community
+  - name: 📖 Documentation
+    url: https://github.com/serverless-dna/run-mcp/tree/main/docs
+    about: Read the documentation before reporting issues
