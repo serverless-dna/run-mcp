@@ -1,0 +1,89 @@
+name: Security Report
+description: Report a security vulnerability (use private reporting for sensitive issues)
+title: "[Security]: "
+labels: ["security", "needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ **IMPORTANT**: For sensitive security vulnerabilities, please use GitHub's [private vulnerability reporting](https://github.com/serverless-dna/run-mcp/security/advisories/new) instead of this public issue template.
+        
+        This template is for security-related issues that are not sensitive or for general security improvements.
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Security Checklist
+      description: Please confirm the following
+      options:
+        - label: This is NOT a sensitive security vulnerability (if it is, use private reporting)
+          required: true
+        - label: I have searched existing issues to ensure this hasn't been reported
+          required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity Level
+      description: How severe is this security issue?
+      options:
+        - Low - Minor security improvement
+        - Medium - Potential security concern
+        - High - Significant security issue
+        - Critical - Immediate security risk
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Security Issue Description
+      description: Describe the security issue or concern
+      placeholder: Provide a clear description of the security issue
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Potential Impact
+      description: What could happen if this security issue is exploited?
+      placeholder: Describe the potential security impact
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce (if applicable)
+      description: How can this security issue be reproduced?
+      placeholder: |
+        1. Configure run-mcp with '...'
+        2. Run command '...'
+        3. Observe security issue
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Suggested Mitigation
+      description: Do you have any suggestions for how to fix this issue?
+      placeholder: Describe any potential fixes or mitigations
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Details
+      description: Provide details about your environment
+      placeholder: |
+        - OS: 
+        - Container Runtime: 
+        - run-mcp Version: 
+        - Configuration details (remove sensitive data):
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context about the security issue
+      placeholder: Any additional information that might help us understand and address the security concern

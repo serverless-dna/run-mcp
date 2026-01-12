@@ -1,0 +1,76 @@
+name: Documentation Issue
+description: Report missing, unclear, or incorrect documentation
+title: "[Docs]: "
+labels: ["documentation", "needs-triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help us improve our documentation. Please provide specific details about what's missing or unclear.
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Pre-flight Checklist
+      description: Please confirm you've completed these steps
+      options:
+        - label: I have searched existing issues to ensure this hasn't been reported
+          required: true
+        - label: I have checked the current documentation in the docs/ folder
+          required: true
+
+  - type: dropdown
+    id: doc-type
+    attributes:
+      label: Documentation Type
+      description: What type of documentation issue is this?
+      options:
+        - Missing Documentation
+        - Unclear Instructions
+        - Incorrect Information
+        - Outdated Content
+        - Typo/Grammar
+        - Example Needed
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Documentation Location
+      description: Which file or section needs attention?
+      placeholder: "e.g., README.md, docs/configuration.md, line 42"
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue
+    attributes:
+      label: What's the Issue?
+      description: Describe what's missing, unclear, or incorrect
+      placeholder: Be specific about what needs to be improved
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What Should It Say?
+      description: How should the documentation be improved?
+      placeholder: Provide your suggested improvement or clarification
+
+  - type: textarea
+    id: context
+    attributes:
+      label: User Context
+      description: What were you trying to accomplish when you encountered this issue?
+      placeholder: Describe your use case and what you were trying to learn
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Add any other context about the documentation issue
+      placeholder: Any additional information that might help us improve the documentation
