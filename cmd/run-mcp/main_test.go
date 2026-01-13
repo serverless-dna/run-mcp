@@ -23,15 +23,15 @@ import (
 func TestProperty19_ContainerRuntimeDetection(t *testing.T) {
 	// **Feature: mcp-container-images, Property 19: Container Runtime Detection**
 	// **Validates: Requirements 13.1, 13.7**
-	
+
 	detector := NewRuntimeDetector()
-	
+
 	// Test that detector has expected runtimes in priority order
 	expectedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
 	if len(detector.runtimes) < len(expectedRuntimes) {
 		t.Errorf("Expected at least %d runtimes, got %d", len(expectedRuntimes), len(detector.runtimes))
 	}
-	
+
 	// Test that the first few runtimes match expected priority order
 	for i, expected := range expectedRuntimes {
 		if i >= len(detector.runtimes) {
@@ -41,7 +41,7 @@ func TestProperty19_ContainerRuntimeDetection(t *testing.T) {
 			t.Errorf("Expected runtime at position %d to be %s, got %s", i, expected, detector.runtimes[i])
 		}
 	}
-	
+
 	// Test detection logic
 	runtime, err := detector.Detect()
 	if err != nil {
@@ -51,7 +51,7 @@ func TestProperty19_ContainerRuntimeDetection(t *testing.T) {
 		}
 		t.Skip("No container runtime available for testing")
 	}
-	
+
 	// If we found a runtime, it should be one of the expected ones
 	validRuntimes := append(expectedRuntimes, "lima nerdctl")
 	found := false
@@ -61,11 +61,11 @@ func TestProperty19_ContainerRuntimeDetection(t *testing.T) {
 			break
 		}
 	}
-	
+
 	if !found {
 		t.Errorf("Detected runtime %s is not in expected list: %v", runtime, validRuntimes)
 	}
-	
+
 	// Test runtime override
 	originalRuntime := os.Getenv("MCP_CONTAINER_RUNTIME")
 	defer func() {
@@ -75,7 +75,7 @@ func TestProperty19_ContainerRuntimeDetection(t *testing.T) {
 			os.Unsetenv("MCP_CONTAINER_RUNTIME")
 		}
 	}()
-	
+
 	// Test with valid override
 	if runtime != "" {
 		os.Setenv("MCP_CONTAINER_RUNTIME", runtime)
@@ -87,7 +87,7 @@ func TestProperty19_ContainerRuntimeDetection(t *testing.T) {
 			t.Errorf("Expected override runtime %s, got %s", runtime, overrideRuntime)
 		}
 	}
-	
+
 	// Test with invalid override
 	os.Setenv("MCP_CONTAINER_RUNTIME", "nonexistent-runtime")
 	_, err = detector.Detect()
@@ -101,9 +101,9 @@ func TestProperty19_ContainerRuntimeDetection(t *testing.T) {
 func TestProperty20_LanguageAutoDetection(t *testing.T) {
 	// **Feature: mcp-container-images, Property 20: Language Auto-Detection**
 	// **Validates: Requirements 13.2, 13.6**
-	
+
 	detector := NewLanguageDetector()
-	
+
 	// Test Node.js commands
 	nodejsCommands := []string{"npx", "node", "yarn", "tsx", "npm"}
 	for _, cmd := range nodejsCommands {
@@ -115,7 +115,7 @@ func TestProperty20_LanguageAutoDetection(t *testing.T) {
 			t.Errorf("Expected nodejs for command %s, got %s", cmd, lang)
 		}
 	}
-	
+
 	// Test Python commands
 	pythonCommands := []string{"uvx", "python", "python3", "uv", "pip", "pip3"}
 	for _, cmd := range pythonCommands {
@@ -127,7 +127,7 @@ func TestProperty20_LanguageAutoDetection(t *testing.T) {
 			t.Errorf("Expected python for command %s, got %s", cmd, lang)
 		}
 	}
-	
+
 	// Test explicit runtime specification
 	explicitTests := []struct {
 		args     []string
@@ -138,7 +138,7 @@ func TestProperty20_LanguageAutoDetection(t *testing.T) {
 		{[]string{"node", "npx", "some-package"}, "nodejs"},
 		{[]string{"nodejs", "npm", "install", "package"}, "nodejs"},
 	}
-	
+
 	for _, test := range explicitTests {
 		lang, err := detector.DetectFromArgs(test.args)
 		if err != nil {
@@ -148,25 +148,25 @@ func TestProperty20_LanguageAutoDetection(t *testing.T) {
 			t.Errorf("Expected %s for args %v, got %s", test.expected, test.args, lang)
 		}
 	}
-	
+
 	// Test unknown command
 	_, err := detector.DetectFromArgs([]string{"unknown-command"})
 	if err == nil {
 		t.Error("Expected error for unknown command")
 	}
-	
+
 	// Test empty args
 	_, err = detector.DetectFromArgs([]string{})
 	if err == nil {
 		t.Error("Expected error for empty args")
 	}
-	
+
 	// Test that all supported languages are valid
 	supportedLanguages := detector.GetSupportedLanguages()
 	if len(supportedLanguages) == 0 {
 		t.Error("Expected at least one supported language")
 	}
-	
+
 	for _, lang := range supportedLanguages {
 		if !detector.IsValidLanguage(lang) {
 			t.Errorf("Language %s should be valid but IsValidLanguage returned false", lang)
@@ -179,16 +179,16 @@ func TestProperty20_LanguageAutoDetection(t *testing.T) {
 func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 	// **Feature: mcp-container-images, Property 21: Secure Environment Variable Passthrough**
 	// **Validates: Requirements 13.3, 13.8, 13.10**
-	
+
 	filter := NewEnvFilter()
-	
+
 	// Test allowed prefixes
 	allowedPrefixes := filter.GetAllowedPrefixes()
 	expectedPrefixes := []string{
 		"AWS_", "OPENAI_", "ANTHROPIC_", "AZURE_", "GOOGLE_",
 		"MCP_", "HF_", "REPLICATE_", "COHERE_",
 	}
-	
+
 	for _, expected := range expectedPrefixes {
 		found := false
 		for _, prefix := range allowedPrefixes {
@@ -201,11 +201,11 @@ func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 			t.Errorf("Expected prefix %s not found in allowed prefixes", expected)
 		}
 	}
-	
+
 	// Test allowed exact matches
 	allowedExact := filter.GetAllowedExact()
 	expectedExact := []string{"GITHUB_TOKEN", "GITLAB_TOKEN", "DATABASE_URL", "REDIS_URL"}
-	
+
 	for _, expected := range expectedExact {
 		found := false
 		for _, exact := range allowedExact {
@@ -218,7 +218,7 @@ func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 			t.Errorf("Expected exact match %s not found in allowed exact matches", expected)
 		}
 	}
-	
+
 	// Test environment variable filtering
 	testCases := []struct {
 		envVar   string
@@ -229,18 +229,18 @@ func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 		{"OPENAI_API_KEY=test", true},
 		{"ANTHROPIC_API_KEY=test", true},
 		{"MCP_DATA_DIR=test", true},
-		
+
 		// Should be allowed (exact matches)
 		{"GITHUB_TOKEN=test", true},
 		{"DATABASE_URL=test", true},
-		
+
 		// Should NOT be allowed
 		{"PATH=/usr/bin", false},
 		{"HOME=/home/user", false},
 		{"DANGEROUS_VAR=malicious", false},
 		{"SYSTEM_VAR=value", false},
 	}
-	
+
 	// Save original environment
 	originalEnv := os.Environ()
 	defer func() {
@@ -253,7 +253,7 @@ func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 			}
 		}
 	}()
-	
+
 	// Clear environment and set test variables
 	os.Clearenv()
 	for _, testCase := range testCases {
@@ -262,17 +262,17 @@ func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 			os.Setenv(parts[0], parts[1])
 		}
 	}
-	
+
 	// Get filtered environment arguments
 	envArgs := filter.GetFilteredEnvArgs()
-	
+
 	// Check that only allowed variables are included
 	for _, testCase := range testCases {
 		parts := strings.SplitN(testCase.envVar, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
-		
+
 		found := false
 		for i := 0; i < len(envArgs); i += 2 {
 			if i+1 < len(envArgs) && envArgs[i] == "-e" {
@@ -282,20 +282,20 @@ func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 				}
 			}
 		}
-		
+
 		if found != testCase.expected {
 			t.Errorf("Environment variable %s: expected %v, got %v", parts[0], testCase.expected, found)
 		}
 	}
-	
+
 	// Test custom passthrough variables
 	os.Setenv("MCP_PASSTHROUGH_ENV", "CUSTOM_VAR1,CUSTOM_VAR2")
 	os.Setenv("CUSTOM_VAR1", "value1")
 	os.Setenv("CUSTOM_VAR2", "value2")
 	os.Setenv("NOT_CUSTOM", "should_not_pass")
-	
+
 	envArgs = filter.GetFilteredEnvArgs()
-	
+
 	// Check that custom variables are included
 	customVars := []string{"CUSTOM_VAR1", "CUSTOM_VAR2"}
 	for _, customVar := range customVars {
@@ -312,7 +312,7 @@ func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 			t.Errorf("Custom variable %s should be passed through but was not found", customVar)
 		}
 	}
-	
+
 	// Check that non-custom variable is not included
 	found := false
 	for i := 0; i < len(envArgs); i += 2 {
@@ -332,21 +332,21 @@ func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 func TestVolumeMounting(t *testing.T) {
 	// Create a temporary directory for testing
 	tempDir := t.TempDir()
-	
+
 	config := &Config{
 		DataDir: tempDir,
 	}
-	
+
 	vm := NewVolumeManager(config)
-	
+
 	// Test volume mount generation
 	mounts := vm.GetVolumeMounts()
-	
+
 	// Should have at least the data mount
 	if len(mounts) < 2 { // -v and the mount spec
 		t.Error("Expected at least one volume mount")
 	}
-	
+
 	// Check data mount
 	found := false
 	for i := 0; i < len(mounts); i += 2 {
@@ -360,13 +360,13 @@ func TestVolumeMounting(t *testing.T) {
 	if !found {
 		t.Error("Data directory mount not found")
 	}
-	
+
 	// Test mount info
 	info := vm.GetMountInfo()
 	if info.DataMount == "" {
 		t.Error("Expected data mount info")
 	}
-	
+
 	// Test data directory validation
 	err := vm.ValidateDataDir()
 	if err != nil {
@@ -380,7 +380,7 @@ func TestConfiguration(t *testing.T) {
 	originalNodejs := os.Getenv("MCP_NODEJS_IMAGE")
 	originalPython := os.Getenv("MCP_PYTHON_IMAGE")
 	originalDataDir := os.Getenv("MCP_DATA_DIR")
-	
+
 	defer func() {
 		// Restore original environment
 		if originalNodejs != "" {
@@ -399,7 +399,7 @@ func TestConfiguration(t *testing.T) {
 			os.Unsetenv("MCP_DATA_DIR")
 		}
 	}()
-	
+
 	// Test default configuration
 	config := loadConfig()
 	if config.NodejsImage == "" {
@@ -411,12 +411,12 @@ func TestConfiguration(t *testing.T) {
 	if config.DataDir == "" {
 		t.Error("Expected default data directory")
 	}
-	
+
 	// Test custom configuration
 	os.Setenv("MCP_NODEJS_IMAGE", "custom/nodejs:test")
 	os.Setenv("MCP_PYTHON_IMAGE", "custom/python:test")
 	os.Setenv("MCP_DATA_DIR", "/custom/data")
-	
+
 	config = loadConfig()
 	if config.NodejsImage != "custom/nodejs:test" {
 		t.Errorf("Expected custom Node.js image, got %s", config.NodejsImage)
@@ -427,7 +427,7 @@ func TestConfiguration(t *testing.T) {
 	if config.DataDir != "/custom/data" {
 		t.Errorf("Expected custom data directory, got %s", config.DataDir)
 	}
-	
+
 	// Test image selection
 	image, err := config.GetImageForLanguage("nodejs")
 	if err != nil {
@@ -436,7 +436,7 @@ func TestConfiguration(t *testing.T) {
 	if image != "custom/nodejs:test" {
 		t.Errorf("Expected custom nodejs image, got %s", image)
 	}
-	
+
 	image, err = config.GetImageForLanguage("python")
 	if err != nil {
 		t.Errorf("Failed to get image for python: %v", err)
@@ -444,13 +444,13 @@ func TestConfiguration(t *testing.T) {
 	if image != "custom/python:test" {
 		t.Errorf("Expected custom python image, got %s", image)
 	}
-	
+
 	// Test invalid language
 	_, err = config.GetImageForLanguage("invalid")
 	if err == nil {
 		t.Error("Expected error for invalid language")
 	}
-	
+
 	// Test validation with valid temp directory
 	tempDir := t.TempDir()
 	config.DataDir = tempDir
@@ -461,13 +461,13 @@ func TestConfiguration(t *testing.T) {
 }
 
 // Property 1: Volume Creation Consistency
-// For any MCP server command and supported container runtime, when run-mcp starts a container, 
-// a named container volume should be created following the deterministic naming pattern 
+// For any MCP server command and supported container runtime, when run-mcp starts a container,
+// a named container volume should be created following the deterministic naming pattern
 // mcp-home-{sanitized-command}-{sanitized-first-arg}
 func TestProperty1_VolumeCreationConsistency(t *testing.T) {
 	// **Feature: container-home-isolation, Property 1: Volume Creation Consistency**
 	// **Validates: Requirements 1.1, 2.1, 2.2, 2.3**
-	
+
 	testCases := []struct {
 		name     string
 		args     []string
@@ -514,32 +514,32 @@ func TestProperty1_VolumeCreationConsistency(t *testing.T) {
 			expected: "mcp-home-uvx-server-with-backslashes",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := sanitizeVolumeName(tc.args)
 			if result != tc.expected {
 				t.Errorf("sanitizeVolumeName(%v) = %s, expected %s", tc.args, result, tc.expected)
 			}
-			
+
 			// Verify the result follows the expected pattern
 			if !strings.HasPrefix(result, "mcp-home-") {
 				t.Errorf("Volume name %s does not start with 'mcp-home-'", result)
 			}
-			
+
 			// Verify no invalid characters remain
 			validPattern := regexp.MustCompile(`^[a-z0-9-]+$`)
 			if !validPattern.MatchString(result) {
 				t.Errorf("Volume name %s contains invalid characters", result)
 			}
-			
+
 			// Verify length constraint
 			if len(result) > 64 {
 				t.Errorf("Volume name %s exceeds 64 character limit (length: %d)", result, len(result))
 			}
 		})
 	}
-	
+
 	// Test deterministic behavior - same input should always produce same output
 	testArgs := []string{"uvx", "awslabs.aws-api-mcp-server@latest"}
 	result1 := sanitizeVolumeName(testArgs)
@@ -647,12 +647,12 @@ func TestVolumeNameEdgeCases(t *testing.T) {
 			description: "Should stop processing at first flag",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := sanitizeVolumeName(tc.args)
 			if result != tc.expected {
-				t.Errorf("sanitizeVolumeName(%v) = %s, expected %s (%s)", 
+				t.Errorf("sanitizeVolumeName(%v) = %s, expected %s (%s)",
 					tc.args, result, tc.expected, tc.description)
 			}
 		})
@@ -668,36 +668,36 @@ func TestVolumeNameTruncation(t *testing.T) {
 		description string
 	}{
 		{
-			name: "exactly 64 characters",
-			args: []string{"uvx", "this-is-a-very-long-server-name-that-should-be-exactly-sixtyfour"},
+			name:        "exactly 64 characters",
+			args:        []string{"uvx", "this-is-a-very-long-server-name-that-should-be-exactly-sixtyfour"},
 			description: "Name exactly at limit should not be truncated",
 		},
 		{
-			name: "over 64 characters",
-			args: []string{"uvx", "this-is-a-very-long-server-name-that-exceeds-the-sixtyfour-character-limit"},
+			name:        "over 64 characters",
+			args:        []string{"uvx", "this-is-a-very-long-server-name-that-exceeds-the-sixtyfour-character-limit"},
 			description: "Name over limit should be truncated with hash",
 		},
 		{
-			name: "extremely long name",
-			args: []string{"uvx", strings.Repeat("very-long-name-", 20)},
+			name:        "extremely long name",
+			args:        []string{"uvx", strings.Repeat("very-long-name-", 20)},
 			description: "Extremely long names should be truncated properly",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := sanitizeVolumeName(tc.args)
-			
+
 			// All results should be 64 characters or less
 			if len(result) > 64 {
 				t.Errorf("Volume name length %d exceeds 64 character limit: %s", len(result), result)
 			}
-			
+
 			// Should still start with mcp-home-
 			if !strings.HasPrefix(result, "mcp-home-") {
 				t.Errorf("Truncated name should still start with 'mcp-home-': %s", result)
 			}
-			
+
 			// If truncated, should end with 8-character hash
 			originalName := "mcp-home-" + strings.Join(tc.args, "-")
 			if len(originalName) > 64 {
@@ -706,20 +706,20 @@ func TestVolumeNameTruncation(t *testing.T) {
 				if len(result) != 64 {
 					t.Errorf("Truncated name should be exactly 64 characters, got %d: %s", len(result), result)
 				}
-				
+
 				// Should contain a hash at the end
 				parts := strings.Split(result, "-")
 				lastPart := parts[len(parts)-1]
 				if len(lastPart) != 8 {
 					t.Errorf("Expected 8-character hash suffix, got %d characters: %s", len(lastPart), lastPart)
 				}
-				
+
 				// Hash should be hexadecimal
 				if matched, _ := regexp.MatchString("^[a-f0-9]{8}$", lastPart); !matched {
 					t.Errorf("Hash suffix should be 8 hexadecimal characters: %s", lastPart)
 				}
 			}
-			
+
 			// Test deterministic truncation - same input should produce same hash
 			result2 := sanitizeVolumeName(tc.args)
 			if result != result2 {
@@ -728,6 +728,7 @@ func TestVolumeNameTruncation(t *testing.T) {
 		})
 	}
 }
+
 // Test volume command abstraction functionality
 // Requirements: 4.11, 4.12, 2.9
 func TestVolumeCommandAbstraction(t *testing.T) {
@@ -741,16 +742,16 @@ func TestVolumeCommandAbstraction(t *testing.T) {
 		{"Finch", "finch"},
 		{"Lima Nerdctl", "lima nerdctl"},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			commander := NewVolumeCommander(tc.runtime)
-			
+
 			// Test that commander is not nil
 			if commander == nil {
 				t.Errorf("NewVolumeCommander(%s) returned nil", tc.runtime)
 			}
-			
+
 			// Test that commander implements VolumeCommander interface
 			var _ VolumeCommander = commander
 		})
@@ -761,9 +762,9 @@ func TestVolumeCommandAbstraction(t *testing.T) {
 // Requirements: 4.11, 4.12, 2.9
 func TestVolumeCommandGeneration(t *testing.T) {
 	testCases := []struct {
-		name            string
-		runtime         string
-		expectedType    string
+		name         string
+		runtime      string
+		expectedType string
 	}{
 		{"Docker", "docker", "*main.DockerVolumeCommander"},
 		{"Podman", "podman", "*main.PodmanVolumeCommander"},
@@ -772,15 +773,15 @@ func TestVolumeCommandGeneration(t *testing.T) {
 		{"Lima Nerdctl", "lima nerdctl", "*main.LimaNerdctlVolumeCommander"},
 		{"Unknown Runtime", "unknown", "*main.DockerVolumeCommander"}, // Should default to Docker
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			commander := NewVolumeCommander(tc.runtime)
-			
+
 			// Check the type of the returned commander
 			commanderType := fmt.Sprintf("%T", commander)
 			if commanderType != tc.expectedType {
-				t.Errorf("NewVolumeCommander(%s) returned type %s, expected %s", 
+				t.Errorf("NewVolumeCommander(%s) returned type %s, expected %s",
 					tc.runtime, commanderType, tc.expectedType)
 			}
 		})
@@ -792,21 +793,21 @@ func TestVolumeCommandGeneration(t *testing.T) {
 func TestVolumeLabelApplication(t *testing.T) {
 	// Test that all commanders support the same label format
 	runtimes := []string{"docker", "podman", "nerdctl", "finch", "lima nerdctl"}
-	
+
 	for _, runtime := range runtimes {
 		t.Run(runtime, func(t *testing.T) {
 			commander := NewVolumeCommander(runtime)
-			
+
 			// We can't actually create volumes in unit tests without the runtime available,
 			// but we can test that the interface accepts the labels without error
 			// This is a structural test to ensure the interface is correctly implemented
-			
+
 			// Test VolumeExists method (should not panic)
 			_, err := commander.VolumeExists("test-volume")
 			// Error is expected since volume doesn't exist and runtime may not be available
 			// We're just testing that the method can be called without panic
 			_ = err // Ignore the error for this structural test
-			
+
 			// Test that the commander has the expected runtime-specific behavior
 			switch runtime {
 			case "lima nerdctl":
@@ -849,9 +850,9 @@ func TestVolumeLabelApplication(t *testing.T) {
 func TestProperty2_VolumeReuseIdempotency(t *testing.T) {
 	// **Feature: container-home-isolation, Property 2: Volume Reuse Idempotency**
 	// **Validates: Requirements 1.2, 2.4, 4.2**
-	
+
 	config := &Config{}
-	
+
 	testCases := []struct {
 		name       string
 		serverName string
@@ -878,33 +879,33 @@ func TestProperty2_VolumeReuseIdempotency(t *testing.T) {
 			runtime:    "finch",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			vm := NewVolumeManager(config)
-			
+
 			// First call to CreateHomeVolume
 			volumeName1, err1 := vm.CreateHomeVolume(tc.serverName, tc.runtime)
-			
+
 			// Second call to CreateHomeVolume with same parameters
 			volumeName2, err2 := vm.CreateHomeVolume(tc.serverName, tc.runtime)
-			
+
 			// Both calls should return the same volume name (idempotency)
 			if volumeName1 != volumeName2 {
 				t.Errorf("Volume names should be identical for same server: %s != %s", volumeName1, volumeName2)
 			}
-			
+
 			// Both calls should have consistent error behavior
 			if (err1 == nil) != (err2 == nil) {
 				t.Errorf("Error behavior should be consistent: err1=%v, err2=%v", err1, err2)
 			}
-			
+
 			// Volume name should follow expected pattern
 			expectedVolumeName := sanitizeVolumeName(strings.Fields(tc.serverName))
 			if err1 == nil && volumeName1 != expectedVolumeName {
 				t.Errorf("Expected volume name %s, got %s", expectedVolumeName, volumeName1)
 			}
-			
+
 			// Test multiple calls in sequence (simulate multiple container starts)
 			for i := 0; i < 5; i++ {
 				volumeNameN, errN := vm.CreateHomeVolume(tc.serverName, tc.runtime)
@@ -917,21 +918,21 @@ func TestProperty2_VolumeReuseIdempotency(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test that different server names produce different volumes
 	vm := NewVolumeManager(config)
-	
+
 	serverName1 := "uvx server-one"
 	serverName2 := "uvx server-two"
 	runtime := "docker"
-	
+
 	volumeName1, _ := vm.CreateHomeVolume(serverName1, runtime)
 	volumeName2, _ := vm.CreateHomeVolume(serverName2, runtime)
-	
+
 	if volumeName1 == volumeName2 {
 		t.Errorf("Different server names should produce different volume names: %s == %s", volumeName1, volumeName2)
 	}
-	
+
 	// Test that same server name with different runtime produces same volume name
 	// (volume names are runtime-agnostic, but runtime metadata is stored in labels)
 	volumeName3, _ := vm.CreateHomeVolume(serverName1, "podman")
@@ -945,7 +946,7 @@ func TestProperty2_VolumeReuseIdempotency(t *testing.T) {
 // Requirements: 1.1, 1.6
 func TestVolumeCreation(t *testing.T) {
 	config := &Config{}
-	
+
 	testCases := []struct {
 		name       string
 		serverName string
@@ -977,13 +978,13 @@ func TestVolumeCreation(t *testing.T) {
 			expectErr:  true, // Expected because empty server name should be handled gracefully
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			vm := NewVolumeManager(config)
-			
+
 			volumeName, err := vm.CreateHomeVolume(tc.serverName, tc.runtime)
-			
+
 			if tc.expectErr {
 				// We expect errors in test environment due to missing container runtimes
 				// But we can still validate the volume name generation logic
@@ -995,18 +996,18 @@ func TestVolumeCreation(t *testing.T) {
 				if err != nil {
 					t.Errorf("Unexpected error: %v", err)
 				}
-				
+
 				// Verify volume name follows expected pattern
 				if !strings.HasPrefix(volumeName, "mcp-home-") {
 					t.Errorf("Volume name should start with 'mcp-home-', got %s", volumeName)
 				}
 			}
-			
+
 			// Test that VolumeManager state is updated correctly
 			if vm.commander == nil {
 				t.Error("VolumeManager commander should be initialized after CreateHomeVolume call")
 			}
-			
+
 			if vm.runtime != tc.runtime {
 				t.Errorf("VolumeManager runtime should be %s, got %s", tc.runtime, vm.runtime)
 			}
@@ -1020,12 +1021,12 @@ func TestVolumeConcurrentAccess(t *testing.T) {
 	config := &Config{}
 	serverName := "uvx concurrent-test-server"
 	runtime := "docker"
-	
+
 	// Test concurrent calls to CreateHomeVolume
 	const numGoroutines = 10
 	results := make(chan string, numGoroutines)
 	errors := make(chan error, numGoroutines)
-	
+
 	// Launch multiple goroutines calling CreateHomeVolume simultaneously
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
@@ -1035,16 +1036,16 @@ func TestVolumeConcurrentAccess(t *testing.T) {
 			errors <- err
 		}()
 	}
-	
+
 	// Collect results
 	var volumeNames []string
 	var errs []error
-	
+
 	for i := 0; i < numGoroutines; i++ {
 		volumeNames = append(volumeNames, <-results)
 		errs = append(errs, <-errors)
 	}
-	
+
 	// All successful calls should return the same volume name
 	expectedVolumeName := sanitizeVolumeName(strings.Fields(serverName))
 	for i, volumeName := range volumeNames {
@@ -1052,10 +1053,10 @@ func TestVolumeConcurrentAccess(t *testing.T) {
 			t.Errorf("Goroutine %d: Expected volume name %s, got %s", i, expectedVolumeName, volumeName)
 		}
 	}
-	
+
 	// Test that concurrent calls to the same VolumeManager instance are safe
 	vm := NewVolumeManager(config)
-	
+
 	for i := 0; i < numGoroutines; i++ {
 		go func(id int) {
 			volumeName, err := vm.CreateHomeVolume(fmt.Sprintf("%s-%d", serverName, id), runtime)
@@ -1063,12 +1064,12 @@ func TestVolumeConcurrentAccess(t *testing.T) {
 			errors <- err
 		}(i)
 	}
-	
+
 	// Collect results from shared VolumeManager
 	for i := 0; i < numGoroutines; i++ {
 		volumeName := <-results
 		err := <-errors
-		
+
 		if err == nil {
 			// Each should get a different volume name since server names are different
 			expectedPattern := "mcp-home-uvx-concurrent-test-server-"
@@ -1084,26 +1085,26 @@ func TestVolumeConcurrentAccess(t *testing.T) {
 func TestVolumeCreationWithDifferentRuntimes(t *testing.T) {
 	config := &Config{}
 	serverName := "uvx test-server"
-	
+
 	runtimes := []string{"docker", "podman", "nerdctl", "finch", "lima nerdctl"}
-	
+
 	for _, runtime := range runtimes {
 		t.Run(runtime, func(t *testing.T) {
 			vm := NewVolumeManager(config)
-			
+
 			volumeName, err := vm.CreateHomeVolume(serverName, runtime)
-			
+
 			// Volume name should be consistent regardless of runtime
 			expectedVolumeName := sanitizeVolumeName(strings.Fields(serverName))
 			if err == nil && volumeName != expectedVolumeName {
 				t.Errorf("Volume name should be consistent across runtimes: expected %s, got %s", expectedVolumeName, volumeName)
 			}
-			
+
 			// VolumeManager should be configured with the correct runtime
 			if vm.runtime != runtime {
 				t.Errorf("VolumeManager runtime should be %s, got %s", runtime, vm.runtime)
 			}
-			
+
 			// Commander should be initialized
 			if vm.commander == nil {
 				t.Error("VolumeManager commander should be initialized")
@@ -1116,11 +1117,11 @@ func TestVolumeCreationWithDifferentRuntimes(t *testing.T) {
 // Requirements: 1.1, 1.6
 func TestVolumeCreationBasicErrorHandling(t *testing.T) {
 	config := &Config{}
-	
+
 	// Test with invalid runtime
 	vm := NewVolumeManager(config)
 	_, err := vm.CreateHomeVolume("test-server", "nonexistent-runtime")
-	
+
 	// Should handle gracefully (may not error immediately due to lazy initialization)
 	if err == nil {
 		// If no immediate error, the commander should still be created
@@ -1128,21 +1129,21 @@ func TestVolumeCreationBasicErrorHandling(t *testing.T) {
 			t.Error("VolumeManager commander should be initialized even with invalid runtime")
 		}
 	}
-	
+
 	// Test with empty server name
 	vm2 := NewVolumeManager(config)
 	volumeName, err := vm2.CreateHomeVolume("", "docker")
-	
+
 	// Should handle empty server name gracefully
 	expectedVolumeName := sanitizeVolumeName([]string{})
 	if err == nil && volumeName != expectedVolumeName {
 		t.Errorf("Empty server name should produce default volume name: expected %s, got %s", expectedVolumeName, volumeName)
 	}
-	
+
 	// Test with whitespace-only server name
 	vm3 := NewVolumeManager(config)
 	volumeName3, err3 := vm3.CreateHomeVolume("   \t\n   ", "docker")
-	
+
 	// Should handle whitespace-only server name gracefully
 	expectedVolumeName3 := sanitizeVolumeName(strings.Fields("   \t\n   "))
 	if err3 == nil && volumeName3 != expectedVolumeName3 {
@@ -1154,32 +1155,32 @@ func TestVolumeCreationBasicErrorHandling(t *testing.T) {
 // Requirements: 4.11, 4.12, 2.9
 func TestVolumeManagerIntegration(t *testing.T) {
 	config := &Config{}
-	
+
 	// Test NewVolumeManagerWithRuntime
 	testRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	for _, runtime := range testRuntimes {
 		t.Run(runtime, func(t *testing.T) {
 			vm := NewVolumeManagerWithRuntime(config, runtime)
-			
+
 			if vm == nil {
 				t.Errorf("NewVolumeManagerWithRuntime returned nil for runtime %s", runtime)
 			}
-			
+
 			if vm.config != config {
 				t.Error("VolumeManager config not set correctly")
 			}
-			
+
 			if vm.commander == nil {
 				t.Error("VolumeManager commander not set")
 			}
-			
+
 			if vm.runtime != runtime {
 				t.Errorf("VolumeManager runtime should be %s, got %s", runtime, vm.runtime)
 			}
 		})
 	}
-	
+
 	// Test that NewVolumeManager creates a manager without commander (lazy initialization)
 	vm := NewVolumeManager(config)
 	if vm.commander != nil {
@@ -1194,7 +1195,7 @@ func TestVolumeManagerIntegration(t *testing.T) {
 // Requirements: 1.1, 2.1, 2.2, 2.3
 func TestVolumeManagerCreateHomeVolume(t *testing.T) {
 	config := &Config{}
-	
+
 	testCases := []struct {
 		name       string
 		serverName string
@@ -1214,13 +1215,13 @@ func TestVolumeManagerCreateHomeVolume(t *testing.T) {
 			expectErr:  true, // Will error because podman may not be available, but tests the flow
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			vm := NewVolumeManager(config)
-			
+
 			volumeName, err := vm.CreateHomeVolume(tc.serverName, tc.runtime)
-			
+
 			if tc.expectErr {
 				// We expect an error because the runtime is likely not available in test environment
 				// But we can still test that the volume name is generated correctly
@@ -1228,12 +1229,12 @@ func TestVolumeManagerCreateHomeVolume(t *testing.T) {
 				if err == nil && volumeName != expectedVolumeName {
 					t.Errorf("Expected volume name %s, got %s", expectedVolumeName, volumeName)
 				}
-				
+
 				// Test that commander was initialized
 				if vm.commander == nil {
 					t.Error("VolumeManager commander should be initialized after CreateHomeVolume call")
 				}
-				
+
 				if vm.runtime != tc.runtime {
 					t.Errorf("VolumeManager runtime should be %s, got %s", tc.runtime, vm.runtime)
 				}
@@ -1241,7 +1242,7 @@ func TestVolumeManagerCreateHomeVolume(t *testing.T) {
 				if err != nil {
 					t.Errorf("Unexpected error: %v", err)
 				}
-				
+
 				// Verify volume name follows expected pattern
 				if !strings.HasPrefix(volumeName, "mcp-home-") {
 					t.Errorf("Volume name should start with 'mcp-home-', got %s", volumeName)
@@ -1250,14 +1251,15 @@ func TestVolumeManagerCreateHomeVolume(t *testing.T) {
 		})
 	}
 }
+
 // Property 13: Ephemeral Volume Cleanup
 // For any container run with the --ephemeral flag, the associated volume should be automatically removed when the container stops
 func TestProperty13_EphemeralVolumeCleanup(t *testing.T) {
 	// **Feature: container-home-isolation, Property 13: Ephemeral Volume Cleanup**
 	// **Validates: Requirements 6.3, 6.4, 6.5**
-	
+
 	config := &Config{EphemeralMode: true}
-	
+
 	// Test with different server names and runtimes
 	testCases := []struct {
 		serverName string
@@ -1268,27 +1270,27 @@ func TestProperty13_EphemeralVolumeCleanup(t *testing.T) {
 		{"python -m server", "nerdctl"},
 		{"node server.js", "finch"},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(fmt.Sprintf("server=%s,runtime=%s", tc.serverName, tc.runtime), func(t *testing.T) {
 			volumeManager := NewVolumeManagerWithRuntime(config, tc.runtime)
-			
+
 			// Create ephemeral volume
 			volumeName, err := volumeManager.CreateEphemeralVolume(tc.serverName, tc.runtime)
 			if err != nil {
 				t.Skipf("Cannot create ephemeral volume with runtime %s: %v", tc.runtime, err)
 			}
-			
+
 			// Verify volume name follows ephemeral pattern
 			if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
 				t.Errorf("Ephemeral volume name %s does not follow expected pattern mcp-ephemeral-*", volumeName)
 			}
-			
+
 			// Verify volume name contains timestamp
 			if !regexp.MustCompile(`-\d+$`).MatchString(volumeName) {
 				t.Errorf("Ephemeral volume name %s does not contain timestamp suffix", volumeName)
 			}
-			
+
 			// Verify volume exists
 			exists, err := volumeManager.commander.VolumeExists(volumeName)
 			if err != nil {
@@ -1297,13 +1299,13 @@ func TestProperty13_EphemeralVolumeCleanup(t *testing.T) {
 			if !exists {
 				t.Errorf("Ephemeral volume %s should exist after creation", volumeName)
 			}
-			
+
 			// Cleanup ephemeral volume (simulating container exit)
 			err = volumeManager.CleanupEphemeralVolume(volumeName)
 			if err != nil {
 				t.Skipf("Cannot cleanup ephemeral volume with runtime %s: %v", tc.runtime, err)
 			}
-			
+
 			// Verify volume no longer exists
 			exists, err = volumeManager.commander.VolumeExists(volumeName)
 			if err != nil {
@@ -1315,13 +1317,14 @@ func TestProperty13_EphemeralVolumeCleanup(t *testing.T) {
 		})
 	}
 }
+
 // Unit tests for ephemeral volume naming
 // Test unique timestamp-based naming and cleanup behavior
 // Requirements: 6.4, 6.5
 func TestEphemeralVolumeNaming(t *testing.T) {
 	config := &Config{EphemeralMode: true}
 	volumeManager := NewVolumeManagerWithRuntime(config, "docker")
-	
+
 	testCases := []struct {
 		name       string
 		serverName string
@@ -1348,11 +1351,11 @@ func TestEphemeralVolumeNaming(t *testing.T) {
 			expected:   "mcp-ephemeral-node-server-js-",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			volumeName := volumeManager.CreateEphemeralVolumeName(tc.serverName)
-			
+
 			// Verify it starts with expected prefix (or truncated version)
 			if !strings.HasPrefix(volumeName, tc.expected) {
 				// For truncated names, just check it starts with mcp-ephemeral-
@@ -1360,17 +1363,17 @@ func TestEphemeralVolumeNaming(t *testing.T) {
 					t.Errorf("Expected volume name to start with mcp-ephemeral-, got %s", volumeName)
 				}
 			}
-			
+
 			// Verify it contains timestamp suffix
 			if !regexp.MustCompile(`-\d+$`).MatchString(volumeName) {
 				t.Errorf("Volume name %s should end with timestamp", volumeName)
 			}
-			
+
 			// Verify it follows ephemeral pattern
 			if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
 				t.Errorf("Volume name %s should start with mcp-ephemeral-", volumeName)
 			}
-			
+
 			// Verify length constraint (64 characters max)
 			if len(volumeName) > 64 {
 				t.Errorf("Volume name %s exceeds 64 character limit (length: %d)", volumeName, len(volumeName))
@@ -1384,19 +1387,19 @@ func TestEphemeralVolumeNaming(t *testing.T) {
 func TestEphemeralVolumeUniqueness(t *testing.T) {
 	config := &Config{EphemeralMode: true}
 	volumeManager := NewVolumeManagerWithRuntime(config, "docker")
-	
+
 	serverName := "uvx test-server"
-	
+
 	// Generate multiple volume names in quick succession
 	var volumeNames []string
 	for i := 0; i < 5; i++ { // Reduced to 5 iterations for faster test
 		volumeName := volumeManager.CreateEphemeralVolumeName(serverName)
 		volumeNames = append(volumeNames, volumeName)
-		
+
 		// Small delay to ensure different timestamps (nanosecond precision should be enough)
 		time.Sleep(10 * time.Nanosecond)
 	}
-	
+
 	// Verify all names are unique
 	seen := make(map[string]bool)
 	for _, name := range volumeNames {
@@ -1405,7 +1408,7 @@ func TestEphemeralVolumeUniqueness(t *testing.T) {
 		}
 		seen[name] = true
 	}
-	
+
 	// Verify all names follow the pattern
 	for _, name := range volumeNames {
 		if !strings.HasPrefix(name, "mcp-ephemeral-") {
@@ -1422,7 +1425,7 @@ func TestEphemeralVolumeUniqueness(t *testing.T) {
 func TestEphemeralVolumeCleanupBehavior(t *testing.T) {
 	config := &Config{EphemeralMode: true}
 	volumeManager := NewVolumeManagerWithRuntime(config, "docker")
-	
+
 	// Test cleanup validation - should only cleanup ephemeral volumes
 	testCases := []struct {
 		name        string
@@ -1445,11 +1448,11 @@ func TestEphemeralVolumeCleanupBehavior(t *testing.T) {
 			shouldError: true,
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := volumeManager.CleanupEphemeralVolume(tc.volumeName)
-			
+
 			if tc.shouldError {
 				if err == nil {
 					t.Errorf("Expected error when trying to cleanup non-ephemeral volume %s", tc.volumeName)
@@ -1457,9 +1460,9 @@ func TestEphemeralVolumeCleanupBehavior(t *testing.T) {
 			} else {
 				// For valid ephemeral volumes, we expect either success or a "volume not found" error
 				// since we're not actually creating the volume in this test
-				if err != nil && !strings.Contains(err.Error(), "not found") && 
-				   !strings.Contains(err.Error(), "no such volume") && 
-				   !strings.Contains(err.Error(), "exit status 1") {
+				if err != nil && !strings.Contains(err.Error(), "not found") &&
+					!strings.Contains(err.Error(), "no such volume") &&
+					!strings.Contains(err.Error(), "exit status 1") {
 					t.Errorf("Unexpected error cleaning up ephemeral volume %s: %v", tc.volumeName, err)
 				}
 			}
@@ -1472,27 +1475,27 @@ func TestEphemeralVolumeCleanupBehavior(t *testing.T) {
 func TestEphemeralVolumeNameTruncation(t *testing.T) {
 	config := &Config{EphemeralMode: true}
 	volumeManager := NewVolumeManagerWithRuntime(config, "docker")
-	
+
 	// Create a very long server name that would exceed 64 characters
 	longServerName := "uvx very-long-server-name-that-exceeds-the-maximum-allowed-length-for-volume-names-in-container-runtimes"
-	
+
 	volumeName := volumeManager.CreateEphemeralVolumeName(longServerName)
-	
+
 	// Verify length constraint
 	if len(volumeName) > 64 {
 		t.Errorf("Volume name %s exceeds 64 character limit (length: %d)", volumeName, len(volumeName))
 	}
-	
+
 	// Verify it still follows ephemeral pattern
 	if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
 		t.Errorf("Truncated volume name %s should still start with mcp-ephemeral-", volumeName)
 	}
-	
+
 	// Verify it still contains timestamp
 	if !regexp.MustCompile(`-\d+$`).MatchString(volumeName) {
 		t.Errorf("Truncated volume name %s should still end with timestamp", volumeName)
 	}
-	
+
 	// Verify it contains hash for uniqueness when truncated
 	if len(longServerName) > 40 { // If original name was long enough to require truncation
 		// Should contain a hash component for uniqueness
@@ -1504,21 +1507,21 @@ func TestEphemeralVolumeNameTruncation(t *testing.T) {
 }
 
 // Property 8: User Mount Configuration
-// For any valid MCP_MOUNT specification, run-mcp should correctly parse, expand paths (including tilde expansion), 
+// For any valid MCP_MOUNT specification, run-mcp should correctly parse, expand paths (including tilde expansion),
 // and mount the specified host directories to container destinations with appropriate options
 func TestProperty8_UserMountConfiguration(t *testing.T) {
 	// **Feature: container-home-isolation, Property 8: User Mount Configuration**
 	// **Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.8**
-	
+
 	parser := NewUserMountParser()
-	
+
 	// Create temporary directories for testing
 	tempDir := t.TempDir()
 	testDir1 := filepath.Join(tempDir, "test1")
 	testDir2 := filepath.Join(tempDir, "test2")
 	os.MkdirAll(testDir1, 0755)
 	os.MkdirAll(testDir2, 0755)
-	
+
 	// Test cases for valid mount configurations
 	testCases := []struct {
 		name        string
@@ -1555,7 +1558,7 @@ func TestProperty8_UserMountConfiguration(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mounts, err := parser.ParseMountString(tc.mountString)
@@ -1563,32 +1566,32 @@ func TestProperty8_UserMountConfiguration(t *testing.T) {
 				t.Errorf("ParseMountString failed: %v", err)
 				return
 			}
-			
+
 			if len(mounts) != len(tc.expected) {
 				t.Errorf("Expected %d mounts, got %d", len(tc.expected), len(mounts))
 				return
 			}
-			
+
 			for i, mount := range mounts {
 				expected := tc.expected[i]
-				
+
 				// Normalize paths for comparison
 				expectedSource := filepath.Clean(expected.Source)
 				actualSource := filepath.Clean(mount.Source)
-				
+
 				if actualSource != expectedSource {
 					t.Errorf("Mount %d: expected source %s, got %s", i, expectedSource, actualSource)
 				}
-				
+
 				if mount.Destination != expected.Destination {
 					t.Errorf("Mount %d: expected destination %s, got %s", i, expected.Destination, mount.Destination)
 				}
-				
+
 				if mount.Options != expected.Options {
 					t.Errorf("Mount %d: expected options %s, got %s", i, expected.Options, mount.Options)
 				}
 			}
-			
+
 			// Validate all mounts
 			for _, mount := range mounts {
 				if err := parser.ValidateMount(mount); err != nil {
@@ -1597,18 +1600,18 @@ func TestProperty8_UserMountConfiguration(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test tilde expansion (Requirement 7.3)
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		t.Skip("Cannot get home directory for tilde expansion test")
 	}
-	
+
 	// Create a test directory in home for tilde expansion test
 	homeTestDir := filepath.Join(homeDir, ".mcp-test-mount")
 	os.MkdirAll(homeTestDir, 0755)
 	defer os.RemoveAll(homeTestDir)
-	
+
 	tildeTestCases := []struct {
 		name        string
 		mountString string
@@ -1625,7 +1628,7 @@ func TestProperty8_UserMountConfiguration(t *testing.T) {
 			expectedSrc: homeDir,
 		},
 	}
-	
+
 	for _, tc := range tildeTestCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mounts, err := parser.ParseMountString(tc.mountString)
@@ -1633,22 +1636,22 @@ func TestProperty8_UserMountConfiguration(t *testing.T) {
 				t.Errorf("ParseMountString failed: %v", err)
 				return
 			}
-			
+
 			if len(mounts) != 1 {
 				t.Errorf("Expected 1 mount, got %d", len(mounts))
 				return
 			}
-			
+
 			mount := mounts[0]
 			expectedSource := filepath.Clean(tc.expectedSrc)
 			actualSource := filepath.Clean(mount.Source)
-			
+
 			if actualSource != expectedSource {
 				t.Errorf("Tilde expansion failed: expected %s, got %s", expectedSource, actualSource)
 			}
 		})
 	}
-	
+
 	// Test Windows path conversion (Requirement 7.4)
 	if runtime.GOOS == "windows" {
 		windowsTestCases := []struct {
@@ -1667,25 +1670,25 @@ func TestProperty8_UserMountConfiguration(t *testing.T) {
 				expectedSrc: "/c/Users/test",
 			},
 		}
-		
+
 		for _, tc := range windowsTestCases {
 			t.Run(tc.name, func(t *testing.T) {
 				// Create the test directory
 				testPath := strings.ReplaceAll(tc.input[:strings.Index(tc.input, ":")], "/", "\\")
 				os.MkdirAll(testPath, 0755)
 				defer os.RemoveAll(testPath)
-				
+
 				mounts, err := parser.ParseMountString(tc.input)
 				if err != nil {
 					t.Errorf("ParseMountString failed: %v", err)
 					return
 				}
-				
+
 				if len(mounts) != 1 {
 					t.Errorf("Expected 1 mount, got %d", len(mounts))
 					return
 				}
-				
+
 				mount := mounts[0]
 				if mount.Source != tc.expectedSrc {
 					t.Errorf("Windows path conversion failed: expected %s, got %s", tc.expectedSrc, mount.Source)
@@ -1693,23 +1696,23 @@ func TestProperty8_UserMountConfiguration(t *testing.T) {
 			})
 		}
 	}
-	
+
 	// Test mount argument generation (Requirement 7.8)
 	testMounts := []Mount{
 		{Source: testDir1, Destination: "/data", Options: ""},
 		{Source: testDir2, Destination: "/config", Options: "ro"},
 	}
-	
+
 	args := parser.GetMountArgs(testMounts)
 	expectedArgs := []string{
 		"-v", fmt.Sprintf("%s:/data", testDir1),
 		"-v", fmt.Sprintf("%s:/config:ro", testDir2),
 	}
-	
+
 	if len(args) != len(expectedArgs) {
 		t.Errorf("Expected %d mount args, got %d", len(expectedArgs), len(args))
 	}
-	
+
 	for i, arg := range args {
 		if i < len(expectedArgs) && arg != expectedArgs[i] {
 			t.Errorf("Mount arg %d: expected %s, got %s", i, expectedArgs[i], arg)
@@ -1722,7 +1725,7 @@ func TestProperty8_UserMountConfiguration(t *testing.T) {
 // Requirements: 7.9, 7.10
 func TestMountParsingEdgeCases(t *testing.T) {
 	parser := NewUserMountParser()
-	
+
 	// Test invalid syntax cases
 	invalidSyntaxCases := []struct {
 		name        string
@@ -1773,11 +1776,11 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			errorMsg:    "",
 		},
 	}
-	
+
 	for _, tc := range invalidSyntaxCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mounts, err := parser.ParseMountString(tc.mountString)
-			
+
 			if tc.expectError {
 				if err == nil {
 					t.Errorf("Expected error for invalid syntax: %s", tc.mountString)
@@ -1795,11 +1798,11 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test missing paths validation
 	tempDir := t.TempDir()
 	nonExistentPath := filepath.Join(tempDir, "nonexistent")
-	
+
 	missingPathCases := []struct {
 		name        string
 		mountString string
@@ -1816,11 +1819,11 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			expectError: false,
 		},
 	}
-	
+
 	for _, tc := range missingPathCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mounts, err := parser.ParseMountString(tc.mountString)
-			
+
 			if tc.expectError {
 				// With the fix, validation now happens in ParseMountString
 				if err == nil {
@@ -1833,12 +1836,12 @@ func TestMountParsingEdgeCases(t *testing.T) {
 					t.Errorf("ParseMountString failed: %v", err)
 					return
 				}
-				
+
 				if len(mounts) != 1 {
 					t.Errorf("Expected 1 mount, got %d", len(mounts))
 					return
 				}
-				
+
 				// ValidateMount should still pass for other validations
 				err = parser.ValidateMount(mounts[0])
 				if err != nil {
@@ -1847,13 +1850,13 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test Windows path conversion edge cases
 	// Helper function to test Windows path conversion regardless of OS
 	convertWindowsPathForTest := func(path string) string {
 		// Convert backslashes to forward slashes
 		path = strings.ReplaceAll(path, "\\", "/")
-		
+
 		// Handle Windows drive letters (C: -> /c)
 		if len(path) >= 2 && path[1] == ':' {
 			drive := strings.ToLower(string(path[0]))
@@ -1865,10 +1868,10 @@ func TestMountParsingEdgeCases(t *testing.T) {
 				return "/" + drive + path[2:]
 			}
 		}
-		
+
 		return path
 	}
-	
+
 	windowsPathCases := []struct {
 		name     string
 		input    string
@@ -1905,7 +1908,7 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			expected: "relative/path",
 		},
 	}
-	
+
 	for _, tc := range windowsPathCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := convertWindowsPathForTest(tc.input)
@@ -1914,7 +1917,7 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test tilde expansion edge cases
 	tildeExpansionCases := []struct {
 		name     string
@@ -1942,16 +1945,16 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			input: "/path/~/middle",
 		},
 	}
-	
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		t.Skip("Cannot get home directory for tilde expansion tests")
 	}
-	
+
 	for _, tc := range tildeExpansionCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := parser.ExpandTildePath(tc.input)
-			
+
 			switch tc.input {
 			case "~":
 				if result != homeDir {
@@ -1970,7 +1973,7 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test mount option validation
 	optionValidationCases := []struct {
 		name        string
@@ -2008,7 +2011,7 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			expectError: false,
 		},
 	}
-	
+
 	for _, tc := range optionValidationCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mount := Mount{
@@ -2016,9 +2019,9 @@ func TestMountParsingEdgeCases(t *testing.T) {
 				Destination: "/dest",
 				Options:     tc.options,
 			}
-			
+
 			err := parser.ValidateMount(mount)
-			
+
 			if tc.expectError {
 				if err == nil {
 					t.Errorf("Expected validation error for options: %s", tc.options)
@@ -2030,7 +2033,7 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test error message formatting
 	errorMessageCases := []struct {
 		name        string
@@ -2048,11 +2051,11 @@ func TestMountParsingEdgeCases(t *testing.T) {
 			expectMsg:   "Example: MCP_MOUNT=~/.aws:/home/mcp/.aws:ro,~/data:/data",
 		},
 	}
-	
+
 	for _, tc := range errorMessageCases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := parser.ParseMountString(tc.mountString)
-			
+
 			if err == nil {
 				t.Errorf("Expected error for invalid syntax: %s", tc.mountString)
 			} else if !strings.Contains(err.Error(), tc.expectMsg) {
@@ -2067,7 +2070,7 @@ func TestMountParsingEdgeCases(t *testing.T) {
 func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 	// **Feature: container-home-isolation, Property 9: Home Directory Override Behavior**
 	// **Validates: Requirements 7.6, 7.7**
-	
+
 	// Test MCP_BIND_HOME override (Requirement 7.6)
 	t.Run("MCP_BIND_HOME_override", func(t *testing.T) {
 		// Set up environment
@@ -2079,13 +2082,13 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 				os.Setenv("MCP_BIND_HOME", originalBindHome)
 			}
 		}()
-		
+
 		// Test cases for MCP_BIND_HOME
 		bindHomeCases := []struct {
-			name        string
-			bindHome    string
-			serverName  string
-			shouldBind  bool
+			name       string
+			bindHome   string
+			serverName string
+			shouldBind bool
 		}{
 			{
 				name:       "bind_home_true",
@@ -2118,31 +2121,31 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 				shouldBind: true,
 			},
 		}
-		
+
 		for _, tc := range bindHomeCases {
 			t.Run(tc.name, func(t *testing.T) {
 				os.Setenv("MCP_BIND_HOME", tc.bindHome)
-				
+
 				homeOverrideHandler := NewHomeOverrideHandler()
 				homeMount := homeOverrideHandler.GetHomeMount(strings.Fields(tc.serverName))
-				
+
 				if tc.shouldBind {
 					// Should return a bind mount path
 					if homeMount == "" {
 						t.Errorf("Expected bind mount path for MCP_BIND_HOME=%s, got empty", tc.bindHome)
 					}
-					
+
 					// Should be in ~/.run-mcp/<volume-name>/ format
 					homeDir, err := os.UserHomeDir()
 					if err != nil {
 						t.Skip("Cannot get home directory")
 					}
-					
+
 					expectedPrefix := filepath.Join(homeDir, ".run-mcp")
 					if !strings.HasPrefix(homeMount, expectedPrefix) {
 						t.Errorf("Expected bind mount to start with %s, got %s", expectedPrefix, homeMount)
 					}
-					
+
 					// Should contain sanitized volume name
 					volumeName := sanitizeVolumeName(strings.Fields(tc.serverName))
 					expectedPath := filepath.Join(homeDir, ".run-mcp", volumeName)
@@ -2158,7 +2161,7 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 			})
 		}
 	})
-	
+
 	// Test MCP_HOME_PATH override (Requirement 7.7)
 	t.Run("MCP_HOME_PATH_override", func(t *testing.T) {
 		// Set up environment
@@ -2170,19 +2173,19 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 				os.Setenv("MCP_HOME_PATH", originalHomePath)
 			}
 		}()
-		
+
 		// Create temporary directories for testing
 		tempDir := t.TempDir()
 		testPath1 := filepath.Join(tempDir, "custom-home1")
 		testPath2 := filepath.Join(tempDir, "custom-home2")
 		os.MkdirAll(testPath1, 0755)
 		os.MkdirAll(testPath2, 0755)
-		
+
 		// Test cases for MCP_HOME_PATH
 		homePathCases := []struct {
-			name        string
-			homePath    string
-			serverName  string
+			name         string
+			homePath     string
+			serverName   string
 			expectedPath string
 		}{
 			{
@@ -2204,14 +2207,14 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 				expectedPath: "",
 			},
 		}
-		
+
 		for _, tc := range homePathCases {
 			t.Run(tc.name, func(t *testing.T) {
 				os.Setenv("MCP_HOME_PATH", tc.homePath)
-				
+
 				homeOverrideHandler := NewHomeOverrideHandler()
 				homeMount := homeOverrideHandler.GetHomeMount(strings.Fields(tc.serverName))
-				
+
 				if tc.expectedPath == "" {
 					// Should return empty (use default behavior)
 					if homeMount != "" {
@@ -2226,7 +2229,7 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 			})
 		}
 	})
-	
+
 	// Test precedence: MCP_HOME_PATH takes precedence over MCP_BIND_HOME
 	t.Run("precedence_test", func(t *testing.T) {
 		// Set up environment
@@ -2244,26 +2247,26 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 				os.Setenv("MCP_HOME_PATH", originalHomePath)
 			}
 		}()
-		
+
 		// Create temporary directory for testing
 		tempDir := t.TempDir()
 		customPath := filepath.Join(tempDir, "custom-home")
 		os.MkdirAll(customPath, 0755)
-		
+
 		// Set both environment variables
 		os.Setenv("MCP_BIND_HOME", "true")
 		os.Setenv("MCP_HOME_PATH", customPath)
-		
+
 		homeOverrideHandler := NewHomeOverrideHandler()
 		serverName := "uvx test-server"
 		homeMount := homeOverrideHandler.GetHomeMount(strings.Fields(serverName))
-		
+
 		// MCP_HOME_PATH should take precedence
 		if homeMount != customPath {
 			t.Errorf("Expected MCP_HOME_PATH to take precedence, got %s instead of %s", homeMount, customPath)
 		}
 	})
-	
+
 	// Test tilde expansion in MCP_HOME_PATH
 	t.Run("tilde_expansion", func(t *testing.T) {
 		// Set up environment
@@ -2275,31 +2278,31 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 				os.Setenv("MCP_HOME_PATH", originalHomePath)
 			}
 		}()
-		
+
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			t.Skip("Cannot get home directory for tilde expansion test")
 		}
-		
+
 		// Create test directory in home
 		testSubDir := ".mcp-test-home"
 		testPath := filepath.Join(homeDir, testSubDir)
 		os.MkdirAll(testPath, 0755)
 		defer os.RemoveAll(testPath)
-		
+
 		// Test tilde expansion
 		os.Setenv("MCP_HOME_PATH", "~/"+testSubDir)
-		
+
 		homeOverrideHandler := NewHomeOverrideHandler()
 		serverName := "uvx test-server"
 		homeMount := homeOverrideHandler.GetHomeMount(strings.Fields(serverName))
-		
+
 		expectedPath := testPath
 		if homeMount != expectedPath {
 			t.Errorf("Expected tilde expansion to %s, got %s", expectedPath, homeMount)
 		}
 	})
-	
+
 	// Test directory creation for bind home
 	t.Run("bind_home_directory_creation", func(t *testing.T) {
 		// Set up environment
@@ -2311,41 +2314,41 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 				os.Setenv("MCP_BIND_HOME", originalBindHome)
 			}
 		}()
-		
+
 		os.Setenv("MCP_BIND_HOME", "true")
-		
+
 		homeOverrideHandler := NewHomeOverrideHandler()
 		serverName := "uvx test-server-creation"
 		volumeName := sanitizeVolumeName(strings.Fields(serverName))
-		
+
 		// Create bind home directory
 		bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
 		if err != nil {
 			t.Errorf("CreateBindHomeDir failed: %v", err)
 		}
-		
+
 		// Verify directory was created
 		if _, err := os.Stat(bindPath); os.IsNotExist(err) {
 			t.Errorf("Bind home directory was not created: %s", bindPath)
 		}
-		
+
 		// Verify path format
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			t.Skip("Cannot get home directory")
 		}
-		
+
 		expectedPath := filepath.Join(homeDir, ".run-mcp", volumeName)
 		if bindPath != expectedPath {
 			t.Errorf("Expected bind path %s, got %s", expectedPath, bindPath)
 		}
-		
+
 		// Verify directory is writable
 		testFile := filepath.Join(bindPath, "test-write")
 		if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
 			t.Errorf("Bind home directory is not writable: %v", err)
 		}
-		
+
 		// Clean up
 		os.Remove(testFile)
 		os.RemoveAll(filepath.Join(homeDir, ".run-mcp"))
@@ -2357,10 +2360,10 @@ func TestProperty9_HomeDirectoryOverrideBehavior(t *testing.T) {
 // Requirements: 7.6, 7.7
 func TestBindHomeDirectoryCreation(t *testing.T) {
 	homeOverrideHandler := NewHomeOverrideHandler()
-	
+
 	t.Run("create_bind_home_directory", func(t *testing.T) {
 		volumeName := "test-volume-bind-home"
-		
+
 		// Clean up any existing directory
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -2368,31 +2371,31 @@ func TestBindHomeDirectoryCreation(t *testing.T) {
 		}
 		runMcpDir := filepath.Join(homeDir, ".run-mcp")
 		os.RemoveAll(runMcpDir)
-		
+
 		// Create bind home directory
 		bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
 		if err != nil {
 			t.Errorf("CreateBindHomeDir failed: %v", err)
 		}
-		
+
 		// Verify directory was created
 		if _, err := os.Stat(bindPath); os.IsNotExist(err) {
 			t.Errorf("Bind home directory was not created: %s", bindPath)
 		}
-		
+
 		// Verify path format
 		expectedPath := filepath.Join(homeDir, ".run-mcp", volumeName)
 		if bindPath != expectedPath {
 			t.Errorf("Expected bind path %s, got %s", expectedPath, bindPath)
 		}
-		
+
 		// Clean up
 		os.RemoveAll(runMcpDir)
 	})
-	
+
 	t.Run("directory_permissions", func(t *testing.T) {
 		volumeName := "test-volume-permissions"
-		
+
 		// Clean up any existing directory
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -2400,42 +2403,42 @@ func TestBindHomeDirectoryCreation(t *testing.T) {
 		}
 		runMcpDir := filepath.Join(homeDir, ".run-mcp")
 		os.RemoveAll(runMcpDir)
-		
+
 		// Create bind home directory
 		bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
 		if err != nil {
 			t.Errorf("CreateBindHomeDir failed: %v", err)
 		}
-		
+
 		// Test write permissions
 		testFile := filepath.Join(bindPath, "test-write")
 		if err := os.WriteFile(testFile, []byte("test content"), 0644); err != nil {
 			t.Errorf("Bind home directory is not writable: %v", err)
 		}
-		
+
 		// Test read permissions
 		content, err := os.ReadFile(testFile)
 		if err != nil {
 			t.Errorf("Cannot read from bind home directory: %v", err)
 		}
-		
+
 		if string(content) != "test content" {
 			t.Errorf("Expected 'test content', got '%s'", string(content))
 		}
-		
+
 		// Test subdirectory creation
 		subDir := filepath.Join(bindPath, "subdir")
 		if err := os.MkdirAll(subDir, 0755); err != nil {
 			t.Errorf("Cannot create subdirectory in bind home: %v", err)
 		}
-		
+
 		// Clean up
 		os.RemoveAll(runMcpDir)
 	})
-	
+
 	t.Run("nested_directory_creation", func(t *testing.T) {
 		volumeName := "test-volume-nested"
-		
+
 		// Clean up any existing directory
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -2443,30 +2446,30 @@ func TestBindHomeDirectoryCreation(t *testing.T) {
 		}
 		runMcpDir := filepath.Join(homeDir, ".run-mcp")
 		os.RemoveAll(runMcpDir)
-		
+
 		// Create bind home directory (should create nested .run-mcp directory)
 		bindPath, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
 		if err != nil {
 			t.Errorf("CreateBindHomeDir failed: %v", err)
 		}
-		
+
 		// Verify parent directory was created
 		if _, err := os.Stat(runMcpDir); os.IsNotExist(err) {
 			t.Errorf("Parent .run-mcp directory was not created: %s", runMcpDir)
 		}
-		
+
 		// Verify target directory was created
 		if _, err := os.Stat(bindPath); os.IsNotExist(err) {
 			t.Errorf("Target bind directory was not created: %s", bindPath)
 		}
-		
+
 		// Clean up
 		os.RemoveAll(runMcpDir)
 	})
-	
+
 	t.Run("idempotent_creation", func(t *testing.T) {
 		volumeName := "test-volume-idempotent"
-		
+
 		// Clean up any existing directory
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -2474,40 +2477,40 @@ func TestBindHomeDirectoryCreation(t *testing.T) {
 		}
 		runMcpDir := filepath.Join(homeDir, ".run-mcp")
 		os.RemoveAll(runMcpDir)
-		
+
 		// Create bind home directory first time
 		bindPath1, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
 		if err != nil {
 			t.Errorf("First CreateBindHomeDir failed: %v", err)
 		}
-		
+
 		// Create test file
 		testFile := filepath.Join(bindPath1, "existing-file")
 		if err := os.WriteFile(testFile, []byte("existing content"), 0644); err != nil {
 			t.Errorf("Cannot create test file: %v", err)
 		}
-		
+
 		// Create bind home directory second time (should be idempotent)
 		bindPath2, err := homeOverrideHandler.CreateBindHomeDir(volumeName)
 		if err != nil {
 			t.Errorf("Second CreateBindHomeDir failed: %v", err)
 		}
-		
+
 		// Verify paths are the same
 		if bindPath1 != bindPath2 {
 			t.Errorf("Expected same path, got %s and %s", bindPath1, bindPath2)
 		}
-		
+
 		// Verify existing file is preserved
 		content, err := os.ReadFile(testFile)
 		if err != nil {
 			t.Errorf("Existing file was not preserved: %v", err)
 		}
-		
+
 		if string(content) != "existing content" {
 			t.Errorf("Expected 'existing content', got '%s'", string(content))
 		}
-		
+
 		// Clean up
 		os.RemoveAll(runMcpDir)
 	})
@@ -2517,24 +2520,24 @@ func TestBindHomeDirectoryCreation(t *testing.T) {
 // Requirements: 7.6, 7.7
 func TestHomePathExpansionAndValidation(t *testing.T) {
 	homeOverrideHandler := NewHomeOverrideHandler()
-	
+
 	t.Run("validate_custom_home_path", func(t *testing.T) {
 		// Create temporary directory for testing
 		tempDir := t.TempDir()
-		
+
 		// Test valid directory
 		err := homeOverrideHandler.ValidateCustomHomePath(tempDir)
 		if err != nil {
 			t.Errorf("ValidateCustomHomePath failed for valid directory: %v", err)
 		}
-		
+
 		// Test non-existent directory
 		nonExistentPath := filepath.Join(tempDir, "non-existent")
 		err = homeOverrideHandler.ValidateCustomHomePath(nonExistentPath)
 		if err == nil {
 			t.Errorf("Expected error for non-existent directory, got nil")
 		}
-		
+
 		// Test file instead of directory
 		testFile := filepath.Join(tempDir, "test-file")
 		os.WriteFile(testFile, []byte("test"), 0644)
@@ -2542,25 +2545,25 @@ func TestHomePathExpansionAndValidation(t *testing.T) {
 		if err == nil {
 			t.Errorf("Expected error for file instead of directory, got nil")
 		}
-		
+
 		// Test empty path
 		err = homeOverrideHandler.ValidateCustomHomePath("")
 		if err == nil {
 			t.Errorf("Expected error for empty path, got nil")
 		}
 	})
-	
+
 	t.Run("tilde_expansion_in_validation", func(t *testing.T) {
 		// Create test directory in home
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			t.Skip("Cannot get home directory")
 		}
-		
+
 		testDir := filepath.Join(homeDir, "test-mcp-home-validation")
 		os.MkdirAll(testDir, 0755)
 		defer os.RemoveAll(testDir)
-		
+
 		// Test tilde expansion in validation
 		tildeTestDir := "~/test-mcp-home-validation"
 		err = homeOverrideHandler.ValidateCustomHomePath(tildeTestDir)
@@ -2568,22 +2571,22 @@ func TestHomePathExpansionAndValidation(t *testing.T) {
 			t.Errorf("ValidateCustomHomePath failed for tilde path: %v", err)
 		}
 	})
-	
+
 	t.Run("write_permission_validation", func(t *testing.T) {
 		// Create temporary directory for testing
 		tempDir := t.TempDir()
-		
+
 		// Test writable directory
 		err := homeOverrideHandler.ValidateCustomHomePath(tempDir)
 		if err != nil {
 			t.Errorf("ValidateCustomHomePath failed for writable directory: %v", err)
 		}
-		
+
 		// Create read-only directory (if possible on this platform)
 		readOnlyDir := filepath.Join(tempDir, "readonly")
-		os.MkdirAll(readOnlyDir, 0555) // Read and execute only
+		os.MkdirAll(readOnlyDir, 0555)    // Read and execute only
 		defer os.Chmod(readOnlyDir, 0755) // Restore permissions for cleanup
-		
+
 		err = homeOverrideHandler.ValidateCustomHomePath(readOnlyDir)
 		// Note: This test might not work on all platforms (e.g., Windows)
 		// but it's still valuable where it does work
@@ -2592,6 +2595,7 @@ func TestHomePathExpansionAndValidation(t *testing.T) {
 		}
 	})
 }
+
 // Test environment variable filtering for MCP configuration variables
 // Requirements: 3.5
 func TestMCPConfigurationVariableFiltering(t *testing.T) {
@@ -2600,7 +2604,7 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 	originalBindHome := os.Getenv("MCP_BIND_HOME")
 	originalHomePath := os.Getenv("MCP_HOME_PATH")
 	originalOtherMCP := os.Getenv("MCP_OTHER_VAR")
-	
+
 	defer func() {
 		// Restore original environment
 		if originalMount == "" {
@@ -2624,17 +2628,17 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 			os.Setenv("MCP_OTHER_VAR", originalOtherMCP)
 		}
 	}()
-	
+
 	// Set test environment variables
 	os.Setenv("MCP_MOUNT", "~/test:/test")
 	os.Setenv("MCP_BIND_HOME", "true")
 	os.Setenv("MCP_HOME_PATH", "/custom/home")
 	os.Setenv("MCP_OTHER_VAR", "should_pass_through")
-	
+
 	// Create environment filter
 	envFilter := NewEnvFilter()
 	filteredArgs := envFilter.GetFilteredEnvArgs()
-	
+
 	// Convert args to map for easier checking
 	envMap := make(map[string]string)
 	for i := 0; i < len(filteredArgs); i += 2 {
@@ -2645,20 +2649,20 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 			}
 		}
 	}
-	
+
 	// Verify MCP configuration variables are filtered out
 	if _, exists := envMap["MCP_MOUNT"]; exists {
 		t.Errorf("MCP_MOUNT should be filtered out but was passed through")
 	}
-	
+
 	if _, exists := envMap["MCP_BIND_HOME"]; exists {
 		t.Errorf("MCP_BIND_HOME should be filtered out but was passed through")
 	}
-	
+
 	if _, exists := envMap["MCP_HOME_PATH"]; exists {
 		t.Errorf("MCP_HOME_PATH should be filtered out but was passed through")
 	}
-	
+
 	// Verify other MCP variables are still passed through
 	if value, exists := envMap["MCP_OTHER_VAR"]; !exists {
 		t.Errorf("MCP_OTHER_VAR should be passed through but was filtered out")
@@ -2666,13 +2670,14 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 		t.Errorf("Expected MCP_OTHER_VAR=should_pass_through, got %s", value)
 	}
 }
+
 // Property 12: Backward Compatibility
-// For any existing MCP server command that worked before volume isolation, 
+// For any existing MCP server command that worked before volume isolation,
 // the command should continue to work transparently with automatic volume creation
 func TestProperty12_BackwardCompatibility(t *testing.T) {
 	// **Feature: container-home-isolation, Property 12: Backward Compatibility**
 	// **Validates: Requirements 5.1, 5.4**
-	
+
 	// Test cases representing existing MCP server commands that should continue working
 	testCases := []struct {
 		name        string
@@ -2711,7 +2716,7 @@ func TestProperty12_BackwardCompatibility(t *testing.T) {
 			description: "Complex commands with multiple flags should work transparently",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			config := &Config{
@@ -2719,18 +2724,18 @@ func TestProperty12_BackwardCompatibility(t *testing.T) {
 				PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
 				DataDir:     t.TempDir(),
 			}
-			
+
 			// Build container command - this should work without errors
 			cmd, volumeName, err := buildContainerCommand(config, "docker", tc.language, tc.args)
 			if err != nil {
 				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
 			}
-			
+
 			// Verify command was built successfully
 			if cmd == nil {
 				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
 			}
-			
+
 			// Verify volume name was generated (unless using home override)
 			homeMount := os.Getenv("MCP_BIND_HOME")
 			customHome := os.Getenv("MCP_HOME_PATH")
@@ -2739,27 +2744,27 @@ func TestProperty12_BackwardCompatibility(t *testing.T) {
 				if volumeName == "" {
 					t.Errorf("Expected volume name to be generated for %s", tc.description)
 				}
-				
+
 				// Volume name should follow expected pattern
 				if !strings.HasPrefix(volumeName, "mcp-home-") && !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
 					t.Errorf("Volume name should follow expected pattern, got: %s", volumeName)
 				}
 			}
-			
+
 			// Verify container arguments include expected elements
 			args := cmd.Args
-			
+
 			// Should have docker/runtime command
 			if len(args) == 0 {
 				t.Fatalf("Command args should not be empty for %s", tc.description)
 			}
-			
+
 			// Should include run, -i, --rm flags
 			foundRun := false
 			foundInteractive := false
 			foundRemove := false
 			foundVolumeMount := false
-			
+
 			for i, arg := range args {
 				switch arg {
 				case "run":
@@ -2774,7 +2779,7 @@ func TestProperty12_BackwardCompatibility(t *testing.T) {
 					}
 				}
 			}
-			
+
 			if !foundRun {
 				t.Errorf("Command should include 'run' argument for %s", tc.description)
 			}
@@ -2787,7 +2792,7 @@ func TestProperty12_BackwardCompatibility(t *testing.T) {
 			if !foundVolumeMount {
 				t.Errorf("Command should include volume mount to /home/mcp for %s", tc.description)
 			}
-			
+
 			// Verify the original command arguments are preserved at the end
 			// Find the image argument first
 			imageIndex := -1
@@ -2798,19 +2803,19 @@ func TestProperty12_BackwardCompatibility(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if imageIndex == -1 {
 				t.Errorf("Expected image %s not found in command args for %s", expectedImage, tc.description)
 			} else {
 				// Arguments after the image should match the original command
 				commandArgs := args[imageIndex+1:]
-				
+
 				// Handle explicit runtime specification
 				expectedArgs := tc.args
 				if len(tc.args) >= 2 && (tc.args[0] == "python" || tc.args[0] == "node" || tc.args[0] == "nodejs") {
 					expectedArgs = tc.args[1:]
 				}
-				
+
 				if len(commandArgs) != len(expectedArgs) {
 					t.Errorf("Command args length mismatch for %s: expected %d, got %d", tc.description, len(expectedArgs), len(commandArgs))
 				} else {
@@ -2824,6 +2829,7 @@ func TestProperty12_BackwardCompatibility(t *testing.T) {
 		})
 	}
 }
+
 // Integration tests for container execution
 // Test complete container startup with volume mounts and environment variable passthrough
 // Requirements: 3.1, 3.3, 3.5
@@ -2834,7 +2840,7 @@ func TestContainerExecutionIntegration(t *testing.T) {
 	originalMount := os.Getenv("MCP_MOUNT")
 	originalBindHome := os.Getenv("MCP_BIND_HOME")
 	originalHomePath := os.Getenv("MCP_HOME_PATH")
-	
+
 	defer func() {
 		// Restore original environment
 		if originalAWS == "" {
@@ -2863,7 +2869,7 @@ func TestContainerExecutionIntegration(t *testing.T) {
 			os.Setenv("MCP_HOME_PATH", originalHomePath)
 		}
 	}()
-	
+
 	testCases := []struct {
 		name        string
 		args        []string
@@ -2897,26 +2903,26 @@ func TestContainerExecutionIntegration(t *testing.T) {
 			args:     []string{"python", "uvx", "awslabs.aws-api-mcp-server@latest"},
 			language: "python",
 			envVars: map[string]string{
-				"AWS_REGION":           "us-east-1",
-				"AWS_ACCESS_KEY_ID":    "test-key",
+				"AWS_REGION":            "us-east-1",
+				"AWS_ACCESS_KEY_ID":     "test-key",
 				"AWS_SECRET_ACCESS_KEY": "test-secret",
-				"ANTHROPIC_API_KEY":    "test-anthropic",
+				"ANTHROPIC_API_KEY":     "test-anthropic",
 			},
 			description: "Python command with multiple environment variables",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Clear MCP_MOUNT for each test case
 			os.Unsetenv("MCP_MOUNT")
-			
+
 			// Set up test environment
 			for key, value := range tc.envVars {
 				os.Setenv(key, value)
 				defer os.Unsetenv(key)
 			}
-			
+
 			if tc.mountConfig != "" {
 				// Create test directory for mount source
 				testDir := t.TempDir()
@@ -2925,29 +2931,29 @@ func TestContainerExecutionIntegration(t *testing.T) {
 				os.Setenv("MCP_MOUNT", actualMountConfig)
 				defer os.Unsetenv("MCP_MOUNT")
 			}
-			
+
 			config := &Config{
 				NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
 				PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
 				DataDir:     t.TempDir(),
 			}
-			
+
 			// Build container command
 			cmd, volumeName, err := buildContainerCommand(config, "docker", tc.language, tc.args)
 			if err != nil {
 				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
 			}
-			
+
 			// Verify command structure
 			if cmd == nil {
 				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
 			}
-			
+
 			args := cmd.Args
 			if len(args) == 0 {
 				t.Fatalf("Command args should not be empty for %s", tc.description)
 			}
-			
+
 			// Test 1: Verify volume mount is present
 			foundHomeMount := false
 			for i, arg := range args {
@@ -2961,7 +2967,7 @@ func TestContainerExecutionIntegration(t *testing.T) {
 			if !foundHomeMount {
 				t.Errorf("Expected home volume mount to /home/mcp for %s", tc.description)
 			}
-			
+
 			// Test 2: Verify environment variables are passed through correctly
 			envFound := make(map[string]bool)
 			for i, arg := range args {
@@ -2971,7 +2977,7 @@ func TestContainerExecutionIntegration(t *testing.T) {
 					if len(parts) == 2 {
 						envKey := parts[0]
 						envValue := parts[1]
-						
+
 						// Check if this is one of our test environment variables
 						if expectedValue, exists := tc.envVars[envKey]; exists {
 							if envValue == expectedValue {
@@ -2980,7 +2986,7 @@ func TestContainerExecutionIntegration(t *testing.T) {
 								t.Errorf("Environment variable %s has wrong value: expected %s, got %s", envKey, expectedValue, envValue)
 							}
 						}
-						
+
 						// Verify MCP configuration variables are NOT passed through
 						if envKey == "MCP_MOUNT" || envKey == "MCP_BIND_HOME" || envKey == "MCP_HOME_PATH" {
 							t.Errorf("MCP configuration variable %s should not be passed to container", envKey)
@@ -2988,14 +2994,14 @@ func TestContainerExecutionIntegration(t *testing.T) {
 					}
 				}
 			}
-			
+
 			// Verify all expected environment variables were found
 			for envKey := range tc.envVars {
 				if !envFound[envKey] {
 					t.Errorf("Expected environment variable %s not found in container args for %s", envKey, tc.description)
 				}
 			}
-			
+
 			// Test 3: Verify user mounts are included when specified
 			if tc.mountConfig != "" {
 				foundUserMount := false
@@ -3013,12 +3019,12 @@ func TestContainerExecutionIntegration(t *testing.T) {
 					t.Errorf("Expected user mount not found in container args for %s", tc.description)
 				}
 			}
-			
+
 			// Test 4: Verify volume name generation
 			if volumeName == "" && os.Getenv("MCP_BIND_HOME") == "" && os.Getenv("MCP_HOME_PATH") == "" {
 				t.Errorf("Expected volume name to be generated for %s", tc.description)
 			}
-			
+
 			// Test 5: Verify image selection
 			expectedImage, _ := config.GetImageForLanguage(tc.language)
 			foundImage := false
@@ -3031,7 +3037,7 @@ func TestContainerExecutionIntegration(t *testing.T) {
 			if !foundImage {
 				t.Errorf("Expected image %s not found in container args for %s", expectedImage, tc.description)
 			}
-			
+
 			// Test 6: Verify command arguments are preserved
 			imageIndex := -1
 			for i, arg := range args {
@@ -3040,16 +3046,16 @@ func TestContainerExecutionIntegration(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if imageIndex != -1 && imageIndex+1 < len(args) {
 				commandArgs := args[imageIndex+1:]
 				expectedArgs := tc.args
-				
+
 				// Handle explicit runtime specification
 				if len(tc.args) >= 2 && (tc.args[0] == "python" || tc.args[0] == "node" || tc.args[0] == "nodejs") {
 					expectedArgs = tc.args[1:]
 				}
-				
+
 				if len(commandArgs) >= len(expectedArgs) {
 					for i, expected := range expectedArgs {
 						if i < len(commandArgs) && commandArgs[i] != expected {
@@ -3063,13 +3069,14 @@ func TestContainerExecutionIntegration(t *testing.T) {
 		})
 	}
 }
+
 // Property 3: Home Directory Write Access
 // For any file or directory operation within /home/mcp, the container should have full read/write permissions,
 // enabling MCP servers to create configuration files, logs, and cache data
 func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 	// **Feature: container-home-isolation, Property 3: Home Directory Write Access**
 	// **Validates: Requirements 1.3, 3.2**
-	
+
 	// Test cases for different types of file operations that should be possible in /home/mcp
 	testCases := []struct {
 		name        string
@@ -3102,7 +3109,7 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 			description: "Node.js server should be able to create temporary files",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			config := &Config{
@@ -3110,22 +3117,22 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 				PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
 				DataDir:     t.TempDir(),
 			}
-			
+
 			// Build container command
 			cmd, volumeName, err := buildContainerCommand(config, "docker", tc.language, tc.args)
 			if err != nil {
 				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
 			}
-			
+
 			// Verify command was built successfully
 			if cmd == nil {
 				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
 			}
-			
+
 			// Verify volume mount is present and writable (not read-only)
 			args := cmd.Args
 			foundWritableHomeMount := false
-			
+
 			for i, arg := range args {
 				if arg == "-v" && i+1 < len(args) {
 					mountSpec := args[i+1]
@@ -3140,11 +3147,11 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 					}
 				}
 			}
-			
+
 			if !foundWritableHomeMount {
 				t.Errorf("Expected writable home volume mount to /home/mcp for %s", tc.description)
 			}
-			
+
 			// Verify volume name was generated (indicates persistent storage)
 			homeMount := os.Getenv("MCP_BIND_HOME")
 			customHome := os.Getenv("MCP_HOME_PATH")
@@ -3152,13 +3159,13 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 				if volumeName == "" {
 					t.Errorf("Expected volume name to be generated for persistent home directory for %s", tc.description)
 				}
-				
+
 				// Volume should follow expected naming pattern
 				if !strings.HasPrefix(volumeName, "mcp-home-") && !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
 					t.Errorf("Volume name should follow expected pattern for %s, got: %s", tc.description, volumeName)
 				}
 			}
-			
+
 			// Verify the container will run with appropriate user permissions
 			// The container should run as UID 1000 (mcp user) which has write access to /home/mcp
 			expectedImage, _ := config.GetImageForLanguage(tc.language)
@@ -3169,11 +3176,11 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !foundImage {
 				t.Errorf("Expected image %s not found in container args for %s", expectedImage, tc.description)
 			}
-			
+
 			// Verify no conflicting user or permission flags that would prevent write access
 			for i, arg := range args {
 				// Check for user override that might conflict with write permissions
@@ -3184,13 +3191,13 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 						t.Logf("Warning: User override detected (%s) for %s - verify write permissions", userSpec, tc.description)
 					}
 				}
-				
+
 				// Check for read-only filesystem flags
 				if arg == "--read-only" {
 					t.Errorf("Container should not have read-only filesystem for %s", tc.description)
 				}
 			}
-			
+
 			// Test different mount scenarios
 			t.Run("volume_mount", func(t *testing.T) {
 				// When using container volumes, verify mount is writable
@@ -3198,7 +3205,7 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 					// Volume mount should be in format: volumeName:/home/mcp (no :ro suffix)
 					expectedMount := volumeName + ":/home/mcp"
 					foundExpectedMount := false
-					
+
 					for i, arg := range args {
 						if arg == "-v" && i+1 < len(args) {
 							if args[i+1] == expectedMount {
@@ -3207,19 +3214,19 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 							}
 						}
 					}
-					
+
 					if !foundExpectedMount {
 						t.Errorf("Expected volume mount %s not found for %s", expectedMount, tc.description)
 					}
 				}
 			})
-			
+
 			t.Run("bind_mount", func(t *testing.T) {
 				// When using bind mounts (MCP_BIND_HOME or MCP_HOME_PATH), verify they're writable
 				if homeMount != "" || customHome != "" {
 					// Bind mounts should also be writable (no :ro suffix)
 					foundBindMount := false
-					
+
 					for i, arg := range args {
 						if arg == "-v" && i+1 < len(args) {
 							mountSpec := args[i+1]
@@ -3229,7 +3236,7 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 							}
 						}
 					}
-					
+
 					if !foundBindMount {
 						t.Errorf("Expected writable bind mount to /home/mcp for %s", tc.description)
 					}
@@ -3238,20 +3245,21 @@ func TestProperty3_HomeDirectoryWriteAccess(t *testing.T) {
 		})
 	}
 }
+
 // Property 5: Consistent Mount Point
-// For any container type (Python or Node.js) and MCP server command, 
+// For any container type (Python or Node.js) and MCP server command,
 // the Container_Home volume should always be mounted at /home/mcp with read/write permissions
 func TestProperty5_ConsistentMountPoint(t *testing.T) {
 	// **Feature: container-home-isolation, Property 5: Consistent Mount Point**
 	// **Validates: Requirements 1.5**
-	
+
 	// Test cases covering different container types and command variations
 	testCases := []struct {
-		name         string
-		args         []string
-		language     string
-		ephemeral    bool
-		description  string
+		name        string
+		args        []string
+		language    string
+		ephemeral   bool
+		description string
 	}{
 		{
 			name:        "python_uvx_persistent",
@@ -3310,7 +3318,7 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 			description: "Complex Node.js command with multiple arguments",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			config := &Config{
@@ -3319,27 +3327,27 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 				DataDir:       t.TempDir(),
 				EphemeralMode: tc.ephemeral,
 			}
-			
+
 			// Build container command
 			cmd, volumeName, err := buildContainerCommand(config, "docker", tc.language, tc.args)
 			if err != nil {
 				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
 			}
-			
+
 			// Verify command was built successfully
 			if cmd == nil {
 				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
 			}
-			
+
 			args := cmd.Args
 			if len(args) == 0 {
 				t.Fatalf("Command args should not be empty for %s", tc.description)
 			}
-			
+
 			// Test 1: Verify exactly one mount to /home/mcp exists
 			homeMountCount := 0
 			var homeMountSpec string
-			
+
 			for i, arg := range args {
 				if arg == "-v" && i+1 < len(args) {
 					mountSpec := args[i+1]
@@ -3351,13 +3359,13 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 					}
 				}
 			}
-			
+
 			if homeMountCount == 0 {
 				t.Errorf("Expected exactly one mount to /home/mcp for %s, found none", tc.description)
 			} else if homeMountCount > 1 {
 				t.Errorf("Expected exactly one mount to /home/mcp for %s, found %d", tc.description, homeMountCount)
 			}
-			
+
 			// Test 2: Verify mount point is exactly /home/mcp (not /home/mcp/ or other variations)
 			if homeMountSpec != "" {
 				parts := strings.Split(homeMountSpec, ":")
@@ -3368,16 +3376,16 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 					}
 				}
 			}
-			
+
 			// Test 3: Verify mount is read/write (not read-only)
 			if homeMountSpec != "" && strings.Contains(homeMountSpec, ":ro") {
 				t.Errorf("Home directory mount should be read/write, not read-only for %s: %s", tc.description, homeMountSpec)
 			}
-			
+
 			// Test 4: Verify volume name consistency based on mode
 			homeMount := os.Getenv("MCP_BIND_HOME")
 			customHome := os.Getenv("MCP_HOME_PATH")
-			
+
 			if homeMount == "" && customHome == "" {
 				// Using container volumes
 				if volumeName == "" {
@@ -3393,7 +3401,7 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 							t.Errorf("Expected persistent volume name to start with 'mcp-home-' for %s, got: %s", tc.description, volumeName)
 						}
 					}
-					
+
 					// Verify mount spec uses the generated volume name
 					expectedMountPrefix := volumeName + ":/home/mcp"
 					if !strings.HasPrefix(homeMountSpec, expectedMountPrefix) {
@@ -3401,22 +3409,22 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 					}
 				}
 			}
-			
+
 			// Test 5: Verify consistency across different container types
 			expectedImage, _ := config.GetImageForLanguage(tc.language)
 			foundImage := false
-			
+
 			for _, arg := range args {
 				if arg == expectedImage {
 					foundImage = true
 					break
 				}
 			}
-			
+
 			if !foundImage {
 				t.Errorf("Expected image %s not found in container args for %s", expectedImage, tc.description)
 			}
-			
+
 			// Test 6: Verify MCP_DATA_DIR mount is present
 			dataMountFound := false
 			for i, arg := range args {
@@ -3429,11 +3437,11 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 					}
 				}
 			}
-			
+
 			if !dataMountFound {
 				t.Errorf("Expected MCP_DATA_DIR mount to /data not found for %s", tc.description)
 			}
-			
+
 			// Test 7: Verify no conflicting mounts to /home directory
 			for i, arg := range args {
 				if arg == "-v" && i+1 < len(args) {
@@ -3449,12 +3457,12 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 					}
 				}
 			}
-			
+
 			// Test 8: Verify mount consistency across runtime variations
 			t.Run("runtime_consistency", func(t *testing.T) {
 				// Test with different runtime commands to ensure consistency
 				runtimes := []string{"docker", "podman", "nerdctl", "finch"}
-				
+
 				for _, runtime := range runtimes {
 					// Skip if runtime is not available (this is just a consistency check)
 					cmd2, volumeName2, err2 := buildContainerCommand(config, runtime, tc.language, tc.args)
@@ -3462,11 +3470,11 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 						// Runtime might not be available, skip
 						continue
 					}
-					
+
 					// Find home mount in this runtime's command
 					args2 := cmd2.Args
 					var homeMountSpec2 string
-					
+
 					for i, arg := range args2 {
 						if arg == "-v" && i+1 < len(args2) {
 							mountSpec := args2[i+1]
@@ -3476,7 +3484,7 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 							}
 						}
 					}
-					
+
 					// Verify mount point is consistent across runtimes
 					if homeMountSpec2 != "" {
 						parts := strings.Split(homeMountSpec2, ":")
@@ -3484,7 +3492,7 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 							t.Errorf("Mount point inconsistent across runtimes for %s with %s: expected /home/mcp, got %s", tc.description, runtime, parts[1])
 						}
 					}
-					
+
 					// Verify volume name consistency (should be same across runtimes for same command)
 					// Note: Ephemeral volumes use timestamps so they will be different each time
 					if homeMount == "" && customHome == "" && volumeName != "" && volumeName2 != "" && !tc.ephemeral {
@@ -3497,13 +3505,14 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 		})
 	}
 }
+
 // Property 7: Environment Variable Passthrough
-// For any user-provided environment variables, run-mcp should pass them through to the container 
+// For any user-provided environment variables, run-mcp should pass them through to the container
 // without modification, preserving both names and values
 func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 	// **Feature: container-home-isolation, Property 7: Environment Variable Passthrough**
 	// **Validates: Requirements 3.1, 3.3**
-	
+
 	// Save original environment to restore later
 	originalEnv := make(map[string]string)
 	testEnvVars := []string{
@@ -3513,12 +3522,12 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 		"DATABASE_URL", "REDIS_URL", "HF_TOKEN", "REPLICATE_API_TOKEN",
 		"COHERE_API_KEY", "MCP_CUSTOM_VAR", "MCP_PASSTHROUGH_TEST",
 	}
-	
+
 	// Save original values
 	for _, envVar := range testEnvVars {
 		originalEnv[envVar] = os.Getenv(envVar)
 	}
-	
+
 	defer func() {
 		// Restore original environment
 		for _, envVar := range testEnvVars {
@@ -3529,7 +3538,7 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 			}
 		}
 	}()
-	
+
 	// Test cases with different combinations of environment variables
 	testCases := []struct {
 		name        string
@@ -3610,41 +3619,41 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 			description: "Mixed environment variables should all be passed through",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Clear all test environment variables first
 			for _, envVar := range testEnvVars {
 				os.Unsetenv(envVar)
 			}
-			
+
 			// Set up test environment variables
 			for key, value := range tc.envVars {
 				os.Setenv(key, value)
 			}
-			
+
 			config := &Config{
 				NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
 				PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
 				DataDir:     t.TempDir(),
 			}
-			
+
 			// Build container command
 			cmd, _, err := buildContainerCommand(config, "docker", tc.language, tc.args)
 			if err != nil {
 				t.Fatalf("buildContainerCommand failed for %s: %v", tc.description, err)
 			}
-			
+
 			// Verify command was built successfully
 			if cmd == nil {
 				t.Fatalf("buildContainerCommand returned nil command for %s", tc.description)
 			}
-			
+
 			args := cmd.Args
 			if len(args) == 0 {
 				t.Fatalf("Command args should not be empty for %s", tc.description)
 			}
-			
+
 			// Extract environment variables from container command
 			containerEnv := make(map[string]string)
 			for i, arg := range args {
@@ -3656,7 +3665,7 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 					}
 				}
 			}
-			
+
 			// Test 1: Verify all expected environment variables are passed through
 			for expectedKey, expectedValue := range tc.envVars {
 				if actualValue, exists := containerEnv[expectedKey]; !exists {
@@ -3665,7 +3674,7 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 					t.Errorf("Environment variable %s has wrong value for %s: expected %s, got %s", expectedKey, tc.description, expectedValue, actualValue)
 				}
 			}
-			
+
 			// Test 2: Verify MCP configuration variables are NOT passed through
 			configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_HOME_PATH"}
 			for _, configVar := range configVars {
@@ -3673,7 +3682,7 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 					t.Errorf("MCP configuration variable %s should not be passed to container for %s", configVar, tc.description)
 				}
 			}
-			
+
 			// Test 3: Verify environment variable names are preserved exactly
 			for expectedKey := range tc.envVars {
 				found := false
@@ -3687,7 +3696,7 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 					t.Errorf("Environment variable name %s not preserved exactly for %s", expectedKey, tc.description)
 				}
 			}
-			
+
 			// Test 4: Verify environment variable values are preserved exactly (no modification)
 			for expectedKey, expectedValue := range tc.envVars {
 				if actualValue, exists := containerEnv[expectedKey]; exists {
@@ -3695,19 +3704,19 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 					if len(actualValue) != len(expectedValue) {
 						t.Errorf("Environment variable %s value length changed for %s: expected %d chars, got %d chars", expectedKey, tc.description, len(expectedValue), len(actualValue))
 					}
-					
+
 					// Check character-by-character to ensure no modifications
 					if actualValue != expectedValue {
 						t.Errorf("Environment variable %s value modified for %s: expected '%s', got '%s'", expectedKey, tc.description, expectedValue, actualValue)
 					}
 				}
 			}
-			
+
 			// Test 5: Verify no unexpected environment variables are added
 			// (This test checks that we don't add extra variables beyond what's expected)
 			expectedCount := len(tc.envVars)
 			actualCount := 0
-			
+
 			// Count variables that match our test set
 			for containerKey := range containerEnv {
 				for expectedKey := range tc.envVars {
@@ -3717,11 +3726,11 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 					}
 				}
 			}
-			
+
 			if actualCount != expectedCount {
 				t.Errorf("Environment variable count mismatch for %s: expected %d test variables, found %d", tc.description, expectedCount, actualCount)
 			}
-			
+
 			// Test 6: Verify special characters and edge cases in values are preserved
 			t.Run("special_characters", func(t *testing.T) {
 				// Test with special characters in environment variable values
@@ -3732,13 +3741,13 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 					"TEST_EMPTY":         "",
 					"TEST_EQUALS":        "key=value=more=equals",
 				}
-				
+
 				// Save original values
 				originalSpecial := make(map[string]string)
 				for key := range specialTestVars {
 					originalSpecial[key] = os.Getenv(key)
 				}
-				
+
 				defer func() {
 					// Restore original values
 					for key, originalValue := range originalSpecial {
@@ -3749,18 +3758,18 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 						}
 					}
 				}()
-				
+
 				// Set special test variables
 				for key, value := range specialTestVars {
 					os.Setenv(key, value)
 				}
-				
+
 				// Build command with special variables
 				cmd2, _, err2 := buildContainerCommand(config, "docker", tc.language, tc.args)
 				if err2 != nil {
 					t.Fatalf("buildContainerCommand failed with special characters: %v", err2)
 				}
-				
+
 				// Extract environment variables
 				containerEnv2 := make(map[string]string)
 				for i, arg := range cmd2.Args {
@@ -3772,7 +3781,7 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 						}
 					}
 				}
-				
+
 				// Verify special characters are preserved
 				for key, expectedValue := range specialTestVars {
 					if actualValue, exists := containerEnv2[key]; exists {
@@ -3787,16 +3796,16 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 }
 
 // Property 6: Volume Management Commands
-// For any set of managed volumes, the volume list, clean, and inspect commands should correctly display, 
+// For any set of managed volumes, the volume list, clean, and inspect commands should correctly display,
 // remove, and show details for volumes matching the mcp-home-* pattern
 func TestProperty6_VolumeManagementCommands(t *testing.T) {
 	// **Feature: container-home-isolation, Property 6: Volume Management Commands**
 	// **Validates: Requirements 2.5, 4.4, 4.5, 4.8, 4.10**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
@@ -3804,23 +3813,23 @@ func TestProperty6_VolumeManagementCommands(t *testing.T) {
 			numVolumes := rand.Intn(5) + 1 // 1-5 volumes
 			serverNames := make([]string, numVolumes)
 			expectedVolumeNames := make([]string, numVolumes)
-			
+
 			for j := 0; j < numVolumes; j++ {
 				// Generate random server names
 				commands := []string{"uvx", "npx", "python", "node"}
 				servers := []string{"test-server", "mcp-server", "api-server", "data-processor"}
-				
+
 				command := commands[rand.Intn(len(commands))]
 				server := servers[rand.Intn(len(servers))]
 				serverNames[j] = fmt.Sprintf("%s %s-%d", command, server, rand.Intn(1000))
 				expectedVolumeNames[j] = sanitizeVolumeName(strings.Fields(serverNames[j]))
 			}
-			
+
 			// Test with mock volume commander
 			mockCommander := &MockVolumeCommander{
 				volumes: make(map[string]VolumeInfo),
 			}
-			
+
 			// Create volumes
 			for j, serverName := range serverNames {
 				labels := map[string]string{
@@ -3829,51 +3838,51 @@ func TestProperty6_VolumeManagementCommands(t *testing.T) {
 					"run-mcp.server":  serverName,
 					"run-mcp.type":    "home",
 				}
-				
+
 				err := mockCommander.CreateVolume(expectedVolumeNames[j], labels)
 				if err != nil {
 					t.Fatalf("Failed to create volume: %v", err)
 				}
 			}
-			
+
 			// Test ListVolumes - should return all created volumes
 			volumes, err := mockCommander.ListVolumes()
 			if err != nil {
 				t.Fatalf("ListVolumes failed: %v", err)
 			}
-			
+
 			// Verify all volumes are returned
 			if len(volumes) != numVolumes {
 				t.Errorf("Expected %d volumes, got %d", numVolumes, len(volumes))
 			}
-			
+
 			// Verify volume names match expected pattern
 			volumeNames := make(map[string]bool)
 			for _, vol := range volumes {
 				volumeNames[vol.Name] = true
-				
+
 				// Verify volume follows mcp-home-* pattern
 				if !strings.HasPrefix(vol.Name, "mcp-home-") {
 					t.Errorf("Volume name %s does not follow mcp-home-* pattern", vol.Name)
 				}
-				
+
 				// Verify required labels exist
 				if vol.Labels["run-mcp"] != "true" {
 					t.Errorf("Volume %s missing run-mcp=true label", vol.Name)
 				}
-				
+
 				if vol.Labels["run-mcp.runtime"] == "" {
 					t.Errorf("Volume %s missing run-mcp.runtime label", vol.Name)
 				}
 			}
-			
+
 			// Verify all expected volumes are present
 			for _, expectedName := range expectedVolumeNames {
 				if !volumeNames[expectedName] {
 					t.Errorf("Expected volume %s not found in list", expectedName)
 				}
 			}
-			
+
 			// Test InspectVolume for each volume
 			for _, volumeName := range expectedVolumeNames {
 				details, err := mockCommander.InspectVolume(volumeName)
@@ -3881,18 +3890,18 @@ func TestProperty6_VolumeManagementCommands(t *testing.T) {
 					t.Errorf("InspectVolume failed for %s: %v", volumeName, err)
 					continue
 				}
-				
+
 				// Verify inspect returns correct details
 				if details.Name != volumeName {
 					t.Errorf("InspectVolume returned wrong name: expected %s, got %s", volumeName, details.Name)
 				}
-				
+
 				// Verify labels are preserved
 				if details.Labels["run-mcp"] != "true" {
 					t.Errorf("InspectVolume for %s missing run-mcp=true label", volumeName)
 				}
 			}
-			
+
 			// Test RemoveVolume - remove half the volumes
 			volumesToRemove := expectedVolumeNames[:numVolumes/2]
 			for _, volumeName := range volumesToRemove {
@@ -3901,24 +3910,24 @@ func TestProperty6_VolumeManagementCommands(t *testing.T) {
 					t.Errorf("RemoveVolume failed for %s: %v", volumeName, err)
 				}
 			}
-			
+
 			// Verify removed volumes are gone
 			remainingVolumes, err := mockCommander.ListVolumes()
 			if err != nil {
 				t.Fatalf("ListVolumes after removal failed: %v", err)
 			}
-			
+
 			expectedRemaining := numVolumes - len(volumesToRemove)
 			if len(remainingVolumes) != expectedRemaining {
 				t.Errorf("After removal, expected %d volumes, got %d", expectedRemaining, len(remainingVolumes))
 			}
-			
+
 			// Verify removed volumes are not in the list
 			remainingNames := make(map[string]bool)
 			for _, vol := range remainingVolumes {
 				remainingNames[vol.Name] = true
 			}
-			
+
 			for _, removedName := range volumesToRemove {
 				if remainingNames[removedName] {
 					t.Errorf("Removed volume %s still appears in list", removedName)
@@ -3943,7 +3952,7 @@ func (mvc *MockVolumeCommander) CreateVolume(name string, labels map[string]stri
 	if mvc.failMode {
 		return mvc.failError
 	}
-	
+
 	mvc.volumes[name] = VolumeInfo{
 		Name:      name,
 		Labels:    labels,
@@ -3957,7 +3966,7 @@ func (mvc *MockVolumeCommander) ListVolumes() ([]VolumeInfo, error) {
 	if mvc.failOnList {
 		return nil, fmt.Errorf("mock list volumes failed")
 	}
-	
+
 	var volumes []VolumeInfo
 	for _, vol := range mvc.volumes {
 		// Only return volumes with run-mcp=true label
@@ -3972,7 +3981,7 @@ func (mvc *MockVolumeCommander) RemoveVolume(name string) error {
 	if mvc.failOnRemove {
 		return fmt.Errorf("mock remove volume failed")
 	}
-	
+
 	if _, exists := mvc.volumes[name]; !exists {
 		return fmt.Errorf("volume not found: %s", name)
 	}
@@ -3984,12 +3993,12 @@ func (mvc *MockVolumeCommander) InspectVolume(name string) (*VolumeDetails, erro
 	if mvc.failOnInspect {
 		return nil, fmt.Errorf("mock inspect volume failed")
 	}
-	
+
 	vol, exists := mvc.volumes[name]
 	if !exists {
 		return nil, fmt.Errorf("volume not found: %s", name)
 	}
-	
+
 	return &VolumeDetails{
 		VolumeInfo: vol,
 		MountPoint: "/var/lib/docker/volumes/" + name + "/_data",
@@ -4001,10 +4010,11 @@ func (mvc *MockVolumeCommander) VolumeExists(name string) (bool, error) {
 	if mvc.failOnExists {
 		return false, fmt.Errorf("mock volume exists check failed")
 	}
-	
+
 	_, exists := mvc.volumes[name]
 	return exists, nil
 }
+
 // Unit tests for CLI command parsing
 // Test subcommand routing and argument validation
 // Requirements: 4.9, 4.13
@@ -4091,7 +4101,7 @@ func TestCLICommandParsing(t *testing.T) {
 
 			// Set args and execute
 			rootCmd.SetArgs(tc.args)
-			
+
 			// Capture output to avoid printing during tests
 			rootCmd.SetOut(os.Stdout)
 			rootCmd.SetErr(os.Stderr)
@@ -4173,7 +4183,7 @@ func TestConfirmationPrompt(t *testing.T) {
 			// Mock the confirmation function behavior
 			response := strings.ToLower(strings.TrimSpace(tc.input))
 			result := response == "y" || response == "yes"
-			
+
 			if result != tc.expected {
 				t.Errorf("Expected %v for input '%s', got %v", tc.expected, tc.input, result)
 			}
@@ -4198,10 +4208,10 @@ func TestVolumeCommandArgumentValidation(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:         "clean command with empty server name",
-			command:      "clean",
-			args:         []string{""},
-			expectError:  false, // Empty string is still a valid argument
+			name:        "clean command with empty server name",
+			command:     "clean",
+			args:        []string{""},
+			expectError: false, // Empty string is still a valid argument
 		},
 		{
 			name:        "inspect command with valid server name",
@@ -4260,7 +4270,7 @@ func TestVolumeCommandArgumentValidation(t *testing.T) {
 
 			// Set args and validate - but don't execute
 			cmd.SetArgs(tc.args)
-			
+
 			// Capture output to avoid printing during tests
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
@@ -4290,12 +4300,12 @@ func TestVolumeCommandArgumentValidation(t *testing.T) {
 // Requirements: 4.9, 4.13
 func TestVolumeCommandExecution(t *testing.T) {
 	testCases := []struct {
-		name           string
-		command        string
-		args           []string
-		setupMock      func() *MockVolumeCommander
-		expectError    bool
-		errorPattern   string
+		name         string
+		command      string
+		args         []string
+		setupMock    func() *MockVolumeCommander
+		expectError  bool
+		errorPattern string
 	}{
 		{
 			name:    "inspect existing volume",
@@ -4353,7 +4363,7 @@ func TestVolumeCommandExecution(t *testing.T) {
 			args:    []string{"non-existent-server"},
 			setupMock: func() *MockVolumeCommander {
 				return &MockVolumeCommander{
-					volumes:     make(map[string]VolumeInfo),
+					volumes:      make(map[string]VolumeInfo),
 					failOnExists: false, // Volume doesn't exist
 				}
 			},
@@ -4373,28 +4383,28 @@ func TestVolumeCommandExecution(t *testing.T) {
 }
 
 // Property 11: Volume Prune Operation
-// For any set of managed volumes, the prune command should remove all volumes with the mcp-home-* pattern, 
+// For any set of managed volumes, the prune command should remove all volumes with the mcp-home-* pattern,
 // leaving no managed volumes remaining
 func TestProperty11_VolumePruneOperation(t *testing.T) {
 	// **Feature: container-home-isolation, Property 11: Volume Prune Operation**
 	// **Validates: Requirements 4.6, 4.7**
-	
+
 	property := func(volumeCount int) bool {
 		if volumeCount < 0 || volumeCount > 10 {
 			return true // Skip invalid inputs
 		}
-		
+
 		// Create a mock volume commander for testing
 		commander := &MockVolumeCommander{
 			volumes: make(map[string]VolumeInfo),
 		}
-		
+
 		// Create test volumes with run-mcp labels
 		volumeNames := make([]string, volumeCount)
 		for i := 0; i < volumeCount; i++ {
 			volumeName := fmt.Sprintf("mcp-home-test-server-%d", i)
 			volumeNames[i] = volumeName
-			
+
 			commander.volumes[volumeName] = VolumeInfo{
 				Name: volumeName,
 				Labels: map[string]string{
@@ -4406,34 +4416,34 @@ func TestProperty11_VolumePruneOperation(t *testing.T) {
 				Runtime:   "docker",
 			}
 		}
-		
+
 		// List volumes before prune
 		volumesBefore, err := commander.ListVolumes()
 		if err != nil {
 			return false
 		}
-		
+
 		if len(volumesBefore) != volumeCount {
 			return false
 		}
-		
+
 		// Prune all volumes
 		for _, vol := range volumesBefore {
 			if err := commander.RemoveVolume(vol.Name); err != nil {
 				return false
 			}
 		}
-		
+
 		// List volumes after prune
 		volumesAfter, err := commander.ListVolumes()
 		if err != nil {
 			return false
 		}
-		
+
 		// Property: After prune, no managed volumes should remain
 		return len(volumesAfter) == 0
 	}
-	
+
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Error(err)
 	}
@@ -4478,7 +4488,7 @@ func TestVolumeCommandFlagParsing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := createVolumePruneCommand()
 			cmd.SetArgs(tc.args)
-			
+
 			// Capture output to avoid printing during tests
 			cmd.SetOut(os.Stdout)
 			cmd.SetErr(os.Stderr)
@@ -4495,7 +4505,7 @@ func TestVolumeCommandFlagParsing(t *testing.T) {
 				if forceFlag != tc.expectForce {
 					t.Errorf("Expected force flag to be %v, got %v", tc.expectForce, forceFlag)
 				}
-				
+
 				// The actual execution might fail due to missing runtime, but that's not what we're testing
 				if err != nil && !strings.Contains(err.Error(), "container runtime detection failed") {
 					t.Errorf("Expected no parsing error but got: %v", err)
@@ -4534,7 +4544,7 @@ func TestStorageWarningMessageFormatting(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			msg := formatStorageWarningMessage(tc.volumeName, tc.volumeSize, tc.sizeLimit)
-			
+
 			if msg != tc.expectedMsg {
 				t.Errorf("Expected message '%s', got '%s'", tc.expectedMsg, msg)
 			}
@@ -4599,7 +4609,7 @@ func TestStorageSizeComparison(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := compareStorageSizes(tc.size1, tc.size2)
-			
+
 			if tc.expectErr {
 				if err == nil {
 					t.Errorf("Expected error but got none")
@@ -4620,11 +4630,11 @@ func TestStorageSizeComparison(t *testing.T) {
 // Requirements: 6.6
 func TestStorageWarnings(t *testing.T) {
 	testCases := []struct {
-		name           string
-		volumeSize     string
-		maxVolumeSize  string
-		expectWarning  bool
-		expectedMsg    string
+		name          string
+		volumeSize    string
+		maxVolumeSize string
+		expectWarning bool
+		expectedMsg   string
 	}{
 		{
 			name:          "volume under limit",
@@ -4683,14 +4693,14 @@ func TestStorageWarnings(t *testing.T) {
 			config := &Config{
 				MaxVolumeSize: tc.maxVolumeSize,
 			}
-			
+
 			volumeInfo := VolumeInfo{
 				Name: "test-volume",
 				Size: tc.volumeSize,
 			}
-			
+
 			warning := checkVolumeStorageWarning(config, volumeInfo)
-			
+
 			if tc.expectWarning {
 				if warning == "" {
 					t.Errorf("Expected warning but got none")
@@ -4710,11 +4720,11 @@ func TestStorageWarnings(t *testing.T) {
 // Requirements: 6.6
 func TestFormatStorageWarningMessage(t *testing.T) {
 	testCases := []struct {
-		name        string
-		volumeName  string
-		volumeSize  string
-		sizeLimit   string
-		expected    string
+		name       string
+		volumeName string
+		volumeSize string
+		sizeLimit  string
+		expected   string
 	}{
 		{
 			name:       "basic warning message",
@@ -4848,7 +4858,7 @@ func TestParseStorageSizeEdgeCases(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result, err := parseStorageSize(tc.input)
-			
+
 			if tc.expectErr {
 				if err == nil {
 					t.Errorf("Expected error but got none")
@@ -4863,90 +4873,91 @@ func TestParseStorageSizeEdgeCases(t *testing.T) {
 		})
 	}
 }
+
 // Property 10: Volume Persistence
-// For any created volume, the data should persist indefinitely across container stops, crashes, and restarts 
+// For any created volume, the data should persist indefinitely across container stops, crashes, and restarts
 // until explicitly removed by user commands
 func TestProperty10_VolumePersistence(t *testing.T) {
 	// **Feature: container-home-isolation, Property 10: Volume Persistence**
 	// **Validates: Requirements 4.3, 6.1, 6.2**
-	
+
 	property := func(serverName string, restartCount int) bool {
 		// Limit inputs to reasonable ranges
 		if len(serverName) == 0 || len(serverName) > 50 || restartCount < 0 || restartCount > 10 {
 			return true // Skip invalid inputs
 		}
-		
+
 		// Sanitize server name to ensure it's valid
 		sanitizedName := strings.ReplaceAll(serverName, " ", "-")
 		if sanitizedName == "" {
 			return true
 		}
-		
+
 		config := &Config{}
-		
+
 		// Create a mock volume commander for testing
 		commander := &MockVolumeCommander{
 			volumes: make(map[string]VolumeInfo),
 		}
-		
+
 		vm := &VolumeManager{
 			config:    config,
 			commander: commander,
 			runtime:   "docker",
 		}
-		
+
 		// Create initial volume
 		volumeName, err := vm.CreateHomeVolume(sanitizedName, "docker")
 		if err != nil {
 			return false
 		}
-		
+
 		// Verify volume was created
 		exists, err := commander.VolumeExists(volumeName)
 		if err != nil || !exists {
 			return false
 		}
-		
+
 		// Simulate multiple container restarts
 		for i := 0; i < restartCount; i++ {
 			// Simulate container stop (volume should persist)
 			// In real scenario, only container is removed, not volume
-			
+
 			// Simulate container restart - volume should still exist and be reused
 			volumeName2, err := vm.CreateHomeVolume(sanitizedName, "docker")
 			if err != nil {
 				return false
 			}
-			
+
 			// Property: Same server name should always return same volume name
 			if volumeName2 != volumeName {
 				return false
 			}
-			
+
 			// Property: Volume should still exist after restart
 			exists, err := commander.VolumeExists(volumeName)
 			if err != nil || !exists {
 				return false
 			}
 		}
-		
+
 		// Property: Volume should persist until explicitly removed
 		// Simulate explicit removal
 		err = vm.RemoveHomeVolume(sanitizedName)
 		if err != nil {
 			return false
 		}
-		
+
 		// Property: After explicit removal, volume should no longer exist
 		exists, err = commander.VolumeExists(volumeName)
 		if err != nil {
 			return false
 		}
-		
+
 		// Volume should not exist after explicit removal
 		return !exists
 	}
-	
+
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Error(err)
 	}
@@ -4964,32 +4975,32 @@ func TestRuntimeDetectionFailures(t *testing.T) {
 			os.Unsetenv("MCP_CONTAINER_RUNTIME")
 		}
 	}()
-	
+
 	// Test with invalid runtime override
 	os.Setenv("MCP_CONTAINER_RUNTIME", "nonexistent-runtime-12345")
-	
+
 	detector := NewRuntimeDetector()
 	_, err := detector.Detect()
-	
+
 	if err == nil {
 		t.Error("Expected error when runtime override points to nonexistent runtime")
 	}
-	
+
 	if !strings.Contains(err.Error(), "specified container runtime") {
 		t.Errorf("Expected error message about specified runtime, got: %v", err)
 	}
-	
+
 	// Test when no runtimes are available (simulate by clearing PATH)
 	os.Unsetenv("MCP_CONTAINER_RUNTIME")
-	
+
 	// Create detector with empty runtime list to simulate no available runtimes
 	emptyDetector := &RuntimeDetector{runtimes: []string{"definitely-not-installed-runtime"}}
 	_, err = emptyDetector.Detect()
-	
+
 	if err == nil {
 		t.Error("Expected error when no container runtimes are available")
 	}
-	
+
 	expectedNoRuntimeMsg := "no container runtime found"
 	if !strings.Contains(err.Error(), expectedNoRuntimeMsg) {
 		t.Errorf("Expected error message about no runtime found, got: %v", err)
@@ -5000,50 +5011,50 @@ func TestRuntimeDetectionFailures(t *testing.T) {
 // Requirements: 5.2, 5.3
 func TestVolumeCreationErrorHandling(t *testing.T) {
 	config := &Config{}
-	
+
 	// Test with mock commander that always fails
 	failingCommander := &MockVolumeCommander{
 		volumes:   make(map[string]VolumeInfo),
 		failMode:  true,
 		failError: fmt.Errorf("mock volume creation failed: insufficient disk space"),
 	}
-	
+
 	vm := &VolumeManager{
 		config:    config,
 		commander: failingCommander,
 		runtime:   "docker",
 	}
-	
+
 	// Test volume creation failure
 	_, err := vm.CreateHomeVolume("test-server", "docker")
 	if err == nil {
 		t.Error("Expected error from failing volume commander")
 	}
-	
+
 	expectedErrMsg := "failed to create volume"
 	if !strings.Contains(err.Error(), expectedErrMsg) {
 		t.Errorf("Expected error message about volume creation failure, got: %v", err)
 	}
-	
+
 	// Test volume existence check failure
 	failingCommander.failOnExists = true
 	_, err = vm.CreateHomeVolume("test-server-2", "docker")
 	if err == nil {
 		t.Error("Expected error from failing volume existence check")
 	}
-	
+
 	expectedExistsErrMsg := "failed to check if volume exists"
 	if !strings.Contains(err.Error(), expectedExistsErrMsg) {
 		t.Errorf("Expected error message about volume existence check failure, got: %v", err)
 	}
-	
+
 	// Test ephemeral volume creation failure
 	failingCommander.failOnExists = false // Reset
 	_, err = vm.CreateEphemeralVolume("test-ephemeral", "docker")
 	if err == nil {
 		t.Error("Expected error from failing ephemeral volume creation")
 	}
-	
+
 	expectedEphemeralErrMsg := "failed to create ephemeral volume"
 	if !strings.Contains(err.Error(), expectedEphemeralErrMsg) {
 		t.Errorf("Expected error message about ephemeral volume creation failure, got: %v", err)
@@ -5059,16 +5070,16 @@ func TestFilesystemErrorDetection(t *testing.T) {
 		PythonImage: "test-image:latest",
 		DataDir:     "/nonexistent/directory/path/12345",
 	}
-	
+
 	err := config.Validate()
 	if err == nil {
 		t.Error("Expected error for nonexistent data directory")
 	}
-	
+
 	if !strings.Contains(err.Error(), "data directory validation failed") {
 		t.Errorf("Expected data directory validation error, got: %v", err)
 	}
-	
+
 	// Test data directory that exists but is not a directory (use a file)
 	tempFile, err := os.CreateTemp("", "test-file")
 	if err != nil {
@@ -5076,35 +5087,35 @@ func TestFilesystemErrorDetection(t *testing.T) {
 	}
 	defer os.Remove(tempFile.Name())
 	tempFile.Close()
-	
+
 	config.DataDir = tempFile.Name()
 	err = config.Validate()
 	if err == nil {
 		t.Error("Expected error when data directory path points to a file")
 	}
-	
+
 	if !strings.Contains(err.Error(), "not a directory") {
 		t.Errorf("Expected 'not a directory' error, got: %v", err)
 	}
-	
+
 	// Test read-only directory (create temp dir and make it read-only)
 	tempDir := t.TempDir()
-	
+
 	// Make directory read-only (remove write permissions)
 	err = os.Chmod(tempDir, 0444)
 	if err != nil {
 		t.Fatalf("Failed to make directory read-only: %v", err)
 	}
-	
+
 	// Restore permissions after test
 	defer os.Chmod(tempDir, 0755)
-	
+
 	config.DataDir = tempDir
-	
+
 	// Test VolumeManager validation
 	vm := NewVolumeManager(config)
 	err = vm.ValidateDataDir()
-	
+
 	// On some systems, write test might still succeed even with 0444 permissions
 	// So we'll check if the error is about write permissions or if it succeeds
 	if err != nil && !strings.Contains(err.Error(), "not writable") {
@@ -5116,7 +5127,7 @@ func TestFilesystemErrorDetection(t *testing.T) {
 // Requirements: 7.9, 7.10
 func TestUserMountParsingErrors(t *testing.T) {
 	parser := NewUserMountParser()
-	
+
 	// Test invalid mount syntax
 	invalidMountSpecs := []struct {
 		name      string
@@ -5167,14 +5178,14 @@ func TestUserMountParsingErrors(t *testing.T) {
 			errMsg:    "invalid mount option",
 		},
 	}
-	
+
 	for _, tc := range invalidMountSpecs {
 		t.Run(tc.name, func(t *testing.T) {
 			// For validation errors (like nonexistent paths), we need to test the full ParseUserMounts flow
-			if strings.Contains(tc.errMsg, "source path does not exist") || 
-			   strings.Contains(tc.errMsg, "destination path must be absolute") ||
-			   strings.Contains(tc.errMsg, "invalid mount option") {
-				
+			if strings.Contains(tc.errMsg, "source path does not exist") ||
+				strings.Contains(tc.errMsg, "destination path must be absolute") ||
+				strings.Contains(tc.errMsg, "invalid mount option") {
+
 				// Set the environment variable and test ParseUserMounts
 				originalMount := os.Getenv("MCP_MOUNT")
 				defer func() {
@@ -5184,10 +5195,10 @@ func TestUserMountParsingErrors(t *testing.T) {
 						os.Unsetenv("MCP_MOUNT")
 					}
 				}()
-				
+
 				os.Setenv("MCP_MOUNT", tc.mountStr)
 				_, err := parser.ParseUserMounts()
-				
+
 				if tc.expectErr {
 					if err == nil {
 						t.Errorf("Expected error for mount spec %s", tc.mountStr)
@@ -5198,7 +5209,7 @@ func TestUserMountParsingErrors(t *testing.T) {
 			} else {
 				// For syntax errors, test ParseMountString directly
 				mounts, err := parser.ParseMountString(tc.mountStr)
-				
+
 				if tc.expectErr {
 					if err == nil {
 						t.Errorf("Expected error for mount spec %s", tc.mountStr)
@@ -5209,7 +5220,7 @@ func TestUserMountParsingErrors(t *testing.T) {
 					if err != nil {
 						t.Errorf("Unexpected error for mount spec %s: %v", tc.mountStr, err)
 					}
-					
+
 					// If no error expected, validate the mounts
 					for _, mount := range mounts {
 						if err := parser.ValidateMount(mount); err != nil {
@@ -5220,7 +5231,7 @@ func TestUserMountParsingErrors(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test MCP_MOUNT environment variable parsing errors
 	originalMount := os.Getenv("MCP_MOUNT")
 	defer func() {
@@ -5230,21 +5241,21 @@ func TestUserMountParsingErrors(t *testing.T) {
 			os.Unsetenv("MCP_MOUNT")
 		}
 	}()
-	
+
 	// Test with invalid MCP_MOUNT
 	os.Setenv("MCP_MOUNT", "/nonexistent:/dest")
 	_, err := parser.ParseUserMounts()
 	if err == nil {
 		t.Error("Expected error when MCP_MOUNT contains nonexistent source path")
 	}
-	
+
 	// Test with malformed MCP_MOUNT
 	os.Setenv("MCP_MOUNT", "invalid_format")
 	_, err = parser.ParseUserMounts()
 	if err == nil {
 		t.Error("Expected error when MCP_MOUNT has invalid format")
 	}
-	
+
 	if !strings.Contains(err.Error(), "invalid MCP_MOUNT syntax") {
 		t.Errorf("Expected MCP_MOUNT syntax error, got: %v", err)
 	}
@@ -5254,7 +5265,7 @@ func TestUserMountParsingErrors(t *testing.T) {
 // Requirements: 7.6, 7.7
 func TestHomeDirectoryOverrideErrors(t *testing.T) {
 	handler := NewHomeOverrideHandler()
-	
+
 	// Save original environment
 	originalBindHome := os.Getenv("MCP_BIND_HOME")
 	originalHomePath := os.Getenv("MCP_HOME_PATH")
@@ -5270,20 +5281,20 @@ func TestHomeDirectoryOverrideErrors(t *testing.T) {
 			os.Unsetenv("MCP_HOME_PATH")
 		}
 	}()
-	
+
 	// Test MCP_HOME_PATH with nonexistent directory
 	os.Setenv("MCP_HOME_PATH", "/definitely/nonexistent/path/12345")
 	os.Unsetenv("MCP_BIND_HOME")
-	
+
 	err := handler.ValidateCustomHomePath("/definitely/nonexistent/path/12345")
 	if err == nil {
 		t.Error("Expected error for nonexistent custom home path")
 	}
-	
+
 	if !strings.Contains(err.Error(), "does not exist") {
 		t.Errorf("Expected 'does not exist' error, got: %v", err)
 	}
-	
+
 	// Test MCP_HOME_PATH pointing to a file instead of directory
 	tempFile, err := os.CreateTemp("", "test-file")
 	if err != nil {
@@ -5291,16 +5302,16 @@ func TestHomeDirectoryOverrideErrors(t *testing.T) {
 	}
 	defer os.Remove(tempFile.Name())
 	tempFile.Close()
-	
+
 	err = handler.ValidateCustomHomePath(tempFile.Name())
 	if err == nil {
 		t.Error("Expected error when custom home path points to a file")
 	}
-	
+
 	if !strings.Contains(err.Error(), "not a directory") {
 		t.Errorf("Expected 'not a directory' error, got: %v", err)
 	}
-	
+
 	// Test MCP_HOME_PATH with read-only directory
 	tempDir := t.TempDir()
 	err = os.Chmod(tempDir, 0444) // Make read-only
@@ -5308,17 +5319,17 @@ func TestHomeDirectoryOverrideErrors(t *testing.T) {
 		t.Fatalf("Failed to make directory read-only: %v", err)
 	}
 	defer os.Chmod(tempDir, 0755) // Restore permissions
-	
+
 	err = handler.ValidateCustomHomePath(tempDir)
 	// On some systems, write test might still succeed even with 0444 permissions
 	if err != nil && !strings.Contains(err.Error(), "not writable") {
 		t.Errorf("Expected 'not writable' error or no error, got: %v", err)
 	}
-	
+
 	// Test CreateBindHomeDir with permission issues
 	// This test is more about the interface than actual permission testing
 	// since permission behavior varies across systems
-	
+
 	// Test with empty volume name
 	_, err = handler.CreateBindHomeDir("")
 	// This should still work as it creates a directory with empty name
@@ -5326,19 +5337,19 @@ func TestHomeDirectoryOverrideErrors(t *testing.T) {
 }
 
 // Property 1: Signal Forwarding Consistency
-// For any supported container runtime and any supported signal, when the signal is sent to the host process, 
+// For any supported container runtime and any supported signal, when the signal is sent to the host process,
 // the signal should be successfully forwarded to the container process using the appropriate runtime-specific mechanism
 func TestProperty1_SignalForwardingConsistency(t *testing.T) {
 	// **Feature: container-signal-handling, Property 1: Signal Forwarding Consistency**
 	// **Validates: Requirements 1.1, 1.2, 4.1, 4.2, 4.3, 4.4**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch", "lima nerdctl"}
-	
+
 	// Test supported signals (platform-specific)
 	var supportedSignals []os.Signal
 	switch runtime.GOOS {
@@ -5349,30 +5360,30 @@ func TestProperty1_SignalForwardingConsistency(t *testing.T) {
 	default:
 		supportedSignals = []os.Signal{os.Interrupt}
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Generate random test data
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			signalIndex := rand.Intn(len(supportedSignals))
-			
+
 			testRuntime := supportedRuntimes[runtimeIndex]
 			testSignal := supportedSignals[signalIndex]
-			
+
 			// Create process manager for the runtime
 			testArgs := []string{"uvx", "test-server"}
 			processManager := NewContainerProcessManager(testRuntime, testArgs)
-			
+
 			// Test signal forwarding mechanism (without actually starting container)
 			// We test the command construction logic
 			signalName := getSignalName(testSignal)
-			
+
 			// Verify signal name is valid
 			if signalName == "" {
 				t.Errorf("Signal name should not be empty for signal %v", testSignal)
 			}
-			
+
 			// Verify signal name follows expected format
 			expectedSignalNames := []string{"SIGINT", "SIGTERM", "SIGKILL", "SIGQUIT"}
 			validSignalName := false
@@ -5382,21 +5393,21 @@ func TestProperty1_SignalForwardingConsistency(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !validSignalName {
 				t.Errorf("Signal name %s is not in expected format for signal %v", signalName, testSignal)
 			}
-			
+
 			// Test container name generation consistency
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty")
 			}
-			
+
 			// Container name should be deterministic for same input
 			processManager2 := NewContainerProcessManager(testRuntime, testArgs)
 			containerName2 := processManager2.GetContainerName()
-			
+
 			// Names should be different (due to timestamp) but follow same pattern
 			if !strings.HasPrefix(containerName, "mcp-home-uvx-test-server-") {
 				t.Errorf("Container name %s does not follow expected pattern", containerName)
@@ -5404,13 +5415,13 @@ func TestProperty1_SignalForwardingConsistency(t *testing.T) {
 			if !strings.HasPrefix(containerName2, "mcp-home-uvx-test-server-") {
 				t.Errorf("Container name %s does not follow expected pattern", containerName2)
 			}
-			
+
 			// Test runtime command parsing for signal forwarding
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty", testRuntime)
 			}
-			
+
 			// First part should be a valid command name
 			if parts[0] == "" {
 				t.Errorf("Runtime command should not be empty for runtime %s", testRuntime)
@@ -5420,22 +5431,22 @@ func TestProperty1_SignalForwardingConsistency(t *testing.T) {
 }
 
 // Property 6: Platform Signal Support
-// For any supported platform (Linux, macOS, Windows), the signal handler should correctly handle 
+// For any supported platform (Linux, macOS, Windows), the signal handler should correctly handle
 // the platform-appropriate signals (SIGINT/SIGTERM/SIGQUIT on Unix, os.Interrupt on Windows)
 func TestProperty6_PlatformSignalSupport(t *testing.T) {
 	// **Feature: container-signal-handling, Property 6: Platform Signal Support**
 	// **Validates: Requirements 3.1, 3.2, 3.3**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test signal configuration loading
 	config := LoadSignalConfig()
 	if config == nil {
 		t.Fatal("Signal configuration should not be nil")
 	}
-	
+
 	// Test default timeout values
 	if config.SigintTimeout <= 0 {
 		t.Error("SIGINT timeout should be positive")
@@ -5443,12 +5454,12 @@ func TestProperty6_PlatformSignalSupport(t *testing.T) {
 	if config.SigtermTimeout <= 0 {
 		t.Error("SIGTERM timeout should be positive")
 	}
-	
+
 	// Test that SIGINT timeout is typically shorter than SIGTERM
 	if config.SigintTimeout >= config.SigtermTimeout {
 		t.Error("SIGINT timeout should typically be shorter than SIGTERM timeout")
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
@@ -5456,28 +5467,28 @@ func TestProperty6_PlatformSignalSupport(t *testing.T) {
 			testArgs := []string{"uvx", "test-server"}
 			processManager := NewContainerProcessManager("docker", testArgs)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Test signal handler creation
 			if signalHandler == nil {
 				t.Fatal("Signal handler should not be nil")
 			}
-			
+
 			// Test timeout configuration
 			testSigintTimeout := time.Duration(rand.Intn(10)+1) * time.Second
 			testSigtermTimeout := time.Duration(rand.Intn(20)+10) * time.Second
-			
+
 			signalHandler.SetTimeout(testSigintTimeout, testSigtermTimeout)
-			
+
 			// Test that process manager is accessible
 			pm := signalHandler.GetProcessManager()
 			if pm == nil {
 				t.Error("Process manager should not be nil")
 			}
-			
+
 			// Test signal configuration with environment variables
 			originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
 			originalDebug := os.Getenv("MCP_DEBUG")
-			
+
 			defer func() {
 				if originalTimeout != "" {
 					os.Setenv("MCP_SIGNAL_TIMEOUT", originalTimeout)
@@ -5490,11 +5501,11 @@ func TestProperty6_PlatformSignalSupport(t *testing.T) {
 					os.Unsetenv("MCP_DEBUG")
 				}
 			}()
-			
+
 			// Test with custom timeout
 			testTimeoutStr := fmt.Sprintf("%ds", rand.Intn(30)+5)
 			os.Setenv("MCP_SIGNAL_TIMEOUT", testTimeoutStr)
-			
+
 			customConfig := LoadSignalConfig()
 			if customConfig.SigtermTimeout <= 0 {
 				t.Error("Custom SIGTERM timeout should be positive")
@@ -5502,14 +5513,14 @@ func TestProperty6_PlatformSignalSupport(t *testing.T) {
 			if customConfig.SigintTimeout <= 0 {
 				t.Error("Custom SIGINT timeout should be positive")
 			}
-			
+
 			// Test debug logging configuration
 			os.Setenv("MCP_DEBUG", "true")
 			debugConfig := LoadSignalConfig()
 			if !debugConfig.EnableLogging {
 				t.Error("Debug logging should be enabled when MCP_DEBUG=true")
 			}
-			
+
 			os.Setenv("MCP_DEBUG", "false")
 			noDebugConfig := LoadSignalConfig()
 			if noDebugConfig.EnableLogging {
@@ -5517,7 +5528,7 @@ func TestProperty6_PlatformSignalSupport(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test platform-specific signal support
 	t.Run("platform_specific_signals", func(t *testing.T) {
 		switch runtime.GOOS {
@@ -5535,7 +5546,7 @@ func TestProperty6_PlatformSignalSupport(t *testing.T) {
 				if signalName == "" {
 					t.Errorf("Signal %v should have a valid signal name on Unix", sig)
 				}
-				
+
 				// Test expected signal names
 				switch sig {
 				case syscall.SIGINT:
@@ -5565,11 +5576,11 @@ func TestProperty6_PlatformSignalSupport(t *testing.T) {
 func TestProperty5_ConfigurationLoading(t *testing.T) {
 	// **Feature: container-signal-handling, Property 5: Configuration Loading**
 	// **Validates: Requirements 2.3**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Save original environment
 	originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
 	originalDebug := os.Getenv("MCP_DEBUG")
@@ -5585,19 +5596,19 @@ func TestProperty5_ConfigurationLoading(t *testing.T) {
 			os.Unsetenv("MCP_DEBUG")
 		}
 	}()
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Test case 1: Default configuration (no environment variables)
 			os.Unsetenv("MCP_SIGNAL_TIMEOUT")
 			os.Unsetenv("MCP_DEBUG")
-			
+
 			config := LoadSignalConfig()
 			if config == nil {
 				t.Fatal("Configuration should not be nil")
 			}
-			
+
 			// Verify default values
 			if config.SigtermTimeout != 10*time.Second {
 				t.Errorf("Expected default SIGTERM timeout 10s, got %v", config.SigtermTimeout)
@@ -5608,18 +5619,18 @@ func TestProperty5_ConfigurationLoading(t *testing.T) {
 			if config.EnableLogging != false {
 				t.Errorf("Expected default logging disabled, got %v", config.EnableLogging)
 			}
-			
+
 			// Test case 2: Valid timeout values
 			validTimeouts := []string{"1s", "5s", "10s", "30s", "1m", "2m30s"}
 			for _, timeoutStr := range validTimeouts {
 				os.Setenv("MCP_SIGNAL_TIMEOUT", timeoutStr)
-				
+
 				config := LoadSignalConfig()
 				expectedDuration, err := time.ParseDuration(timeoutStr)
 				if err != nil {
 					t.Fatalf("Test setup error: invalid duration %s", timeoutStr)
 				}
-				
+
 				if config.SigtermTimeout != expectedDuration {
 					t.Errorf("Expected SIGTERM timeout %v, got %v", expectedDuration, config.SigtermTimeout)
 				}
@@ -5627,12 +5638,12 @@ func TestProperty5_ConfigurationLoading(t *testing.T) {
 					t.Errorf("Expected SIGINT timeout %v, got %v", expectedDuration/2, config.SigintTimeout)
 				}
 			}
-			
+
 			// Test case 3: Invalid timeout values should use defaults
 			invalidTimeouts := []string{"invalid", "not-a-duration", "10", "abc123"}
 			for _, timeoutStr := range invalidTimeouts {
 				os.Setenv("MCP_SIGNAL_TIMEOUT", timeoutStr)
-				
+
 				config := LoadSignalConfig()
 				// Should fall back to defaults when parsing fails
 				if config.SigtermTimeout != 10*time.Second {
@@ -5642,7 +5653,7 @@ func TestProperty5_ConfigurationLoading(t *testing.T) {
 					t.Errorf("Expected fallback SIGINT timeout 5s for invalid input '%s', got %v", timeoutStr, config.SigintTimeout)
 				}
 			}
-			
+
 			// Test case 4: Debug logging configuration
 			debugValues := map[string]bool{
 				"true":  true,
@@ -5652,24 +5663,24 @@ func TestProperty5_ConfigurationLoading(t *testing.T) {
 				"":      false,
 				"other": false,
 			}
-			
+
 			for debugValue, expectedLogging := range debugValues {
 				if debugValue == "" {
 					os.Unsetenv("MCP_DEBUG")
 				} else {
 					os.Setenv("MCP_DEBUG", debugValue)
 				}
-				
+
 				config := LoadSignalConfig()
 				if config.EnableLogging != expectedLogging {
 					t.Errorf("Expected logging %v for MCP_DEBUG='%s', got %v", expectedLogging, debugValue, config.EnableLogging)
 				}
 			}
-			
+
 			// Test case 5: Combined configuration
 			os.Setenv("MCP_SIGNAL_TIMEOUT", "15s")
 			os.Setenv("MCP_DEBUG", "true")
-			
+
 			config = LoadSignalConfig()
 			if config.SigtermTimeout != 15*time.Second {
 				t.Errorf("Expected combined SIGTERM timeout 15s, got %v", config.SigtermTimeout)
@@ -5683,11 +5694,12 @@ func TestProperty5_ConfigurationLoading(t *testing.T) {
 		})
 	}
 }
+
 // Test container naming integration
 func TestContainerNamingIntegration(t *testing.T) {
 	// Test container naming logic without requiring actual container runtimes
 	// This tests the ProcessManager container naming functionality
-	
+
 	testCases := []struct {
 		name     string
 		runtime  string
@@ -5701,49 +5713,49 @@ func TestContainerNamingIntegration(t *testing.T) {
 			expected: "mcp-home-uvx-mcp-server-sqlite",
 		},
 		{
-			name:     "npx_command", 
+			name:     "npx_command",
 			runtime:  "podman",
 			args:     []string{"npx", "@modelcontextprotocol/server-filesystem", "/data"},
 			expected: "mcp-home-npx-modelcontextprotocol-server-filesystem",
 		},
 		{
 			name:     "lima_nerdctl",
-			runtime:  "lima nerdctl", 
+			runtime:  "lima nerdctl",
 			args:     []string{"python", "-m", "server"},
 			expected: "mcp-home-python",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Test ProcessManager container naming directly without volume creation
 			processManager := NewContainerProcessManager(tc.runtime, tc.args)
 			containerName := processManager.GetContainerName()
-			
+
 			t.Logf("Container name: %s", containerName)
 			t.Logf("Expected prefix: %s", tc.expected)
-			
+
 			// Verify container name follows expected pattern (starts with expected prefix)
 			if !strings.HasPrefix(containerName, tc.expected) {
 				t.Errorf("Container name doesn't start with expected prefix: got %s, expected prefix %s", containerName, tc.expected)
 			}
-			
+
 			// Verify container name contains timestamp (should end with digits)
 			parts := strings.Split(containerName, "-")
 			if len(parts) < 2 {
 				t.Errorf("Container name should contain timestamp: %s", containerName)
 			}
-			
+
 			lastPart := parts[len(parts)-1]
 			if len(lastPart) == 0 {
 				t.Errorf("Container name should end with timestamp: %s", containerName)
 			}
-			
+
 			// Verify the container name is unique (contains nanosecond timestamp)
 			if len(lastPart) < 10 { // Nanosecond timestamps are long
 				t.Errorf("Container name should contain nanosecond timestamp for uniqueness: %s", containerName)
 			}
-			
+
 			// Test that multiple calls generate different names (uniqueness)
 			processManager2 := NewContainerProcessManager(tc.runtime, tc.args)
 			containerName2 := processManager2.GetContainerName()
@@ -5759,32 +5771,32 @@ func TestContainerNamingIntegration(t *testing.T) {
 func TestProperty2_ExitCodePropagation(t *testing.T) {
 	// **Feature: container-signal-handling, Property 2: Exit Code Propagation**
 	// **Validates: Requirements 1.4**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Skip if no container runtime available
 	detector := NewRuntimeDetector()
 	containerRuntime, err := detector.Detect()
 	if err != nil {
 		t.Skipf("No container runtime available: %v", err)
 	}
-	
+
 	// Property test with reduced iterations for faster execution
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Generate test exit codes (reduced set for faster testing)
 			exitCodes := []int{0, 1, 2, 42, 130}
 			exitCode := exitCodes[i%len(exitCodes)]
-			
+
 			// Create a simple container command that exits with the specified code
 			// Use a minimal container that can exit with any code
 			args := []string{"sh", "-c", fmt.Sprintf("exit %d", exitCode)}
-			
+
 			// Create process manager
 			processManager := NewContainerProcessManager(containerRuntime, args)
-			
+
 			// Build a minimal container command for testing
 			containerArgs := []string{
 				"run", "-i", "--rm",
@@ -5792,7 +5804,7 @@ func TestProperty2_ExitCodePropagation(t *testing.T) {
 				"alpine:latest", // Use minimal alpine image
 			}
 			containerArgs = append(containerArgs, args...)
-			
+
 			// Handle multi-word runtimes
 			parts := strings.Fields(containerRuntime)
 			var containerCmd *exec.Cmd
@@ -5802,24 +5814,24 @@ func TestProperty2_ExitCodePropagation(t *testing.T) {
 			} else {
 				containerCmd = exec.Command(containerRuntime, containerArgs...)
 			}
-			
+
 			// Start the container
 			if err := processManager.StartContainer(containerCmd); err != nil {
 				t.Skipf("Failed to start container (may not have alpine image): %v", err)
 			}
-			
+
 			// Wait for exit and get the exit code
 			actualExitCode, err := processManager.WaitForExit()
-			
+
 			// Verify exit code propagation
 			if err != nil && exitCode == 0 {
 				t.Errorf("Expected no error for exit code 0, got: %v", err)
 			}
-			
+
 			if actualExitCode != exitCode {
 				t.Errorf("Exit code not propagated correctly: expected %d, got %d", exitCode, actualExitCode)
 			}
-			
+
 			// Test the handleExit function behavior
 			// Note: We can't test os.Exit() directly, but we can test the logic
 			if exitCode == 0 {
@@ -5832,30 +5844,31 @@ func TestProperty2_ExitCodePropagation(t *testing.T) {
 		})
 	}
 }
+
 // Property 3: Graceful Shutdown Wait
 // For any signal forwarded to a container process, the host process should wait for the container to exit gracefully before terminating itself
 func TestProperty3_GracefulShutdownWait(t *testing.T) {
 	// **Feature: container-signal-handling, Property 3: Graceful Shutdown Wait**
 	// **Validates: Requirements 1.3**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Skip if no container runtime available
 	detector := NewRuntimeDetector()
 	containerRuntime, err := detector.Detect()
 	if err != nil {
 		t.Skipf("No container runtime available: %v", err)
 	}
-	
+
 	// Property test with reduced iterations for faster execution
 	for i := 0; i < 5; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Test different graceful shutdown scenarios
 			shutdownDelays := []int{1, 2, 3} // seconds to wait before exiting
 			delay := shutdownDelays[i%len(shutdownDelays)]
-			
+
 			// Create a container command that handles signals gracefully
 			// This script will catch SIGTERM and wait before exiting
 			script := fmt.Sprintf(`
@@ -5864,13 +5877,13 @@ func TestProperty3_GracefulShutdownWait(t *testing.T) {
 				sleep 30 &  # Background sleep so we can interrupt
 				wait
 			`, delay)
-			
+
 			args := []string{"sh", "-c", script}
-			
+
 			// Create process manager and signal handler
 			processManager := NewContainerProcessManager(containerRuntime, args)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Build container command
 			containerArgs := []string{
 				"run", "-i", "--rm",
@@ -5878,7 +5891,7 @@ func TestProperty3_GracefulShutdownWait(t *testing.T) {
 				"alpine:latest", // Use minimal alpine image
 			}
 			containerArgs = append(containerArgs, args...)
-			
+
 			// Handle multi-word runtimes
 			parts := strings.Fields(containerRuntime)
 			var containerCmd *exec.Cmd
@@ -5888,23 +5901,23 @@ func TestProperty3_GracefulShutdownWait(t *testing.T) {
 			} else {
 				containerCmd = exec.Command(containerRuntime, containerArgs...)
 			}
-			
+
 			// Start the container
 			if err := processManager.StartContainer(containerCmd); err != nil {
 				t.Skipf("Failed to start container (may not have alpine image): %v", err)
 			}
-			
+
 			// Start signal handling
 			if err := signalHandler.Start(containerCmd); err != nil {
 				t.Fatalf("Failed to start signal handling: %v", err)
 			}
-			
+
 			// Give container more time to start and stabilize
 			time.Sleep(1 * time.Second)
-			
+
 			// Record start time for measuring graceful shutdown
 			startTime := time.Now()
-			
+
 			// Send SIGTERM signal to test graceful shutdown
 			if err := processManager.ForwardSignal(syscall.SIGTERM); err != nil {
 				signalHandler.Stop()
@@ -5915,14 +5928,14 @@ func TestProperty3_GracefulShutdownWait(t *testing.T) {
 				}
 				t.Skipf("Failed to forward signal (container may have exited): %v", err)
 			}
-			
+
 			// Wait for container to exit gracefully
 			exitCode, err := processManager.WaitForExit()
 			shutdownDuration := time.Since(startTime)
-			
+
 			// Stop signal handling
 			signalHandler.Stop()
-			
+
 			// Verify graceful shutdown behavior
 			// Note: We're more lenient with error handling due to race conditions
 			if err != nil {
@@ -5931,45 +5944,45 @@ func TestProperty3_GracefulShutdownWait(t *testing.T) {
 					t.Errorf("Expected graceful shutdown, got error: %v", err)
 				}
 			}
-			
+
 			// Accept exit code 0 (normal exit) or -1 (race condition where process already exited)
 			if exitCode != 0 && exitCode != -1 {
 				t.Errorf("Expected exit code 0 or -1 for graceful shutdown, got: %d", exitCode)
 			}
-			
+
 			// Verify that the host process waited for the container's graceful shutdown
 			// The shutdown should take at least the delay time (allowing some tolerance)
 			// But be more lenient for race conditions
 			minExpectedDuration := time.Duration(delay) * time.Second
 			maxExpectedDuration := minExpectedDuration + 3*time.Second // Allow 3s tolerance
-			
+
 			if shutdownDuration < minExpectedDuration && exitCode == 0 {
 				// Only enforce timing if we got a clean exit
-				t.Logf("Host process completed quickly (may be due to race condition): expected at least %v, got %v", 
+				t.Logf("Host process completed quickly (may be due to race condition): expected at least %v, got %v",
 					minExpectedDuration, shutdownDuration)
 			}
-			
+
 			if shutdownDuration > maxExpectedDuration {
-				t.Logf("Shutdown took longer than expected (but this is acceptable): expected max %v, got %v", 
+				t.Logf("Shutdown took longer than expected (but this is acceptable): expected max %v, got %v",
 					maxExpectedDuration, shutdownDuration)
 			}
-			
+
 			t.Logf("Graceful shutdown completed in %v (expected ~%ds), exit code: %d", shutdownDuration, delay, exitCode)
 		})
 	}
 }
 
 // Property 4: Timeout-Based Force Termination
-// For any container process that doesn't respond to signals within the configured timeout, 
+// For any container process that doesn't respond to signals within the configured timeout,
 // the signal handler should send SIGKILL to force termination
 func TestProperty4_TimeoutBasedForceTermination(t *testing.T) {
 	// **Feature: container-signal-handling, Property 4: Timeout-Based Force Termination**
 	// **Validates: Requirements 2.1, 2.2**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
@@ -5982,66 +5995,66 @@ func TestProperty4_TimeoutBasedForceTermination(t *testing.T) {
 					os.Unsetenv("MCP_SIGNAL_TIMEOUT")
 				}
 			}()
-			
+
 			// Generate random timeout values for testing
 			testTimeoutSeconds := rand.Intn(29) + 2 // 2-30 seconds
 			testTimeoutStr := fmt.Sprintf("%ds", testTimeoutSeconds)
 			os.Setenv("MCP_SIGNAL_TIMEOUT", testTimeoutStr)
-			
+
 			// Load configuration with the test timeout
 			config := LoadSignalConfig()
 			if config == nil {
 				t.Fatal("Signal configuration should not be nil")
 			}
-			
+
 			// Verify timeout values are loaded correctly
 			expectedDuration := time.Duration(testTimeoutSeconds) * time.Second
 			if config.SigtermTimeout != expectedDuration {
 				t.Errorf("Expected SIGTERM timeout %v, got %v", expectedDuration, config.SigtermTimeout)
 			}
-			
+
 			// SIGINT should be half of SIGTERM timeout
 			expectedSigintTimeout := expectedDuration / 2
 			if config.SigintTimeout != expectedSigintTimeout {
 				t.Errorf("Expected SIGINT timeout %v, got %v", expectedSigintTimeout, config.SigintTimeout)
 			}
-			
+
 			// Test signal handler creation with timeout configuration
 			testArgs := []string{"uvx", "test-server"}
 			processManager := NewContainerProcessManager("docker", testArgs)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			if signalHandler == nil {
 				t.Fatal("Signal handler should not be nil")
 			}
-			
+
 			// Test timeout setting
 			customSigintTimeout := time.Duration(rand.Intn(10)+1) * time.Second
 			customSigtermTimeout := time.Duration(rand.Intn(20)+10) * time.Second
-			
+
 			signalHandler.SetTimeout(customSigintTimeout, customSigtermTimeout)
-			
+
 			// Verify that the signal handler has the correct process manager
 			pm := signalHandler.GetProcessManager()
 			if pm == nil {
 				t.Error("Process manager should not be nil")
 			}
-			
+
 			// Test that the process manager can handle force kill operations
-			// (We can't actually test force kill without a running container, 
+			// (We can't actually test force kill without a running container,
 			// but we can test that the method exists and handles errors gracefully)
 			err := pm.ForceKill()
 			// Error is expected since no container is running
 			if err == nil {
 				t.Error("ForceKill should return error when no container is started")
 			}
-			
+
 			// Test signal name conversion for force termination
 			killSignalName := getSignalName(syscall.SIGKILL)
 			if killSignalName != "SIGKILL" {
 				t.Errorf("Expected SIGKILL signal name, got %s", killSignalName)
 			}
-			
+
 			// Test that timeout values are reasonable
 			if config.SigtermTimeout < time.Second {
 				t.Error("SIGTERM timeout should be at least 1 second")
@@ -6052,11 +6065,11 @@ func TestProperty4_TimeoutBasedForceTermination(t *testing.T) {
 			if config.SigtermTimeout > 5*time.Minute {
 				t.Error("SIGTERM timeout should not exceed 5 minutes")
 			}
-			
+
 			// Test default timeout values when no environment variable is set
 			os.Unsetenv("MCP_SIGNAL_TIMEOUT")
 			defaultConfig := LoadSignalConfig()
-			
+
 			if defaultConfig.SigtermTimeout != 10*time.Second {
 				t.Errorf("Expected default SIGTERM timeout 10s, got %v", defaultConfig.SigtermTimeout)
 			}
@@ -6065,7 +6078,7 @@ func TestProperty4_TimeoutBasedForceTermination(t *testing.T) {
 			}
 		})
 	}
-	
+
 	// Test invalid timeout values are handled gracefully
 	t.Run("invalid_timeout_values", func(t *testing.T) {
 		originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
@@ -6076,20 +6089,20 @@ func TestProperty4_TimeoutBasedForceTermination(t *testing.T) {
 				os.Unsetenv("MCP_SIGNAL_TIMEOUT")
 			}
 		}()
-		
+
 		invalidTimeouts := []string{"invalid", "-5s", "0s", "abc123", ""}
-		
+
 		for _, invalidTimeout := range invalidTimeouts {
 			os.Setenv("MCP_SIGNAL_TIMEOUT", invalidTimeout)
 			config := LoadSignalConfig()
-			
+
 			// Should fall back to default values for invalid timeouts
 			if config.SigtermTimeout != 10*time.Second {
-				t.Errorf("Invalid timeout %s should fall back to default SIGTERM timeout 10s, got %v", 
+				t.Errorf("Invalid timeout %s should fall back to default SIGTERM timeout 10s, got %v",
 					invalidTimeout, config.SigtermTimeout)
 			}
 			if config.SigintTimeout != 5*time.Second {
-				t.Errorf("Invalid timeout %s should fall back to default SIGINT timeout 5s, got %v", 
+				t.Errorf("Invalid timeout %s should fall back to default SIGINT timeout 5s, got %v",
 					invalidTimeout, config.SigintTimeout)
 			}
 		}
@@ -6101,10 +6114,10 @@ func TestProperty4_TimeoutBasedForceTermination(t *testing.T) {
 func TestForceTerminationExitCode(t *testing.T) {
 	// Test exit code handling for force termination scenarios
 	testCases := []struct {
-		name           string
-		containerExit  int
-		expectedExit   int
-		description    string
+		name          string
+		containerExit int
+		expectedExit  int
+		description   string
 	}{
 		{
 			name:          "normal_exit",
@@ -6143,12 +6156,12 @@ func TestForceTerminationExitCode(t *testing.T) {
 			description:   "Other signal termination should preserve exit code",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Test the exit code conversion logic that should be in WaitForExit
 			var actualExit int
-			
+
 			// Simulate the logic from WaitForExit method
 			if tc.containerExit == 137 {
 				// Force terminated with SIGKILL - return 130 as per requirements
@@ -6160,41 +6173,41 @@ func TestForceTerminationExitCode(t *testing.T) {
 				// Normal exit code
 				actualExit = tc.containerExit
 			}
-			
+
 			if actualExit != tc.expectedExit {
 				t.Errorf("%s: expected exit code %d, got %d", tc.description, tc.expectedExit, actualExit)
 			}
-			
+
 			t.Logf("%s: exit code %d -> %d ✓", tc.description, tc.containerExit, actualExit)
 		})
 	}
-	
+
 	// Test force kill error handling
 	t.Run("force_kill_error_handling", func(t *testing.T) {
 		testArgs := []string{"test", "command"}
 		processManager := NewContainerProcessManager("nonexistent-runtime", testArgs)
-		
+
 		// Force kill should return an error when container is not started
 		err := processManager.ForceKill()
 		if err == nil {
 			t.Error("ForceKill should return error when container is not started")
 		}
-		
+
 		expectedErrorMsg := "container not started"
 		if !strings.Contains(err.Error(), expectedErrorMsg) {
 			t.Errorf("Expected error message to contain '%s', got: %v", expectedErrorMsg, err)
 		}
 	})
-	
+
 	// Test force kill with already stopped container
 	t.Run("force_kill_already_stopped", func(t *testing.T) {
 		// This test verifies that the ForceKill method includes error handling
 		// for already-stopped containers by checking the error message patterns
-		
+
 		// The ForceKill method should handle "no such container" errors
 		// by returning nil (not an error) since the container is already stopped
 		// This is tested indirectly through the error message checking in ForceKill
-		
+
 		t.Log("ForceKill method includes error handling for already-stopped containers")
 	})
 }
@@ -6204,41 +6217,41 @@ func TestForceTerminationExitCode(t *testing.T) {
 func TestProperty12_ErrorHandlingResilience(t *testing.T) {
 	// **Feature: container-signal-handling, Property 12: Error Handling Resilience**
 	// **Validates: Requirements 6.1, 6.3**
-	
+
 	property := func(containerName string, signalType int) bool {
 		// Limit inputs to reasonable ranges
 		if len(containerName) == 0 || len(containerName) > 50 || signalType < 1 || signalType > 15 {
 			return true // Skip invalid inputs
 		}
-		
+
 		// Sanitize container name
 		sanitizedName := strings.ReplaceAll(containerName, " ", "-")
 		if sanitizedName == "" {
 			return true
 		}
-		
+
 		// Create a mock process manager that simulates signal forwarding failures
 		processManager := &MockProcessManager{
 			containerName: sanitizedName,
 			runtime:       "docker",
 			failSignal:    true, // Simulate signal forwarding failure
 		}
-		
+
 		// Create signal handler
 		signalHandler := NewSignalHandler(processManager)
-		
+
 		// Create a mock command
 		cmd := &exec.Cmd{
 			Path: "docker",
 			Args: []string{"docker", "run", "--name", sanitizedName, "test-image"},
 		}
-		
+
 		// Start signal handling
 		err := signalHandler.Start(cmd)
 		if err != nil {
 			return false // Signal handler should start successfully
 		}
-		
+
 		// Simulate signal forwarding (this should fail gracefully)
 		var signal os.Signal
 		switch signalType % 4 {
@@ -6251,27 +6264,27 @@ func TestProperty12_ErrorHandlingResilience(t *testing.T) {
 		default:
 			signal = syscall.SIGINT
 		}
-		
+
 		// Forward signal - this should fail but be handled gracefully
 		err = processManager.ForwardSignal(signal)
-		
+
 		// Property: Signal forwarding failure should be handled gracefully
 		// The error should be returned but not cause a panic or crash
 		if err == nil {
 			return false // We expect an error from our mock
 		}
-		
+
 		// Property: Error message should be descriptive
 		if !strings.Contains(err.Error(), "signal forwarding failed") {
 			return false
 		}
-		
+
 		// Stop signal handling
 		signalHandler.Stop()
-		
+
 		return true
 	}
-	
+
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Error(err)
 	}
@@ -6282,19 +6295,19 @@ func TestProperty12_ErrorHandlingResilience(t *testing.T) {
 func TestProperty15_ComprehensiveLogging(t *testing.T) {
 	// **Feature: container-signal-handling, Property 15: Comprehensive Logging**
 	// **Validates: Requirements 2.4, 7.1, 7.2, 7.3, 7.4**
-	
+
 	property := func(containerName string, enableLogging bool, timeoutSeconds int) bool {
 		// Limit inputs to reasonable ranges
 		if len(containerName) == 0 || len(containerName) > 50 || timeoutSeconds < 1 || timeoutSeconds > 30 {
 			return true // Skip invalid inputs
 		}
-		
+
 		// Sanitize container name
 		sanitizedName := strings.ReplaceAll(containerName, " ", "-")
 		if sanitizedName == "" {
 			return true
 		}
-		
+
 		// Set up logging environment
 		originalDebug := os.Getenv("MCP_DEBUG")
 		defer func() {
@@ -6304,13 +6317,13 @@ func TestProperty15_ComprehensiveLogging(t *testing.T) {
 				os.Setenv("MCP_DEBUG", originalDebug)
 			}
 		}()
-		
+
 		if enableLogging {
 			os.Setenv("MCP_DEBUG", "true")
 		} else {
 			os.Unsetenv("MCP_DEBUG")
 		}
-		
+
 		// Create signal configuration with custom timeout
 		originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
 		defer func() {
@@ -6320,60 +6333,60 @@ func TestProperty15_ComprehensiveLogging(t *testing.T) {
 				os.Setenv("MCP_SIGNAL_TIMEOUT", originalTimeout)
 			}
 		}()
-		
+
 		timeoutDuration := fmt.Sprintf("%ds", timeoutSeconds)
 		os.Setenv("MCP_SIGNAL_TIMEOUT", timeoutDuration)
-		
+
 		// Load signal configuration
 		config := LoadSignalConfig()
-		
+
 		// Property: Configuration should reflect environment variables
 		expectedTimeout := time.Duration(timeoutSeconds) * time.Second
 		if config.SigtermTimeout != expectedTimeout {
 			return false
 		}
-		
+
 		// Property: Logging should be enabled/disabled based on environment
 		if config.EnableLogging != enableLogging {
 			return false
 		}
-		
+
 		// Property: SIGINT timeout should be half of SIGTERM timeout
 		expectedSigintTimeout := expectedTimeout / 2
 		if config.SigintTimeout != expectedSigintTimeout {
 			return false
 		}
-		
+
 		// Create a mock process manager
 		processManager := &MockProcessManager{
 			containerName: sanitizedName,
 			runtime:       "docker",
 		}
-		
+
 		// Create signal handler with the loaded configuration
 		signalHandler := NewSignalHandler(processManager)
-		
+
 		// Property: Signal handler should use the loaded configuration
 		defaultHandler, ok := signalHandler.(*DefaultSignalHandler)
 		if !ok {
 			return false
 		}
-		
+
 		if defaultHandler.sigintTimeout != expectedSigintTimeout {
 			return false
 		}
-		
+
 		if defaultHandler.sigtermTimeout != expectedTimeout {
 			return false
 		}
-		
+
 		if defaultHandler.config.EnableLogging != enableLogging {
 			return false
 		}
-		
+
 		return true
 	}
-	
+
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Error(err)
 	}
@@ -6384,40 +6397,40 @@ func TestProperty15_ComprehensiveLogging(t *testing.T) {
 func TestProperty14_ForceTerminationErrorHandling(t *testing.T) {
 	// **Feature: container-signal-handling, Property 14: Force Termination Error Handling**
 	// **Validates: Requirements 6.4**
-	
+
 	property := func(containerName string, forceKillFails bool) bool {
 		// Limit inputs to reasonable ranges
 		if len(containerName) == 0 || len(containerName) > 50 {
 			return true // Skip invalid inputs
 		}
-		
+
 		// Use the same sanitization logic as the production code
 		// This matches the sanitizeVolumeName function behavior
 		sanitizedName := strings.ToLower(containerName)
 		sanitizedName = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(sanitizedName, "-")
 		sanitizedName = strings.Trim(sanitizedName, "-")
-		
+
 		// If sanitization resulted in empty string, skip this input
 		if sanitizedName == "" {
 			return true
 		}
-		
+
 		// Create a mock process manager that can simulate force kill failures
 		processManager := &MockProcessManager{
-			containerName:   sanitizedName,
-			runtime:         "docker",
-			failForceKill:   forceKillFails,
+			containerName: sanitizedName,
+			runtime:       "docker",
+			failForceKill: forceKillFails,
 		}
-		
+
 		// Test force kill behavior
 		err := processManager.ForceKill()
-		
+
 		if forceKillFails {
 			// Property: When force kill fails, should return descriptive error
 			if err == nil {
 				return false
 			}
-			
+
 			// Property: Error message should be descriptive
 			if !strings.Contains(err.Error(), "force kill failed") {
 				return false
@@ -6428,10 +6441,10 @@ func TestProperty14_ForceTerminationErrorHandling(t *testing.T) {
 				return false
 			}
 		}
-		
+
 		return true
 	}
-	
+
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Error(err)
 	}
@@ -6466,11 +6479,11 @@ func (mpm *MockProcessManager) ForwardSignal(signal os.Signal) error {
 	if !mpm.started {
 		return fmt.Errorf("container not started")
 	}
-	
+
 	if mpm.failSignal {
 		return fmt.Errorf("signal forwarding failed: mock error for signal %v", signal)
 	}
-	
+
 	return nil
 }
 
@@ -6478,11 +6491,11 @@ func (mpm *MockProcessManager) ForceKill() error {
 	if !mpm.started {
 		return fmt.Errorf("container not started")
 	}
-	
+
 	if mpm.failForceKill {
 		return fmt.Errorf("force kill failed: mock error")
 	}
-	
+
 	return nil
 }
 
@@ -6493,12 +6506,12 @@ func (mpm *MockProcessManager) ForceKill() error {
 // Requirements: 6.1, 6.2, 6.3, 6.4
 func TestSignalForwardingErrorHandling(t *testing.T) {
 	testCases := []struct {
-		name           string
-		containerName  string
-		runtime        string
-		failSignal     bool
-		failForceKill  bool
-		expectedError  string
+		name          string
+		containerName string
+		runtime       string
+		failSignal    bool
+		failForceKill bool
+		expectedError string
 	}{
 		{
 			name:          "successful signal forwarding",
@@ -6533,7 +6546,7 @@ func TestSignalForwardingErrorHandling(t *testing.T) {
 			expectedError: "signal forwarding failed",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create mock process manager with specified failure modes
@@ -6543,21 +6556,21 @@ func TestSignalForwardingErrorHandling(t *testing.T) {
 				failSignal:    tc.failSignal,
 				failForceKill: tc.failForceKill,
 			}
-			
+
 			// Start container
 			cmd := &exec.Cmd{
 				Path: tc.runtime,
 				Args: []string{tc.runtime, "run", "--name", tc.containerName, "test-image"},
 			}
-			
+
 			err := processManager.StartContainer(cmd)
 			if err != nil {
 				t.Fatalf("Failed to start container: %v", err)
 			}
-			
+
 			// Test signal forwarding
 			err = processManager.ForwardSignal(syscall.SIGTERM)
-			
+
 			if tc.failSignal {
 				if err == nil {
 					t.Errorf("Expected signal forwarding to fail but it succeeded")
@@ -6569,11 +6582,11 @@ func TestSignalForwardingErrorHandling(t *testing.T) {
 					t.Errorf("Expected signal forwarding to succeed but got error: %v", err)
 				}
 			}
-			
+
 			// Test force kill if signal forwarding failed
 			if tc.failSignal {
 				err = processManager.ForceKill()
-				
+
 				if tc.failForceKill {
 					if err == nil {
 						t.Errorf("Expected force kill to fail but it succeeded")
@@ -6599,33 +6612,33 @@ func TestDuplicateSignalHandling(t *testing.T) {
 		runtime:       "docker",
 		exitCode:      0,
 	}
-	
+
 	// Start container
 	cmd := &exec.Cmd{
 		Path: "docker",
 		Args: []string{"docker", "run", "--name", "test-container-duplicate", "test-image"},
 	}
-	
+
 	err := processManager.StartContainer(cmd)
 	if err != nil {
 		t.Fatalf("Failed to start container: %v", err)
 	}
-	
+
 	// First signal should succeed
 	err = processManager.ForwardSignal(syscall.SIGTERM)
 	if err != nil {
 		t.Errorf("First signal forwarding failed: %v", err)
 	}
-	
+
 	// Simulate container termination by setting started to false
 	processManager.started = false
-	
+
 	// Second signal should handle gracefully (container already terminated)
 	err = processManager.ForwardSignal(syscall.SIGTERM)
 	if err == nil {
 		t.Errorf("Expected error for signal to already-terminated container")
 	}
-	
+
 	// Error should be descriptive but not cause system failure
 	if !strings.Contains(err.Error(), "container not started") {
 		t.Errorf("Expected descriptive error for terminated container, got: %v", err)
@@ -6638,7 +6651,7 @@ func TestSignalLoggingConfiguration(t *testing.T) {
 	// Save original environment
 	originalDebug := os.Getenv("MCP_DEBUG")
 	originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
-	
+
 	defer func() {
 		if originalDebug == "" {
 			os.Unsetenv("MCP_DEBUG")
@@ -6651,7 +6664,7 @@ func TestSignalLoggingConfiguration(t *testing.T) {
 			os.Setenv("MCP_SIGNAL_TIMEOUT", originalTimeout)
 		}
 	}()
-	
+
 	testCases := []struct {
 		name            string
 		debugValue      string
@@ -6702,7 +6715,7 @@ func TestSignalLoggingConfiguration(t *testing.T) {
 			expectedTimeout: 10 * time.Second, // Default SIGTERM timeout
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Set environment variables
@@ -6711,26 +6724,26 @@ func TestSignalLoggingConfiguration(t *testing.T) {
 			} else {
 				os.Setenv("MCP_DEBUG", tc.debugValue)
 			}
-			
+
 			if tc.timeoutValue == "" {
 				os.Unsetenv("MCP_SIGNAL_TIMEOUT")
 			} else {
 				os.Setenv("MCP_SIGNAL_TIMEOUT", tc.timeoutValue)
 			}
-			
+
 			// Load configuration
 			config := LoadSignalConfig()
-			
+
 			// Verify logging configuration
 			if config.EnableLogging != tc.expectedLogging {
 				t.Errorf("Expected logging enabled=%v, got %v", tc.expectedLogging, config.EnableLogging)
 			}
-			
+
 			// Verify timeout configuration
 			if config.SigtermTimeout != tc.expectedTimeout {
 				t.Errorf("Expected SIGTERM timeout=%v, got %v", tc.expectedTimeout, config.SigtermTimeout)
 			}
-			
+
 			// Verify SIGINT timeout is half of SIGTERM
 			expectedSigintTimeout := tc.expectedTimeout / 2
 			if config.SigintTimeout != expectedSigintTimeout {
@@ -6745,13 +6758,13 @@ func TestSignalLoggingConfiguration(t *testing.T) {
 func TestProperty11_EphemeralVolumeCleanup(t *testing.T) {
 	// **Feature: container-signal-handling, Property 11: Ephemeral Volume Cleanup**
 	// **Validates: Requirements 5.5**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	config := &Config{EphemeralMode: true}
-	
+
 	// Test with different server names and runtimes
 	testCases := []struct {
 		serverName string
@@ -6763,22 +6776,22 @@ func TestProperty11_EphemeralVolumeCleanup(t *testing.T) {
 		{"node server.js", "docker"},
 		{"uvx test-server", "podman"},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(fmt.Sprintf("server=%s,runtime=%s", tc.serverName, tc.runtime), func(t *testing.T) {
 			volumeManager := NewVolumeManagerWithRuntime(config, tc.runtime)
-			
+
 			// Create ephemeral volume
 			volumeName, err := volumeManager.CreateEphemeralVolume(tc.serverName, tc.runtime)
 			if err != nil {
 				t.Skipf("Cannot create ephemeral volume with runtime %s: %v", tc.runtime, err)
 			}
-			
+
 			// Verify volume name follows ephemeral pattern
 			if !strings.HasPrefix(volumeName, "mcp-ephemeral-") {
 				t.Errorf("Ephemeral volume name %s does not follow expected pattern mcp-ephemeral-*", volumeName)
 			}
-			
+
 			// Verify volume exists
 			exists, err := volumeManager.commander.VolumeExists(volumeName)
 			if err != nil {
@@ -6787,13 +6800,13 @@ func TestProperty11_EphemeralVolumeCleanup(t *testing.T) {
 			if !exists {
 				t.Errorf("Ephemeral volume %s should exist after creation", volumeName)
 			}
-			
+
 			// Simulate signal handling cleanup (this is what executeWithSignalHandlingAndCleanup does)
 			// Requirements: 5.5 - Volume cleanup occurs after container termination during signal handling
 			if cleanupErr := volumeManager.CleanupEphemeralVolume(volumeName); cleanupErr != nil {
 				t.Errorf("Failed to cleanup ephemeral volume %s during signal handling: %v", volumeName, cleanupErr)
 			}
-			
+
 			// Verify volume no longer exists after signal handling cleanup
 			exists, err = volumeManager.commander.VolumeExists(volumeName)
 			if err != nil {
@@ -6811,14 +6824,14 @@ func TestProperty11_EphemeralVolumeCleanup(t *testing.T) {
 func TestProperty8_ProcessGroupIndependence(t *testing.T) {
 	// **Feature: container-signal-handling, Property 8: Process Group Independence**
 	// **Validates: Requirements 5.1**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	// Test different process group scenarios
 	testScenarios := []struct {
 		name        string
@@ -6829,69 +6842,69 @@ func TestProperty8_ProcessGroupIndependence(t *testing.T) {
 		{"job_control", "Process with job control enabled"},
 		{"no_job_control", "Process with job control disabled"},
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Generate random test data
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			scenarioIndex := rand.Intn(len(testScenarios))
-			
+
 			testRuntime := supportedRuntimes[runtimeIndex]
 			testScenario := testScenarios[scenarioIndex]
-			
+
 			// Create signal handler and process manager
 			testArgs := []string{"uvx", "test-server"}
 			processManager := NewContainerProcessManager(testRuntime, testArgs)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Test that signal handler configuration is independent of process group
 			// The signal handler should work regardless of process group membership
-			
+
 			// Verify signal handler can be created and configured
 			if signalHandler == nil {
 				t.Error("Signal handler should not be nil")
 			}
-			
+
 			// Test signal capture setup (should work regardless of process group)
 			config := LoadSignalConfig()
 			if config == nil {
 				t.Error("Signal configuration should not be nil")
 			}
-			
+
 			// Verify timeout configuration is independent of process group
 			signalHandler.SetTimeout(5*time.Second, 10*time.Second)
-			
+
 			// Test that process manager can be retrieved (independence test)
 			retrievedPM := signalHandler.GetProcessManager()
 			if retrievedPM == nil {
 				t.Error("Process manager should not be nil")
 			}
-			
+
 			// Verify container naming works independently of process group
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty")
 			}
-			
+
 			// Container name should follow expected pattern regardless of process group
 			if !strings.HasPrefix(containerName, "mcp-home-uvx-test-server-") {
 				t.Errorf("Container name %s does not follow expected pattern for scenario %s", containerName, testScenario.name)
 			}
-			
+
 			// Test signal forwarding command construction (should be independent of process group)
 			testSignal := syscall.SIGTERM
 			signalName := getSignalName(testSignal)
 			if signalName != "SIGTERM" {
 				t.Errorf("Signal name should be SIGTERM, got %s", signalName)
 			}
-			
+
 			// Verify runtime command parsing works independently
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty", testRuntime)
 			}
-			
+
 			// Test that signal handler can be stopped cleanly (independence test)
 			if err := signalHandler.Stop(); err != nil {
 				t.Errorf("Signal handler stop should not fail: %v", err)
@@ -6905,14 +6918,14 @@ func TestProperty8_ProcessGroupIndependence(t *testing.T) {
 func TestProperty9_ChildProcessSignalPropagation(t *testing.T) {
 	// **Feature: container-signal-handling, Property 9: Child Process Signal Propagation**
 	// **Validates: Requirements 5.2**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	// Test signals that should propagate to child processes
 	var propagationSignals []os.Signal
 	switch runtime.GOOS {
@@ -6923,7 +6936,7 @@ func TestProperty9_ChildProcessSignalPropagation(t *testing.T) {
 	default:
 		propagationSignals = []os.Signal{os.Interrupt}
 	}
-	
+
 	// Test different child process scenarios
 	childProcessScenarios := []struct {
 		name        string
@@ -6935,7 +6948,7 @@ func TestProperty9_ChildProcessSignalPropagation(t *testing.T) {
 		{"node_child_process", "Node.js process spawning child processes", []string{"node", "-e", "require('child_process').spawn('sleep', ['30'])"}},
 		{"uvx_server", "UVX server that may spawn child processes", []string{"uvx", "test-server"}},
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
@@ -6943,44 +6956,44 @@ func TestProperty9_ChildProcessSignalPropagation(t *testing.T) {
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			signalIndex := rand.Intn(len(propagationSignals))
 			scenarioIndex := rand.Intn(len(childProcessScenarios))
-			
+
 			testRuntime := supportedRuntimes[runtimeIndex]
 			testSignal := propagationSignals[signalIndex]
 			testScenario := childProcessScenarios[scenarioIndex]
-			
+
 			// Create process manager for the runtime
 			processManager := NewContainerProcessManager(testRuntime, testScenario.command)
-			
+
 			// Test signal forwarding mechanism for child process propagation
 			// Container runtimes handle child process signal propagation automatically
 			// when signals are sent to the main container process
-			
+
 			// Verify signal name is valid for propagation
 			signalName := getSignalName(testSignal)
 			if signalName == "" {
 				t.Errorf("Signal name should not be empty for signal %v", testSignal)
 			}
-			
+
 			// Test that container naming supports child process scenarios
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty for child process scenario")
 			}
-			
+
 			// Verify container name follows expected pattern
 			expectedVolumeName := sanitizeVolumeName(testScenario.command)
 			// Container names are based on volume names with timestamp suffix
 			if !strings.HasPrefix(containerName, expectedVolumeName+"-") {
-				t.Errorf("Container name %s does not follow expected pattern %s- for child process scenario %s", 
+				t.Errorf("Container name %s does not follow expected pattern %s- for child process scenario %s",
 					containerName, expectedVolumeName, testScenario.name)
 			}
-			
+
 			// Test runtime command construction for child process signal propagation
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty", testRuntime)
 			}
-			
+
 			// Verify signal forwarding command structure supports child process propagation
 			// All container runtimes use: <runtime> kill --signal <signal> <container>
 			// This automatically propagates to child processes within the container
@@ -6992,18 +7005,18 @@ func TestProperty9_ChildProcessSignalPropagation(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !validSignalName {
 				t.Errorf("Signal name %s is not valid for child process propagation with signal %v", signalName, testSignal)
 			}
-			
+
 			// Test that BuildCommand creates proper container command for child processes
 			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
 			cmd := processManager.BuildCommand(image, testScenario.command)
 			if cmd == nil {
 				t.Error("Built command should not be nil for child process scenario")
 			}
-			
+
 			// Verify command includes container name for signal targeting
 			cmdArgs := cmd.Args
 			nameIndex := -1
@@ -7013,7 +7026,7 @@ func TestProperty9_ChildProcessSignalPropagation(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if nameIndex == -1 {
 				t.Error("Container command should include --name flag for child process signal propagation")
 			} else if cmdArgs[nameIndex] != containerName {
@@ -7028,14 +7041,14 @@ func TestProperty9_ChildProcessSignalPropagation(t *testing.T) {
 func TestProperty10_HostTerminationCleanup(t *testing.T) {
 	// **Feature: container-signal-handling, Property 10: Host Termination Cleanup**
 	// **Validates: Requirements 5.4**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	// Test different host termination scenarios
 	terminationScenarios := []struct {
 		name        string
@@ -7046,7 +7059,7 @@ func TestProperty10_HostTerminationCleanup(t *testing.T) {
 		{"parent_sigkill", "Parent process sends SIGKILL", syscall.SIGKILL},
 		{"parent_sigint", "Parent process sends SIGINT (Ctrl-C)", syscall.SIGINT},
 	}
-	
+
 	// Add Windows-specific scenarios
 	if runtime.GOOS == "windows" {
 		terminationScenarios = []struct {
@@ -7057,75 +7070,75 @@ func TestProperty10_HostTerminationCleanup(t *testing.T) {
 			{"parent_interrupt", "Parent process sends interrupt", os.Interrupt},
 		}
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Generate random test data
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			scenarioIndex := rand.Intn(len(terminationScenarios))
-			
+
 			testRuntime := supportedRuntimes[runtimeIndex]
 			testScenario := terminationScenarios[scenarioIndex]
-			
+
 			// Create process manager and signal handler
 			testArgs := []string{"uvx", "test-server"}
 			processManager := NewContainerProcessManager(testRuntime, testArgs)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Test host termination cleanup mechanism
 			// The signal handler should ensure container cleanup when host is terminated
-			
+
 			// Verify signal handler can handle termination signals
 			config := LoadSignalConfig()
 			if config == nil {
 				t.Error("Signal configuration should not be nil for host termination cleanup")
 			}
-			
+
 			// Test signal name conversion for termination cleanup
 			signalName := getSignalName(testScenario.signal)
 			if signalName == "" {
 				t.Errorf("Signal name should not be empty for termination signal %v", testScenario.signal)
 			}
-			
+
 			// Verify container naming supports cleanup operations
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty for host termination cleanup")
 			}
-			
+
 			// Container name should be unique and identifiable for cleanup
 			if !strings.HasPrefix(containerName, "mcp-home-uvx-test-server-") {
 				t.Errorf("Container name %s does not follow expected pattern for cleanup", containerName)
 			}
-			
+
 			// Test that force kill mechanism works for cleanup
 			// This is what happens when host termination requires immediate cleanup
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty for cleanup operations", testRuntime)
 			}
-			
+
 			// Verify force kill command structure for host termination cleanup
 			// Force kill uses SIGKILL to ensure container termination
 			forceKillSignal := getSignalName(syscall.SIGKILL)
 			if forceKillSignal != "SIGKILL" {
 				t.Errorf("Force kill signal should be SIGKILL, got %s", forceKillSignal)
 			}
-			
+
 			// Test signal handler cleanup behavior
 			// When host is terminated, signal handler should clean up properly
 			if err := signalHandler.Stop(); err != nil {
 				t.Errorf("Signal handler stop should not fail during host termination cleanup: %v", err)
 			}
-			
+
 			// Test that container command includes --rm flag for automatic cleanup
 			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
 			cmd := processManager.BuildCommand(image, testArgs)
 			if cmd == nil {
 				t.Error("Built command should not be nil for host termination cleanup")
 			}
-			
+
 			// Verify command includes --rm flag for automatic container removal
 			cmdArgs := cmd.Args
 			hasRmFlag := false
@@ -7135,11 +7148,11 @@ func TestProperty10_HostTerminationCleanup(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !hasRmFlag {
 				t.Error("Container command should include --rm flag for automatic cleanup on host termination")
 			}
-			
+
 			// Verify command includes container name for targeted cleanup
 			hasNameFlag := false
 			for i, arg := range cmdArgs {
@@ -7148,7 +7161,7 @@ func TestProperty10_HostTerminationCleanup(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !hasNameFlag {
 				t.Error("Container command should include --name flag with correct name for host termination cleanup")
 			}
@@ -7161,14 +7174,14 @@ func TestProperty10_HostTerminationCleanup(t *testing.T) {
 func TestProperty16_StreamDraining(t *testing.T) {
 	// **Feature: container-signal-handling, Property 16: Stream Draining**
 	// **Validates: Requirements 8.1**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	// Test different stream scenarios with pending data
 	streamScenarios := []struct {
 		name        string
@@ -7182,7 +7195,7 @@ func TestProperty16_StreamDraining(t *testing.T) {
 		{"no_output", "Container with no output", []string{"sleep", "1"}, false},
 		{"continuous_output", "Container with continuous output", []string{"sh", "-c", "while true; do echo 'data'; sleep 0.1; done"}, true},
 	}
-	
+
 	// Test signals that should allow stream draining
 	var drainableSignals []os.Signal
 	switch runtime.GOOS {
@@ -7193,7 +7206,7 @@ func TestProperty16_StreamDraining(t *testing.T) {
 	default:
 		drainableSignals = []os.Signal{os.Interrupt}
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
@@ -7201,54 +7214,54 @@ func TestProperty16_StreamDraining(t *testing.T) {
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			scenarioIndex := rand.Intn(len(streamScenarios))
 			signalIndex := rand.Intn(len(drainableSignals))
-			
+
 			testRuntime := supportedRuntimes[runtimeIndex]
 			testScenario := streamScenarios[scenarioIndex]
 			testSignal := drainableSignals[signalIndex]
-			
+
 			// Create process manager and signal handler
 			processManager := NewContainerProcessManager(testRuntime, testScenario.command)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Test stream draining configuration
 			// The signal handler should be configured to allow stream draining
-			
+
 			// Verify signal handler supports stream draining timeouts
 			config := LoadSignalConfig()
 			if config == nil {
 				t.Error("Signal configuration should not be nil for stream draining")
 			}
-			
+
 			// Test that timeout configuration allows for stream draining
 			// Stream draining should happen within the signal timeout period
 			signalHandler.SetTimeout(5*time.Second, 10*time.Second)
-			
+
 			// Verify signal name is valid for stream draining
 			signalName := getSignalName(testSignal)
 			if signalName == "" {
 				t.Errorf("Signal name should not be empty for drainable signal %v", testSignal)
 			}
-			
+
 			// Test container naming for stream draining scenarios
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty for stream draining")
 			}
-			
+
 			// Container name should follow expected pattern
 			expectedVolumeName := sanitizeVolumeName(testScenario.command)
 			if !strings.HasPrefix(containerName, expectedVolumeName+"-") {
-				t.Errorf("Container name %s does not follow expected pattern %s- for stream scenario %s", 
+				t.Errorf("Container name %s does not follow expected pattern %s- for stream scenario %s",
 					containerName, expectedVolumeName, testScenario.name)
 			}
-			
+
 			// Test that BuildCommand creates proper container for stream handling
 			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
 			cmd := processManager.BuildCommand(image, testScenario.command)
 			if cmd == nil {
 				t.Error("Built command should not be nil for stream draining scenario")
 			}
-			
+
 			// Verify command includes interactive flag for proper stream handling
 			cmdArgs := cmd.Args
 			hasInteractiveFlag := false
@@ -7258,33 +7271,33 @@ func TestProperty16_StreamDraining(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !hasInteractiveFlag {
 				t.Error("Container command should include -i flag for proper stream handling during draining")
 			}
-			
+
 			// Test signal forwarding mechanism for stream draining
 			// The signal should be forwarded but allow time for stream draining
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty for stream draining", testRuntime)
 			}
-			
+
 			// Verify that graceful signals (not SIGKILL) are used for stream draining
 			if testSignal == syscall.SIGKILL {
 				t.Skip("SIGKILL does not allow stream draining, skipping")
 			}
-			
+
 			// Test that signal handler can be stopped cleanly after stream draining
 			if err := signalHandler.Stop(); err != nil {
 				t.Errorf("Signal handler stop should not fail after stream draining: %v", err)
 			}
-			
+
 			// Verify stream draining timeout is reasonable
 			// Should be less than or equal to the signal timeout
-			streamTimeout := 2 * time.Second // Reasonable stream draining timeout
+			streamTimeout := 2 * time.Second  // Reasonable stream draining timeout
 			signalTimeout := 10 * time.Second // Default signal timeout
-			
+
 			if streamTimeout > signalTimeout {
 				t.Errorf("Stream draining timeout %v should not exceed signal timeout %v", streamTimeout, signalTimeout)
 			}
@@ -7297,14 +7310,14 @@ func TestProperty16_StreamDraining(t *testing.T) {
 func TestProperty17_EOFDetectionAndShutdown(t *testing.T) {
 	// **Feature: container-signal-handling, Property 17: EOF Detection and Shutdown**
 	// **Validates: Requirements 8.2**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	// Test different EOF scenarios
 	eofScenarios := []struct {
 		name        string
@@ -7320,55 +7333,55 @@ func TestProperty17_EOFDetectionAndShutdown(t *testing.T) {
 		{"immediate_exit", "Container exits immediately", []string{"true"}, true},
 		{"long_running", "Long running container", []string{"sleep", "30"}, false},
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Generate random test data
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			scenarioIndex := rand.Intn(len(eofScenarios))
-			
+
 			testRuntime := supportedRuntimes[runtimeIndex]
 			testScenario := eofScenarios[scenarioIndex]
-			
+
 			// Create process manager and signal handler
 			processManager := NewContainerProcessManager(testRuntime, testScenario.command)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Test EOF detection configuration
 			// The signal handler should be able to detect when container streams close
-			
+
 			// Verify signal handler can handle EOF scenarios
 			config := LoadSignalConfig()
 			if config == nil {
 				t.Error("Signal configuration should not be nil for EOF detection")
 			}
-			
+
 			// Test container naming for EOF detection scenarios
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty for EOF detection")
 			}
-			
+
 			// Container name should follow expected pattern
 			expectedVolumeName := sanitizeVolumeName(testScenario.command)
 			if !strings.HasPrefix(containerName, expectedVolumeName+"-") {
-				t.Errorf("Container name %s does not follow expected pattern %s- for EOF scenario %s", 
+				t.Errorf("Container name %s does not follow expected pattern %s- for EOF scenario %s",
 					containerName, expectedVolumeName, testScenario.name)
 			}
-			
+
 			// Test that BuildCommand creates proper container for EOF detection
 			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
 			cmd := processManager.BuildCommand(image, testScenario.command)
 			if cmd == nil {
 				t.Error("Built command should not be nil for EOF detection scenario")
 			}
-			
+
 			// Verify command includes proper flags for stream handling
 			cmdArgs := cmd.Args
 			hasInteractiveFlag := false
 			hasRemoveFlag := false
-			
+
 			for _, arg := range cmdArgs {
 				if arg == "-i" {
 					hasInteractiveFlag = true
@@ -7377,41 +7390,41 @@ func TestProperty17_EOFDetectionAndShutdown(t *testing.T) {
 					hasRemoveFlag = true
 				}
 			}
-			
+
 			if !hasInteractiveFlag {
 				t.Error("Container command should include -i flag for EOF detection")
 			}
-			
+
 			if !hasRemoveFlag {
 				t.Error("Container command should include --rm flag for cleanup after EOF")
 			}
-			
+
 			// Test runtime command parsing for EOF handling
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty for EOF detection", testRuntime)
 			}
-			
+
 			// Verify that process manager can handle container exit detection
 			// This is tested through the WaitForExit method
 			if processManager == nil {
 				t.Error("Process manager should not be nil for EOF detection")
 			}
-			
+
 			// Test signal handler configuration for EOF scenarios
 			signalHandler.SetTimeout(5*time.Second, 10*time.Second)
-			
+
 			// Verify signal handler can be started and stopped for EOF handling
 			// Note: We don't actually start a container here, just test the configuration
 			if err := signalHandler.Stop(); err != nil {
 				t.Errorf("Signal handler stop should not fail for EOF detection: %v", err)
 			}
-			
+
 			// Test that EOF detection works with different exit scenarios
 			if testScenario.expectsEOF {
 				// For scenarios that expect EOF, verify the command structure supports detection
 				// The container runtime will handle EOF detection automatically
-				
+
 				// Verify container name is present for process tracking
 				hasNameFlag := false
 				for i, arg := range cmdArgs {
@@ -7420,7 +7433,7 @@ func TestProperty17_EOFDetectionAndShutdown(t *testing.T) {
 						break
 					}
 				}
-				
+
 				if !hasNameFlag {
 					t.Error("Container command should include --name flag for EOF detection and process tracking")
 				}
@@ -7434,14 +7447,14 @@ func TestProperty17_EOFDetectionAndShutdown(t *testing.T) {
 func TestProperty18_StreamTimeoutOverride(t *testing.T) {
 	// **Feature: container-signal-handling, Property 18: Stream Timeout Override**
 	// **Validates: Requirements 8.3**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	// Test different timeout scenarios
 	timeoutScenarios := []struct {
 		name           string
@@ -7451,13 +7464,13 @@ func TestProperty18_StreamTimeoutOverride(t *testing.T) {
 		signalTimeout  time.Duration
 		shouldOverride bool
 	}{
-		{"fast_drain", "Stream drains quickly", []string{"sh", "-c", "echo 'quick'; sleep 0.1"}, 1*time.Second, 5*time.Second, false},
-		{"slow_drain", "Stream drains slowly", []string{"sh", "-c", "echo 'slow'; sleep 3"}, 2*time.Second, 1*time.Second, true},
-		{"infinite_output", "Continuous stream output", []string{"sh", "-c", "while true; do echo 'data'; done"}, 1*time.Second, 2*time.Second, true},
-		{"blocked_stream", "Blocked stream scenario", []string{"sh", "-c", "echo 'blocked'; sleep 10"}, 1*time.Second, 3*time.Second, true},
-		{"normal_timeout", "Normal timeout scenario", []string{"sh", "-c", "echo 'normal'; sleep 1"}, 3*time.Second, 5*time.Second, false},
+		{"fast_drain", "Stream drains quickly", []string{"sh", "-c", "echo 'quick'; sleep 0.1"}, 1 * time.Second, 5 * time.Second, false},
+		{"slow_drain", "Stream drains slowly", []string{"sh", "-c", "echo 'slow'; sleep 3"}, 2 * time.Second, 1 * time.Second, true},
+		{"infinite_output", "Continuous stream output", []string{"sh", "-c", "while true; do echo 'data'; done"}, 1 * time.Second, 2 * time.Second, true},
+		{"blocked_stream", "Blocked stream scenario", []string{"sh", "-c", "echo 'blocked'; sleep 10"}, 1 * time.Second, 3 * time.Second, true},
+		{"normal_timeout", "Normal timeout scenario", []string{"sh", "-c", "echo 'normal'; sleep 1"}, 3 * time.Second, 5 * time.Second, false},
 	}
-	
+
 	// Test signals that support timeout override
 	var timeoutSignals []os.Signal
 	switch runtime.GOOS {
@@ -7468,7 +7481,7 @@ func TestProperty18_StreamTimeoutOverride(t *testing.T) {
 	default:
 		timeoutSignals = []os.Signal{os.Interrupt}
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
@@ -7476,53 +7489,53 @@ func TestProperty18_StreamTimeoutOverride(t *testing.T) {
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			scenarioIndex := rand.Intn(len(timeoutScenarios))
 			signalIndex := rand.Intn(len(timeoutSignals))
-			
+
 			testRuntime := supportedRuntimes[runtimeIndex]
 			testScenario := timeoutScenarios[scenarioIndex]
 			testSignal := timeoutSignals[signalIndex]
-			
+
 			// Create process manager and signal handler
 			processManager := NewContainerProcessManager(testRuntime, testScenario.command)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Test stream timeout override configuration
 			// The signal handler should enforce timeouts even during stream draining
-			
+
 			// Configure timeouts for testing override behavior
 			signalHandler.SetTimeout(testScenario.streamTimeout, testScenario.signalTimeout)
-			
+
 			// Verify signal handler configuration supports timeout override
 			config := LoadSignalConfig()
 			if config == nil {
 				t.Error("Signal configuration should not be nil for timeout override")
 			}
-			
+
 			// Test signal name for timeout override scenarios
 			signalName := getSignalName(testSignal)
 			if signalName == "" {
 				t.Errorf("Signal name should not be empty for timeout signal %v", testSignal)
 			}
-			
+
 			// Test container naming for timeout scenarios
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty for timeout override")
 			}
-			
+
 			// Container name should follow expected pattern
 			expectedVolumeName := sanitizeVolumeName(testScenario.command)
 			if !strings.HasPrefix(containerName, expectedVolumeName+"-") {
-				t.Errorf("Container name %s does not follow expected pattern %s- for timeout scenario %s", 
+				t.Errorf("Container name %s does not follow expected pattern %s- for timeout scenario %s",
 					containerName, expectedVolumeName, testScenario.name)
 			}
-			
+
 			// Test that BuildCommand creates proper container for timeout handling
 			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
 			cmd := processManager.BuildCommand(image, testScenario.command)
 			if cmd == nil {
 				t.Error("Built command should not be nil for timeout override scenario")
 			}
-			
+
 			// Verify command structure supports force termination after timeout
 			cmdArgs := cmd.Args
 			hasNameFlag := false
@@ -7532,46 +7545,46 @@ func TestProperty18_StreamTimeoutOverride(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !hasNameFlag {
 				t.Error("Container command should include --name flag for timeout override and force termination")
 			}
-			
+
 			// Test force kill mechanism for timeout override
 			// When stream timeout is exceeded, force termination should be used
 			forceKillSignal := getSignalName(syscall.SIGKILL)
 			if forceKillSignal != "SIGKILL" {
 				t.Errorf("Force kill signal should be SIGKILL for timeout override, got %s", forceKillSignal)
 			}
-			
+
 			// Test runtime command parsing for timeout override
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty for timeout override", testRuntime)
 			}
-			
+
 			// Verify timeout logic: stream timeout vs signal timeout
 			if testScenario.shouldOverride {
 				// When stream draining would exceed signal timeout, force termination should occur
 				if testScenario.streamTimeout <= testScenario.signalTimeout {
 					// This scenario expects override but timeouts don't support it
 					// This tests the edge case where override logic should still work
-					t.Logf("Scenario %s: stream timeout %v <= signal timeout %v, but override expected", 
+					t.Logf("Scenario %s: stream timeout %v <= signal timeout %v, but override expected",
 						testScenario.name, testScenario.streamTimeout, testScenario.signalTimeout)
 				}
 			} else {
 				// When stream draining completes within signal timeout, no override needed
 				if testScenario.streamTimeout > testScenario.signalTimeout {
-					t.Errorf("Scenario %s: stream timeout %v > signal timeout %v, but no override expected", 
+					t.Errorf("Scenario %s: stream timeout %v > signal timeout %v, but no override expected",
 						testScenario.name, testScenario.streamTimeout, testScenario.signalTimeout)
 				}
 			}
-			
+
 			// Test signal handler cleanup for timeout scenarios
 			if err := signalHandler.Stop(); err != nil {
 				t.Errorf("Signal handler stop should not fail for timeout override: %v", err)
 			}
-			
+
 			// Verify that timeout override preserves container cleanup
 			hasRemoveFlag := false
 			for _, arg := range cmdArgs {
@@ -7580,7 +7593,7 @@ func TestProperty18_StreamTimeoutOverride(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !hasRemoveFlag {
 				t.Error("Container command should include --rm flag for cleanup after timeout override")
 			}
@@ -7593,14 +7606,14 @@ func TestProperty18_StreamTimeoutOverride(t *testing.T) {
 func TestProperty19_StdinEOFHandling(t *testing.T) {
 	// **Feature: container-signal-handling, Property 19: Stdin EOF Handling**
 	// **Validates: Requirements 8.4**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	// Test different stdin EOF scenarios
 	stdinScenarios := []struct {
 		name        string
@@ -7616,55 +7629,55 @@ func TestProperty19_StdinEOFHandling(t *testing.T) {
 		{"sleep_command", "Sleep command (no stdin)", []string{"sleep", "30"}, false},
 		{"uvx_server", "UVX MCP server", []string{"uvx", "test-server"}, true},
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Generate random test data
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			scenarioIndex := rand.Intn(len(stdinScenarios))
-			
+
 			testRuntime := supportedRuntimes[runtimeIndex]
 			testScenario := stdinScenarios[scenarioIndex]
-			
+
 			// Create process manager and signal handler
 			processManager := NewContainerProcessManager(testRuntime, testScenario.command)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Test stdin EOF handling configuration
 			// The signal handler should handle stdin closure gracefully
-			
+
 			// Verify signal handler supports stdin EOF scenarios
 			config := LoadSignalConfig()
 			if config == nil {
 				t.Error("Signal configuration should not be nil for stdin EOF handling")
 			}
-			
+
 			// Test container naming for stdin scenarios
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty for stdin EOF handling")
 			}
-			
+
 			// Container name should follow expected pattern
 			expectedVolumeName := sanitizeVolumeName(testScenario.command)
 			if !strings.HasPrefix(containerName, expectedVolumeName+"-") {
-				t.Errorf("Container name %s does not follow expected pattern %s- for stdin scenario %s", 
+				t.Errorf("Container name %s does not follow expected pattern %s- for stdin scenario %s",
 					containerName, expectedVolumeName, testScenario.name)
 			}
-			
+
 			// Test that BuildCommand creates proper container for stdin handling
 			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
 			cmd := processManager.BuildCommand(image, testScenario.command)
 			if cmd == nil {
 				t.Error("Built command should not be nil for stdin EOF scenario")
 			}
-			
+
 			// Verify command includes interactive flag for stdin handling
 			cmdArgs := cmd.Args
 			hasInteractiveFlag := false
 			hasNameFlag := false
-			
+
 			for i, arg := range cmdArgs {
 				if arg == "-i" {
 					hasInteractiveFlag = true
@@ -7673,35 +7686,35 @@ func TestProperty19_StdinEOFHandling(t *testing.T) {
 					hasNameFlag = true
 				}
 			}
-			
+
 			if !hasInteractiveFlag {
 				t.Error("Container command should include -i flag for proper stdin EOF handling")
 			}
-			
+
 			if !hasNameFlag {
 				t.Error("Container command should include --name flag for stdin EOF process tracking")
 			}
-			
+
 			// Test runtime command parsing for stdin EOF handling
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty for stdin EOF handling", testRuntime)
 			}
-			
+
 			// Test signal handler configuration for stdin EOF scenarios
 			signalHandler.SetTimeout(5*time.Second, 10*time.Second)
-			
+
 			// For commands that read stdin, test graceful shutdown behavior
 			if testScenario.readsStdin {
 				// Commands that read stdin should handle EOF gracefully
 				// The container runtime will propagate stdin closure to the container
-				
+
 				// Verify that graceful shutdown signals are available
 				gracefulSignals := []os.Signal{syscall.SIGTERM, syscall.SIGINT}
 				if runtime.GOOS == "windows" {
 					gracefulSignals = []os.Signal{os.Interrupt}
 				}
-				
+
 				for _, sig := range gracefulSignals {
 					signalName := getSignalName(sig)
 					if signalName == "" {
@@ -7713,12 +7726,12 @@ func TestProperty19_StdinEOFHandling(t *testing.T) {
 				// but may not require special stdin handling
 				t.Logf("Scenario %s does not read stdin, EOF handling is automatic", testScenario.name)
 			}
-			
+
 			// Test that signal handler can handle stdin EOF scenarios
 			if err := signalHandler.Stop(); err != nil {
 				t.Errorf("Signal handler stop should not fail for stdin EOF handling: %v", err)
 			}
-			
+
 			// Verify container cleanup after stdin EOF
 			hasRemoveFlag := false
 			for _, arg := range cmdArgs {
@@ -7727,22 +7740,22 @@ func TestProperty19_StdinEOFHandling(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !hasRemoveFlag {
 				t.Error("Container command should include --rm flag for cleanup after stdin EOF")
 			}
-			
+
 			// Test that process manager can handle stdin EOF detection
 			// This is primarily handled by the container runtime, but we verify the setup
 			if processManager == nil {
 				t.Error("Process manager should not be nil for stdin EOF handling")
 			}
-			
+
 			// Verify that stdin EOF leads to graceful shutdown, not force termination
 			// This is tested by ensuring graceful signals are preferred over SIGKILL
 			forceKillSignal := getSignalName(syscall.SIGKILL)
 			gracefulSignal := getSignalName(syscall.SIGTERM)
-			
+
 			if forceKillSignal == gracefulSignal {
 				t.Error("Force kill signal should be different from graceful signal for proper stdin EOF handling")
 			}
@@ -7755,18 +7768,18 @@ func TestProperty19_StdinEOFHandling(t *testing.T) {
 func TestProperty7_UnsupportedSignalResilience(t *testing.T) {
 	// **Feature: container-signal-handling, Property 7: Unsupported Signal Resilience**
 	// **Validates: Requirements 3.5**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	// Define platform-specific supported and unsupported signals
 	var supportedSignals []os.Signal
 	var unsupportedSignals []os.Signal
-	
+
 	switch runtime.GOOS {
 	case "windows":
 		supportedSignals = []os.Signal{os.Interrupt}
@@ -7780,38 +7793,38 @@ func TestProperty7_UnsupportedSignalResilience(t *testing.T) {
 		supportedSignals = []os.Signal{os.Interrupt}
 		unsupportedSignals = []os.Signal{syscall.SIGTERM, syscall.SIGQUIT}
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
 			// Generate random test data
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			testRuntime := supportedRuntimes[runtimeIndex]
-			
+
 			// Create process manager and signal handler
 			testArgs := []string{"uvx", "test-server"}
 			processManager := NewContainerProcessManager(testRuntime, testArgs)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Test that supported signals are recognized as supported
 			for _, sig := range supportedSignals {
 				if !signalHandler.(*DefaultSignalHandler).isSupportedSignal(sig) {
 					t.Errorf("Signal %v should be supported on platform %s", sig, runtime.GOOS)
 				}
 			}
-			
+
 			// Test that unsupported signals are recognized as unsupported
 			for _, sig := range unsupportedSignals {
 				if signalHandler.(*DefaultSignalHandler).isSupportedSignal(sig) {
 					t.Errorf("Signal %v should be unsupported on platform %s", sig, runtime.GOOS)
 				}
 			}
-			
+
 			// Test signal handler creation and configuration
 			if signalHandler == nil {
 				t.Fatal("Signal handler should not be nil")
 			}
-			
+
 			// Test that unsupported signals don't cause errors in signal name conversion
 			for _, sig := range unsupportedSignals {
 				signalName := getSignalName(sig)
@@ -7819,36 +7832,36 @@ func TestProperty7_UnsupportedSignalResilience(t *testing.T) {
 					t.Errorf("Signal name should not be empty for unsupported signal %v", sig)
 				}
 				// Signal name should either be a standard name or the string representation
-				if signalName != "SIGINT" && signalName != "SIGTERM" && signalName != "SIGKILL" && 
-				   signalName != "SIGQUIT" && signalName != sig.String() {
+				if signalName != "SIGINT" && signalName != "SIGTERM" && signalName != "SIGKILL" &&
+					signalName != "SIGQUIT" && signalName != sig.String() {
 					t.Errorf("Signal name %s should be either standard or string representation for signal %v", signalName, sig)
 				}
 			}
-			
+
 			// Test container naming consistency for unsupported signal scenarios
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty for unsupported signal handling")
 			}
-			
+
 			// Container name should follow expected pattern
 			expectedVolumeName := sanitizeVolumeName(testArgs)
 			if !strings.HasPrefix(containerName, expectedVolumeName+"-") {
 				t.Errorf("Container name %s does not follow expected pattern %s-", containerName, expectedVolumeName)
 			}
-			
+
 			// Test that BuildCommand creates proper container for signal handling
 			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
 			cmd := processManager.BuildCommand(image, testArgs)
 			if cmd == nil {
 				t.Error("Built command should not be nil for unsupported signal handling")
 			}
-			
+
 			// Verify command includes necessary flags for signal handling
 			cmdArgs := cmd.Args
 			hasNameFlag := false
 			hasRemoveFlag := false
-			
+
 			for i, arg := range cmdArgs {
 				if arg == "--name" && i+1 < len(cmdArgs) && cmdArgs[i+1] == containerName {
 					hasNameFlag = true
@@ -7857,24 +7870,24 @@ func TestProperty7_UnsupportedSignalResilience(t *testing.T) {
 					hasRemoveFlag = true
 				}
 			}
-			
+
 			if !hasNameFlag {
 				t.Error("Container command should include --name flag for signal handling")
 			}
-			
+
 			if !hasRemoveFlag {
 				t.Error("Container command should include --rm flag for cleanup")
 			}
-			
+
 			// Test runtime command parsing for unsupported signal scenarios
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty", testRuntime)
 			}
-			
+
 			// Test signal handler configuration
 			signalHandler.SetTimeout(5*time.Second, 10*time.Second)
-			
+
 			// Test that signal handler can be stopped gracefully
 			if err := signalHandler.Stop(); err != nil {
 				t.Errorf("Signal handler stop should not fail: %v", err)
@@ -7888,14 +7901,14 @@ func TestProperty7_UnsupportedSignalResilience(t *testing.T) {
 func TestProperty13_DuplicateSignalHandling(t *testing.T) {
 	// **Feature: container-signal-handling, Property 13: Duplicate Signal Handling**
 	// **Validates: Requirements 6.2**
-	
+
 	if testing.Short() {
 		t.Skip("Skipping property test in short mode")
 	}
-	
+
 	// Test supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch"}
-	
+
 	// Test supported signals (platform-specific)
 	var supportedSignals []os.Signal
 	switch runtime.GOOS {
@@ -7906,7 +7919,7 @@ func TestProperty13_DuplicateSignalHandling(t *testing.T) {
 	default:
 		supportedSignals = []os.Signal{os.Interrupt}
 	}
-	
+
 	// Common error messages that indicate container already terminated
 	duplicateSignalErrors := []string{
 		"container not started",
@@ -7918,7 +7931,7 @@ func TestProperty13_DuplicateSignalHandling(t *testing.T) {
 		"container is not running",
 		"no container found",
 	}
-	
+
 	// Property test with multiple iterations
 	for i := 0; i < 10; i++ {
 		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
@@ -7926,24 +7939,24 @@ func TestProperty13_DuplicateSignalHandling(t *testing.T) {
 			runtimeIndex := rand.Intn(len(supportedRuntimes))
 			signalIndex := rand.Intn(len(supportedSignals))
 			errorIndex := rand.Intn(len(duplicateSignalErrors))
-			
+
 			testRuntime := supportedRuntimes[runtimeIndex]
 			testSignal := supportedSignals[signalIndex]
 			testErrorMsg := duplicateSignalErrors[errorIndex]
-			
+
 			// Create process manager and signal handler
 			testArgs := []string{"uvx", "test-server"}
 			processManager := NewContainerProcessManager(testRuntime, testArgs)
 			signalHandler := NewSignalHandler(processManager)
-			
+
 			// Test duplicate signal error detection
 			testError := fmt.Errorf("failed to forward signal: %s", testErrorMsg)
 			isDuplicate := signalHandler.(*DefaultSignalHandler).isDuplicateSignalError(testError)
-			
+
 			if !isDuplicate {
 				t.Errorf("Error '%s' should be recognized as duplicate signal error", testError.Error())
 			}
-			
+
 			// Test that non-duplicate errors are not misidentified
 			nonDuplicateErrors := []string{
 				"network error",
@@ -7952,48 +7965,48 @@ func TestProperty13_DuplicateSignalHandling(t *testing.T) {
 				"invalid signal",
 				"timeout occurred",
 			}
-			
+
 			for _, nonDuplicateMsg := range nonDuplicateErrors {
 				nonDuplicateError := fmt.Errorf("failed to forward signal: %s", nonDuplicateMsg)
 				if signalHandler.(*DefaultSignalHandler).isDuplicateSignalError(nonDuplicateError) {
 					t.Errorf("Error '%s' should NOT be recognized as duplicate signal error", nonDuplicateError.Error())
 				}
 			}
-			
+
 			// Test nil error handling
 			if signalHandler.(*DefaultSignalHandler).isDuplicateSignalError(nil) {
 				t.Error("Nil error should not be recognized as duplicate signal error")
 			}
-			
+
 			// Test signal handler creation and configuration
 			if signalHandler == nil {
 				t.Fatal("Signal handler should not be nil")
 			}
-			
+
 			// Test container naming for duplicate signal scenarios
 			containerName := processManager.GetContainerName()
 			if containerName == "" {
 				t.Error("Container name should not be empty for duplicate signal handling")
 			}
-			
+
 			// Container name should follow expected pattern
 			expectedVolumeName := sanitizeVolumeName(testArgs)
 			if !strings.HasPrefix(containerName, expectedVolumeName+"-") {
 				t.Errorf("Container name %s does not follow expected pattern %s-", containerName, expectedVolumeName)
 			}
-			
+
 			// Test that BuildCommand creates proper container for signal handling
 			image := "ghcr.io/walmsles/run-mcp-nodejs:latest"
 			cmd := processManager.BuildCommand(image, testArgs)
 			if cmd == nil {
 				t.Error("Built command should not be nil for duplicate signal handling")
 			}
-			
+
 			// Verify command includes necessary flags for signal handling
 			cmdArgs := cmd.Args
 			hasNameFlag := false
 			hasRemoveFlag := false
-			
+
 			for i, arg := range cmdArgs {
 				if arg == "--name" && i+1 < len(cmdArgs) && cmdArgs[i+1] == containerName {
 					hasNameFlag = true
@@ -8002,42 +8015,42 @@ func TestProperty13_DuplicateSignalHandling(t *testing.T) {
 					hasRemoveFlag = true
 				}
 			}
-			
+
 			if !hasNameFlag {
 				t.Error("Container command should include --name flag for signal handling")
 			}
-			
+
 			if !hasRemoveFlag {
 				t.Error("Container command should include --rm flag for cleanup")
 			}
-			
+
 			// Test signal name conversion for duplicate signal scenarios
 			signalName := getSignalName(testSignal)
 			if signalName == "" {
 				t.Errorf("Signal name should not be empty for signal %v", testSignal)
 			}
-			
+
 			// Test runtime command parsing for duplicate signal scenarios
 			parts := strings.Fields(testRuntime)
 			if len(parts) == 0 {
 				t.Errorf("Runtime %s should not be empty", testRuntime)
 			}
-			
+
 			// Test signal handler configuration
 			signalHandler.SetTimeout(5*time.Second, 10*time.Second)
-			
+
 			// Test that signal handler can be stopped gracefully
 			if err := signalHandler.Stop(); err != nil {
 				t.Errorf("Signal handler stop should not fail: %v", err)
 			}
-			
+
 			// Test that process manager handles duplicate signals gracefully
 			// We can't actually test with a running container, but we can test error handling
 			pm := signalHandler.GetProcessManager()
 			if pm == nil {
 				t.Error("Process manager should not be nil for duplicate signal handling")
 			}
-			
+
 			// Test force kill error handling (should handle "container not found" gracefully)
 			err := pm.ForceKill()
 			// Error is expected since no container is running, but it should be handled gracefully
@@ -8047,6 +8060,7 @@ func TestProperty13_DuplicateSignalHandling(t *testing.T) {
 		})
 	}
 }
+
 // Task 11: Final integration and testing
 // Test signal handling with all supported container runtimes (Docker, Podman, Nerdctl, Finch, Lima)
 // Verify backward compatibility with existing functionality
@@ -8055,17 +8069,17 @@ func TestProperty13_DuplicateSignalHandling(t *testing.T) {
 func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 	// Test signal handling integration across all supported container runtimes
 	// This test verifies that signal forwarding works consistently across all runtimes
-	
+
 	// Define all supported container runtimes
 	supportedRuntimes := []string{"docker", "podman", "nerdctl", "finch", "lima nerdctl"}
-	
+
 	// Test configuration
 	config := &Config{
 		NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
 		PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
 		DataDir:     t.TempDir(),
 	}
-	
+
 	// Test cases for different scenarios
 	testCases := []struct {
 		name        string
@@ -8086,13 +8100,13 @@ func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 			description: "Node.js MCP server with signal handling",
 		},
 	}
-	
+
 	for _, runtime := range supportedRuntimes {
 		t.Run(fmt.Sprintf("runtime_%s", strings.ReplaceAll(runtime, " ", "_")), func(t *testing.T) {
 			// Check if runtime is available
 			detector := NewRuntimeDetector()
 			availableRuntimes := detector.ListAvailableRuntimes()
-			
+
 			runtimeAvailable := false
 			for _, available := range availableRuntimes {
 				if available.Name == runtime {
@@ -8100,11 +8114,11 @@ func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if !runtimeAvailable {
 				t.Skipf("Runtime %s not available on this system", runtime)
 			}
-			
+
 			for _, tc := range testCases {
 				t.Run(tc.name, func(t *testing.T) {
 					// Test 1: Build container command with signal handling support
@@ -8112,22 +8126,22 @@ func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 					if err != nil {
 						t.Fatalf("buildContainerCommandWithSignals failed for runtime %s: %v", runtime, err)
 					}
-					
+
 					// Verify command structure
 					if containerCmd == nil {
 						t.Fatalf("buildContainerCommandWithSignals returned nil command for runtime %s", runtime)
 					}
-					
+
 					if signalHandler == nil {
 						t.Fatalf("buildContainerCommandWithSignals returned nil signal handler for runtime %s", runtime)
 					}
-					
+
 					// Test 2: Verify container naming for signal forwarding
 					processManager := signalHandler.GetProcessManager()
 					if processManager == nil {
 						t.Fatalf("Signal handler should have a process manager for runtime %s", runtime)
 					}
-					
+
 					// Verify container name is generated for signal forwarding
 					args := containerCmd.Args
 					foundNameFlag := false
@@ -8141,31 +8155,31 @@ func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 							break
 						}
 					}
-					
+
 					if !foundNameFlag {
 						t.Errorf("Container command should include --name flag for signal forwarding with runtime %s", runtime)
 					}
-					
+
 					// Test 3: Verify signal handler configuration
 					// Test timeout configuration
 					signalHandler.SetTimeout(3*time.Second, 5*time.Second)
-					
+
 					// Test process group independence (Requirements 5.1)
 					signalHandler.SetProcessGroupIndependent(true)
-					
+
 					// Test host termination cleanup (Requirements 5.4)
 					signalHandler.EnableHostTerminationCleanup(true)
-					
+
 					// Test stream handling (Requirements 8.1, 8.2, 8.3, 8.4)
 					signalHandler.EnableStreamHandling(true)
 					signalHandler.SetStreamTimeout(2 * time.Second)
-					
+
 					// Test 4: Verify runtime-specific command structure
 					// Check that the command is properly structured for the runtime
 					if len(args) == 0 {
 						t.Fatalf("Command args should not be empty for runtime %s", runtime)
 					}
-					
+
 					// For multi-word runtimes like "lima nerdctl", verify proper command structure
 					if strings.Contains(runtime, " ") {
 						parts := strings.Fields(runtime)
@@ -8177,7 +8191,7 @@ func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 							t.Errorf("Expected command to start with %s for runtime %s, got %s", runtime, runtime, args[0])
 						}
 					}
-					
+
 					// Test 5: Verify backward compatibility
 					// The command should still include all the standard container options
 					expectedFlags := []string{"-i", "--rm"}
@@ -8193,18 +8207,18 @@ func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 							t.Errorf("Expected flag %s not found in command for runtime %s", expectedFlag, runtime)
 						}
 					}
-					
+
 					// Test 6: Verify volume handling remains compatible
 					if volumeName == "" && os.Getenv("MCP_BIND_HOME") == "" && os.Getenv("MCP_HOME_PATH") == "" {
 						t.Errorf("Expected volume name to be generated for runtime %s", runtime)
 					}
-					
+
 					// Test 7: Verify image selection works correctly
 					expectedImage, err := config.GetImageForLanguage(tc.language)
 					if err != nil {
 						t.Fatalf("Failed to get image for language %s: %v", tc.language, err)
 					}
-					
+
 					foundImage := false
 					for _, arg := range args {
 						if arg == expectedImage {
@@ -8215,7 +8229,7 @@ func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 					if !foundImage {
 						t.Errorf("Expected image %s not found in command for runtime %s", expectedImage, runtime)
 					}
-					
+
 					// Test 8: Test signal forwarding mechanism (without actually running container)
 					// This tests the signal forwarding command construction
 					if cpm, ok := processManager.(*ContainerProcessManager); ok {
@@ -8228,7 +8242,7 @@ func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 						} else if !strings.Contains(err.Error(), "container") {
 							t.Errorf("Error should mention container for runtime %s, got: %v", runtime, err)
 						}
-						
+
 						// Test force kill
 						err = cpm.ForceKill()
 						// Similar expectation - should fail but indicate the mechanism is working
@@ -8238,7 +8252,7 @@ func TestSignalHandlingIntegrationAllRuntimes(t *testing.T) {
 							t.Errorf("Error should mention container for runtime %s, got: %v", runtime, err)
 						}
 					}
-					
+
 					// Test 9: Verify cross-platform signal support
 					// Test that the signal handler supports platform-appropriate signals
 					if signalHandler != nil {
@@ -8263,13 +8277,13 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 	// Test that signal handling doesn't break existing functionality
 	// Since both buildContainerCommand and buildContainerCommandWithSignals now include signal handling,
 	// we test that the signal-enabled version produces valid, working commands
-	
+
 	config := &Config{
 		NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
 		PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
 		DataDir:     t.TempDir(),
 	}
-	
+
 	// Test cases that should work exactly the same as before
 	testCases := []struct {
 		name        string
@@ -8296,14 +8310,14 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 			description: "Python with explicit runtime should work with signal handling",
 		},
 	}
-	
+
 	// Get available runtime for testing
 	detector := NewRuntimeDetector()
 	containerRuntime, err := detector.Detect()
 	if err != nil {
 		t.Skip("No container runtime available for backward compatibility testing")
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Test with signal handling (current implementation)
@@ -8311,10 +8325,10 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildContainerCommandWithSignals failed: %v", err)
 			}
-			
+
 			// Verify the command has all expected components for backward compatibility
 			args := containerCmd.Args
-			
+
 			// Test 1: Verify standard container flags are present
 			expectedFlags := []string{"-i", "--rm"}
 			for _, expectedFlag := range expectedFlags {
@@ -8329,7 +8343,7 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 					t.Errorf("Expected flag %s not found in command", expectedFlag)
 				}
 			}
-			
+
 			// Test 2: Verify container name is present (for signal handling)
 			foundNameFlag := false
 			for i, arg := range args {
@@ -8345,7 +8359,7 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 			if !foundNameFlag {
 				t.Error("Container command should include --name flag for signal forwarding")
 			}
-			
+
 			// Test 3: Verify volume mounting works
 			foundHomeMount := false
 			for i, arg := range args {
@@ -8359,13 +8373,13 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 			if !foundHomeMount {
 				t.Error("Expected home volume mount to /home/mcp")
 			}
-			
+
 			// Test 4: Verify image selection works correctly
 			expectedImage, err := config.GetImageForLanguage(tc.language)
 			if err != nil {
 				t.Fatalf("Failed to get image for language %s: %v", tc.language, err)
 			}
-			
+
 			foundImage := false
 			for _, arg := range args {
 				if arg == expectedImage {
@@ -8376,7 +8390,7 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 			if !foundImage {
 				t.Errorf("Expected image %s not found in command", expectedImage)
 			}
-			
+
 			// Test 5: Verify command arguments are preserved
 			imageIndex := -1
 			for i, arg := range args {
@@ -8385,16 +8399,16 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 					break
 				}
 			}
-			
+
 			if imageIndex != -1 && imageIndex+1 < len(args) {
 				commandArgs := args[imageIndex+1:]
 				expectedArgs := tc.args
-				
+
 				// Handle explicit runtime specification
 				if len(tc.args) >= 2 && (tc.args[0] == "python" || tc.args[0] == "node" || tc.args[0] == "nodejs") {
 					expectedArgs = tc.args[1:]
 				}
-				
+
 				if len(commandArgs) >= len(expectedArgs) {
 					for i, expected := range expectedArgs {
 						if i < len(commandArgs) && commandArgs[i] != expected {
@@ -8405,12 +8419,12 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 					t.Errorf("Not enough command arguments: expected at least %d, got %d", len(expectedArgs), len(commandArgs))
 				}
 			}
-			
+
 			// Test 6: Verify volume name generation works
 			if volumeName == "" && os.Getenv("MCP_BIND_HOME") == "" && os.Getenv("MCP_HOME_PATH") == "" {
 				t.Error("Expected volume name to be generated")
 			}
-			
+
 			// Test 7: Verify signal handler is properly initialized
 			if signalHandler == nil {
 				t.Error("Signal handler should not be nil")
@@ -8419,7 +8433,7 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 				if pm == nil {
 					t.Error("Process manager should not be nil")
 				}
-				
+
 				// Test signal handler configuration
 				signalHandler.SetTimeout(3*time.Second, 5*time.Second)
 				signalHandler.SetProcessGroupIndependent(true)
@@ -8435,49 +8449,49 @@ func TestSignalHandlingBackwardCompatibility(t *testing.T) {
 // Requirements: 3.1, 3.2, 3.3
 func TestSignalHandlingCrossPlatform(t *testing.T) {
 	// Test platform-specific signal handling behavior
-	
+
 	// Get available runtime for testing
 	detector := NewRuntimeDetector()
 	containerRuntime, err := detector.Detect()
 	if err != nil {
 		t.Skip("No container runtime available for cross-platform testing")
 	}
-	
+
 	config := &Config{
 		NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
 		PythonImage: "ghcr.io/serverless-dna/run-mcp-python:latest",
 		DataDir:     t.TempDir(),
 	}
-	
+
 	args := []string{"uvx", "mcp-server-sqlite", "--db-path", "/data/db.sqlite"}
-	
+
 	// Build container command with signal handling
 	_, _, signalHandler, err := buildContainerCommandWithSignals(config, containerRuntime, "python", args)
 	if err != nil {
 		t.Fatalf("buildContainerCommandWithSignals failed: %v", err)
 	}
-	
+
 	if signalHandler == nil {
 		t.Fatal("Signal handler should not be nil")
 	}
-	
+
 	// Test platform-specific signal support
 	t.Run("platform_signal_support", func(t *testing.T) {
 		// Test that the signal handler is configured for the current platform
 		// We can't test actual signal delivery without running containers,
 		// but we can verify the handler is properly initialized
-		
+
 		pm := signalHandler.GetProcessManager()
 		if pm == nil {
 			t.Error("Process manager should not be nil")
 		}
-		
+
 		// Test signal configuration loading
 		config := LoadSignalConfig()
 		if config == nil {
 			t.Error("Signal configuration should not be nil")
 		}
-		
+
 		// Verify timeout values are reasonable
 		if config.SigintTimeout <= 0 {
 			t.Error("SIGINT timeout should be positive")
@@ -8485,33 +8499,33 @@ func TestSignalHandlingCrossPlatform(t *testing.T) {
 		if config.SigtermTimeout <= 0 {
 			t.Error("SIGTERM timeout should be positive")
 		}
-		
+
 		// Test timeout configuration
 		signalHandler.SetTimeout(3*time.Second, 5*time.Second)
-		
+
 		// Test platform-specific features
 		switch runtime.GOOS {
 		case "windows":
 			// Windows-specific tests
 			t.Log("Testing Windows-specific signal handling")
 			// Windows only supports os.Interrupt
-			
+
 		case "linux", "darwin":
-			// Unix-specific tests  
+			// Unix-specific tests
 			t.Log("Testing Unix-specific signal handling")
 			// Unix systems support SIGINT, SIGTERM, SIGQUIT
-			
+
 		default:
 			t.Log("Testing default signal handling for platform:", runtime.GOOS)
 		}
 	})
-	
+
 	// Test configuration loading with environment variables
 	t.Run("environment_configuration", func(t *testing.T) {
 		// Save original environment
 		originalTimeout := os.Getenv("MCP_SIGNAL_TIMEOUT")
 		originalDebug := os.Getenv("MCP_DEBUG")
-		
+
 		defer func() {
 			if originalTimeout == "" {
 				os.Unsetenv("MCP_SIGNAL_TIMEOUT")
@@ -8524,30 +8538,30 @@ func TestSignalHandlingCrossPlatform(t *testing.T) {
 				os.Setenv("MCP_DEBUG", originalDebug)
 			}
 		}()
-		
+
 		// Test custom timeout configuration
 		os.Setenv("MCP_SIGNAL_TIMEOUT", "8s")
 		config := LoadSignalConfig()
-		
+
 		if config.SigtermTimeout != 8*time.Second {
 			t.Errorf("Expected SIGTERM timeout to be 8s, got %v", config.SigtermTimeout)
 		}
 		if config.SigintTimeout != 4*time.Second {
 			t.Errorf("Expected SIGINT timeout to be 4s (half of SIGTERM), got %v", config.SigintTimeout)
 		}
-		
+
 		// Test debug logging configuration
 		os.Setenv("MCP_DEBUG", "true")
 		config = LoadSignalConfig()
-		
+
 		if !config.EnableLogging {
 			t.Error("Expected logging to be enabled when MCP_DEBUG=true")
 		}
-		
+
 		// Test invalid timeout (should fall back to defaults)
 		os.Setenv("MCP_SIGNAL_TIMEOUT", "invalid")
 		config = LoadSignalConfig()
-		
+
 		if config.SigtermTimeout != 10*time.Second {
 			t.Errorf("Expected default SIGTERM timeout (10s) with invalid config, got %v", config.SigtermTimeout)
 		}
@@ -8555,4 +8569,128 @@ func TestSignalHandlingCrossPlatform(t *testing.T) {
 			t.Errorf("Expected default SIGINT timeout (5s) with invalid config, got %v", config.SigintTimeout)
 		}
 	})
+}
+
+// Property 1: Secure Default Container Access
+// For any container started with default configuration (no explicit mounts, data dir, or env vars),
+// the container should have access only to its home volume and no host credential directories,
+// data directories, or environment variables.
+func TestProperty1_SecureDefaultContainerAccess(t *testing.T) {
+	// **Feature: remove-default-credential-mounts, Property 1: Secure Default Container Access**
+	// **Validates: Requirements 1.1, 1.6, 8.1, 8.3, 9.1, 9.3**
+
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+
+	property := func(serverCmd []string) bool {
+		// Ensure we have at least one command argument
+		if len(serverCmd) == 0 {
+			serverCmd = []string{"test-server"}
+		}
+
+		// Clear any MCP environment variables to ensure default behavior
+		originalMcpMount := os.Getenv("MCP_MOUNT")
+		originalMcpDataDir := os.Getenv("MCP_DATA_DIR")
+		originalMcpPassthrough := os.Getenv("MCP_PASSTHROUGH_ENV")
+
+		defer func() {
+			// Restore original environment
+			if originalMcpMount != "" {
+				os.Setenv("MCP_MOUNT", originalMcpMount)
+			} else {
+				os.Unsetenv("MCP_MOUNT")
+			}
+			if originalMcpDataDir != "" {
+				os.Setenv("MCP_DATA_DIR", originalMcpDataDir)
+			} else {
+				os.Unsetenv("MCP_DATA_DIR")
+			}
+			if originalMcpPassthrough != "" {
+				os.Setenv("MCP_PASSTHROUGH_ENV", originalMcpPassthrough)
+			} else {
+				os.Unsetenv("MCP_PASSTHROUGH_ENV")
+			}
+		}()
+
+		// Clear MCP environment variables for default behavior
+		os.Unsetenv("MCP_MOUNT")
+		os.Unsetenv("MCP_DATA_DIR")
+		os.Unsetenv("MCP_PASSTHROUGH_ENV")
+
+		// Create config with no explicit data directory
+		config := &Config{
+			DataDir: "", // Empty means no explicit data directory
+		}
+
+		vm := NewVolumeManager(config)
+
+		// Test 1: No automatic credential mounts
+		mounts := vm.GetVolumeMounts()
+
+		// Check that no credential directories are mounted
+		for i := 0; i < len(mounts); i++ {
+			if mounts[i] == "-v" && i+1 < len(mounts) {
+				mountSpec := mounts[i+1]
+				// Should not contain any credential directory paths
+				if strings.Contains(mountSpec, ".aws") ||
+					strings.Contains(mountSpec, ".config") ||
+					strings.Contains(mountSpec, ".ssh") ||
+					strings.Contains(mountSpec, "Keychains") {
+					return false // Found credential mount - property violated
+				}
+			}
+		}
+
+		// Test 2: No automatic data directory mount when not explicitly set
+		foundDataMount := false
+		for i := 0; i < len(mounts); i++ {
+			if mounts[i] == "-v" && i+1 < len(mounts) {
+				mountSpec := mounts[i+1]
+				if strings.Contains(mountSpec, ":/data") {
+					foundDataMount = true
+					break
+				}
+			}
+		}
+		// Should not have data mount when MCP_DATA_DIR is not set
+		if foundDataMount {
+			return false // Found data mount when none should exist
+		}
+
+		// Test 3: Mount info should not include credential mounts
+		info := vm.GetMountInfo()
+		// The CredentialMounts field should not exist anymore (removed in our changes)
+		// We can only test that DataMount is empty when no explicit data dir is set
+		if info.DataMount != "" {
+			return false // Should have no data mount info
+		}
+
+		// Test 4: Environment variable filtering should not pass through any variables by default
+		filter := NewEnvFilter()
+		envArgs := filter.GetFilteredEnvArgs()
+
+		// Should have no environment variables passed through by default
+		// (except for any that might be explicitly set by the test environment)
+		// We'll check that no AWS_, OPENAI_, or other sensitive prefixes are passed through
+		for i := 0; i < len(envArgs); i++ {
+			if envArgs[i] == "-e" && i+1 < len(envArgs) {
+				envVar := envArgs[i+1]
+				// Check for hardcoded prefixes that should not be passed through by default
+				if strings.HasPrefix(envVar, "AWS_") ||
+					strings.HasPrefix(envVar, "OPENAI_") ||
+					strings.HasPrefix(envVar, "ANTHROPIC_") ||
+					strings.HasPrefix(envVar, "GITHUB_TOKEN=") {
+					return false // Found sensitive env var passed through by default
+				}
+			}
+		}
+
+		return true // All security checks passed
+	}
+
+	// Run property test with multiple iterations
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Error(err)
+	}
 }
