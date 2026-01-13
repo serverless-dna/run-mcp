@@ -13,24 +13,24 @@ type Config struct {
 	PythonImage      string
 	DataDir          string
 	ContainerRuntime string
-	EphemeralMode    bool   // New field for ephemeral volume support
-	MaxVolumeSize    string // Maximum volume size for storage warnings (Requirements: 6.6)
+	EphemeralMode    bool          // New field for ephemeral volume support
+	MaxVolumeSize    string        // Maximum volume size for storage warnings (Requirements: 6.6)
 	SignalConfig     *SignalConfig // Signal handling configuration
 }
 
 // loadConfig loads configuration from environment variables with defaults
 func loadConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
-	
+
 	config := &Config{
-		NodejsImage:      getEnvWithDefault("MCP_NODEJS_IMAGE", "ghcr.io/serverless-dna/run-mcp-nodejs:latest"),
-		PythonImage:      getEnvWithDefault("MCP_PYTHON_IMAGE", "ghcr.io/serverless-dna/run-mcp-python:latest"),
-		DataDir:          getEnvWithDefault("MCP_DATA_DIR", homeDir),
-		ContainerRuntime: os.Getenv("MCP_CONTAINER_RUNTIME"), // Optional override
-		MaxVolumeSize:    os.Getenv("MCP_MAX_VOLUME_SIZE"),   // Optional storage limit for warnings
-		SignalConfig:     LoadSignalConfig(),                 // Load signal handling configuration
+		NodejsImage:      getEnvWithDefault(MCPNodejsImage, "ghcr.io/serverless-dna/run-mcp-nodejs:latest"),
+		PythonImage:      getEnvWithDefault(MCPPythonImage, "ghcr.io/serverless-dna/run-mcp-python:latest"),
+		DataDir:          getEnvWithDefault(MCPDataDir, homeDir),
+		ContainerRuntime: os.Getenv(MCPContainerRuntime), // Optional override
+		MaxVolumeSize:    os.Getenv(MCPMaxVolumeSize),    // Optional storage limit for warnings
+		SignalConfig:     LoadSignalConfig(),             // Load signal handling configuration
 	}
-	
+
 	return config
 }
 
@@ -58,22 +58,22 @@ func (c *Config) GetImageForLanguage(language string) (string, error) {
 func (c *Config) Validate() error {
 	// Validate images are specified
 	if c.NodejsImage == "" {
-		return fmt.Errorf("MCP_NODEJS_IMAGE cannot be empty")
+		return fmt.Errorf("%s cannot be empty", MCPNodejsImage)
 	}
 	if c.PythonImage == "" {
-		return fmt.Errorf("MCP_PYTHON_IMAGE cannot be empty")
+		return fmt.Errorf("%s cannot be empty", MCPPythonImage)
 	}
-	
+
 	// Validate data directory
 	if c.DataDir == "" {
-		return fmt.Errorf("MCP_DATA_DIR cannot be empty")
+		return fmt.Errorf("%s cannot be empty", MCPDataDir)
 	}
-	
+
 	// Check if data directory exists and is accessible
 	if err := c.validateDataDir(); err != nil {
 		return fmt.Errorf("data directory validation failed: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -86,11 +86,11 @@ func (c *Config) validateDataDir() error {
 		}
 		return fmt.Errorf("cannot access data directory: %w", err)
 	}
-	
+
 	if !info.IsDir() {
 		return fmt.Errorf("data directory path is not a directory: %s", c.DataDir)
 	}
-	
+
 	return nil
 }
 
@@ -117,13 +117,13 @@ func (c *Config) dataDirWritable() bool {
 	if !c.dataDirExists() {
 		return false
 	}
-	
+
 	testFile := filepath.Join(c.DataDir, ".mcp-write-test")
 	err := os.WriteFile(testFile, []byte("test"), 0644)
 	if err != nil {
 		return false
 	}
-	
+
 	os.Remove(testFile)
 	return true
 }
@@ -168,22 +168,13 @@ func GetDefaultImages() map[string]string {
 // GetEnvironmentVariables returns all MCP-related environment variables
 func GetEnvironmentVariables() map[string]string {
 	vars := make(map[string]string)
-	
-	mcpVars := []string{
-		"MCP_NODEJS_IMAGE",
-		"MCP_PYTHON_IMAGE",
-		"MCP_DATA_DIR",
-		"MCP_CONTAINER_RUNTIME",
-		"MCP_PASSTHROUGH_ENV",
-		"MCP_SIGNAL_TIMEOUT",
-		"MCP_DEBUG",
-	}
-	
-	for _, varName := range mcpVars {
+
+	// Use centralized list of all MCP environment variables
+	for _, varName := range AllMCPEnvVars() {
 		if value := os.Getenv(varName); value != "" {
 			vars[varName] = value
 		}
 	}
-	
+
 	return vars
 }

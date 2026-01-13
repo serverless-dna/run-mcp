@@ -38,32 +38,32 @@ func NewEnvFilter() *EnvFilter {
 func (ef *EnvFilter) GetFilteredEnvArgs() []string {
 	var args []string
 	seen := make(map[string]bool)
-	
+
 	// Add user-specified additional vars from MCP_PASSTHROUGH_ENV
 	customVars := ef.getCustomPassthroughVars()
 	for _, v := range customVars {
 		ef.allowedExact[v] = true
 	}
-	
+
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
 		key := parts[0]
-		
+
 		// Skip if already processed
 		if seen[key] {
 			continue
 		}
-		
+
 		// Check if variable should be passed through
 		if ef.shouldPassthrough(key) {
 			args = append(args, "-e", env)
 			seen[key] = true
 		}
 	}
-	
+
 	return args
 }
 
@@ -71,38 +71,30 @@ func (ef *EnvFilter) GetFilteredEnvArgs() []string {
 func (ef *EnvFilter) shouldPassthrough(key string) bool {
 	// Exclude run-mcp configuration variables (Requirement 3.5)
 	// These should be consumed by run-mcp and not passed to the container
-	configVars := []string{
-		"MCP_MOUNT",
-		"MCP_BIND_HOME", 
-		"MCP_HOME_PATH",
+	if IsConfigurationEnvVar(key) {
+		return false
 	}
-	
-	for _, configVar := range configVars {
-		if key == configVar {
-			return false
-		}
-	}
-	
+
 	// Check exact match first
 	if ef.allowedExact[key] {
 		return true
 	}
-	
+
 	// Check prefix match
 	for _, prefix := range ef.allowedPrefixes {
 		if strings.HasPrefix(key, prefix) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
 // getCustomPassthroughVars parses MCP_PASSTHROUGH_ENV for additional variables
 func (ef *EnvFilter) getCustomPassthroughVars() []string {
 	var vars []string
-	
-	if extra := os.Getenv("MCP_PASSTHROUGH_ENV"); extra != "" {
+
+	if extra := os.Getenv(MCPPassthroughEnv); extra != "" {
 		for _, v := range strings.Split(extra, ",") {
 			v = strings.TrimSpace(v)
 			if v != "" {
@@ -110,7 +102,7 @@ func (ef *EnvFilter) getCustomPassthroughVars() []string {
 			}
 		}
 	}
-	
+
 	return vars
 }
 
@@ -142,33 +134,33 @@ func (ef *EnvFilter) AddAllowedExact(name string) {
 func (ef *EnvFilter) GetFilteredEnvCount() int {
 	count := 0
 	seen := make(map[string]bool)
-	
+
 	// Add custom vars to exact matches temporarily
 	customVars := ef.getCustomPassthroughVars()
 	originalExact := make(map[string]bool)
 	for k, v := range ef.allowedExact {
 		originalExact[k] = v
 	}
-	
+
 	for _, v := range customVars {
 		ef.allowedExact[v] = true
 	}
-	
+
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
 		key := parts[0]
-		
+
 		if !seen[key] && ef.shouldPassthrough(key) {
 			count++
 			seen[key] = true
 		}
 	}
-	
+
 	// Restore original exact matches
 	ef.allowedExact = originalExact
-	
+
 	return count
 }
