@@ -20,12 +20,13 @@ type Config struct {
 
 // loadConfig loads configuration from environment variables with defaults
 func loadConfig() *Config {
-	homeDir, _ := os.UserHomeDir()
+	// Don't default MCP_DATA_DIR to home directory - only use if explicitly set
+	dataDir := os.Getenv(MCPDataDir) // Only use if explicitly set
 
 	config := &Config{
 		NodejsImage:      getEnvWithDefault(MCPNodejsImage, "ghcr.io/serverless-dna/run-mcp-nodejs:latest"),
 		PythonImage:      getEnvWithDefault(MCPPythonImage, "ghcr.io/serverless-dna/run-mcp-python:latest"),
-		DataDir:          getEnvWithDefault(MCPDataDir, homeDir),
+		DataDir:          dataDir,                        // Empty string if not set
 		ContainerRuntime: os.Getenv(MCPContainerRuntime), // Optional override
 		MaxVolumeSize:    os.Getenv(MCPMaxVolumeSize),    // Optional storage limit for warnings
 		SignalConfig:     LoadSignalConfig(),             // Load signal handling configuration
@@ -64,14 +65,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("%s cannot be empty", MCPPythonImage)
 	}
 
-	// Validate data directory
-	if c.DataDir == "" {
-		return fmt.Errorf("%s cannot be empty", MCPDataDir)
-	}
-
-	// Check if data directory exists and is accessible
-	if err := c.validateDataDir(); err != nil {
-		return fmt.Errorf("data directory validation failed: %w", err)
+	// Only validate data directory if it's set
+	if c.DataDir != "" {
+		if err := c.validateDataDir(); err != nil {
+			return fmt.Errorf("data directory validation failed: %w", err)
+		}
 	}
 
 	return nil

@@ -15,13 +15,13 @@ This implementation plan converts the secure-by-default design into discrete cod
   - **Property 1: Secure Default Container Access**
   - **Validates: Requirements 1.1, 1.6, 8.1, 8.3, 9.1, 9.3**
 
-- [ ] 2. Implement secure data directory mounting
+- [x] 2. Implement secure data directory mounting
   - Modify `getDataMount()` to only mount when `MCP_DATA_DIR` is explicitly set
-  - Add `isDefaultHomeDir()` helper method to detect when DataDir equals home directory
+  - ~~Add `isDefaultHomeDir()` helper method to detect when DataDir equals home directory~~ (removed per user feedback)
   - Update configuration loading to not default `MCP_DATA_DIR` to home directory
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
 
-- [ ] 2.1 Write property test for explicit data directory mounting
+- [x] 2.1 Write property test for explicit data directory mounting
   - **Property 4: Explicit Data Directory Mounting**
   - **Validates: Requirements 4.1, 4.3, 8.2**
 

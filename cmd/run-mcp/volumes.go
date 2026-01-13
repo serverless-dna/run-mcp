@@ -836,13 +836,8 @@ func (vm *VolumeManager) GetVolumeMounts() []string {
 func (vm *VolumeManager) getDataMount() string {
 	dataDir := vm.config.DataDir
 
-	// Only mount if MCP_DATA_DIR is explicitly set (not defaulted to home)
+	// Only mount if MCP_DATA_DIR is explicitly set
 	if dataDir == "" {
-		return ""
-	}
-
-	// Check if this is the default home directory (which means it wasn't explicitly set)
-	if vm.isDefaultHomeDir(dataDir) {
 		return ""
 	}
 
@@ -850,20 +845,6 @@ func (vm *VolumeManager) getDataMount() string {
 	dataDir = vm.normalizePath(dataDir)
 
 	return fmt.Sprintf("%s:/data", dataDir)
-}
-
-// isDefaultHomeDir checks if the data directory is the default home directory
-func (vm *VolumeManager) isDefaultHomeDir(dataDir string) bool {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-
-	// Normalize both paths for comparison
-	normalizedDataDir := vm.normalizePath(dataDir)
-	normalizedHomeDir := vm.normalizePath(homeDir)
-
-	return normalizedDataDir == normalizedHomeDir
 }
 
 // normalizePath normalizes file paths for cross-platform compatibility

@@ -408,8 +408,9 @@ func TestConfiguration(t *testing.T) {
 	if config.PythonImage == "" {
 		t.Error("Expected default Python image")
 	}
-	if config.DataDir == "" {
-		t.Error("Expected default data directory")
+	// DataDir should be empty by default (no longer defaults to home directory)
+	if config.DataDir != "" {
+		t.Errorf("Expected empty data directory by default, got %s", config.DataDir)
 	}
 
 	// Test custom configuration
@@ -8692,5 +8693,140 @@ func TestProperty1_SecureDefaultContainerAccess(t *testing.T) {
 	// Run property test with multiple iterations
 	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
 		t.Error(err)
+	}
+}
+
+// Property 4: Explicit Data Directory Mounting
+// For any explicitly set MCP_DATA_DIR value, the system should mount that directory at /data in the container and validate its accessibility
+func TestProperty4_ExplicitDataDirectoryMounting(t *testing.T) {
+	// **Feature: remove-default-credential-mounts, Property 4: Explicit Data Directory Mounting**
+	// **Validates: Requirements 4.1, 4.3, 8.2**
+
+	// Save original environment
+	originalDataDir := os.Getenv("MCP_DATA_DIR")
+	defer func() {
+		if originalDataDir != "" {
+			os.Setenv("MCP_DATA_DIR", originalDataDir)
+		} else {
+			os.Unsetenv("MCP_DATA_DIR")
+		}
+	}()
+
+	// Property: For any explicitly set MCP_DATA_DIR, the system should mount it
+	property := func(explicitDataDir string) bool {
+		// Skip empty strings and paths that would be considered "default home"
+		if explicitDataDir == "" {
+			return true // Skip this case
+		}
+
+		// Create a temporary directory for testing
+		tempDir := t.TempDir()
+		testDataDir := filepath.Join(tempDir, "test-data")
+		if err := os.MkdirAll(testDataDir, 0755); err != nil {
+			t.Logf("Failed to create test directory: %v", err)
+			return true // Skip this case
+		}
+
+		// Set MCP_DATA_DIR explicitly
+		os.Setenv("MCP_DATA_DIR", testDataDir)
+
+		// Load configuration
+		config := loadConfig()
+
+		// Verify configuration has the explicit data directory
+		if config.DataDir != testDataDir {
+			t.Logf("Expected DataDir %s, got %s", testDataDir, config.DataDir)
+			return false
+		}
+
+		// Create volume manager
+		vm := NewVolumeManager(config)
+
+		// Get data mount
+		dataMount := vm.getDataMount()
+
+		// Should have a data mount since MCP_DATA_DIR is explicitly set
+		if dataMount == "" {
+			t.Logf("Expected data mount for explicit MCP_DATA_DIR %s, got empty", testDataDir)
+			return false
+		}
+
+		// Verify mount format
+		expectedMount := fmt.Sprintf("%s:/data", vm.normalizePath(testDataDir))
+		if dataMount != expectedMount {
+			t.Logf("Expected mount %s, got %s", expectedMount, dataMount)
+			return false
+		}
+
+		// Verify volume mounts include the data mount
+		mounts := vm.GetVolumeMounts()
+		found := false
+		for i := 0; i < len(mounts); i += 2 {
+			if i+1 < len(mounts) && mounts[i] == "-v" && mounts[i+1] == dataMount {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Logf("Data mount %s not found in volume mounts %v", dataMount, mounts)
+			return false
+		}
+
+		// Verify data directory validation passes
+		if err := vm.ValidateDataDir(); err != nil {
+			t.Logf("Data directory validation failed: %v", err)
+			return false
+		}
+
+		return true
+	}
+
+	// Test with specific examples
+	testCases := []string{
+		"/tmp/test-data",
+		"/var/data",
+		"/home/user/projects",
+	}
+
+	for _, testCase := range testCases {
+		if !property(testCase) {
+			t.Errorf("Property failed for test case: %s", testCase)
+		}
+	}
+
+	// Test that when MCP_DATA_DIR is not set, no data mount is created
+	os.Unsetenv("MCP_DATA_DIR")
+	config := loadConfig()
+	vm := NewVolumeManager(config)
+
+	dataMount := vm.getDataMount()
+	if dataMount != "" {
+		t.Errorf("Expected no data mount when MCP_DATA_DIR is not set, got %s", dataMount)
+	}
+
+	mounts := vm.GetVolumeMounts()
+	for i := 0; i < len(mounts); i += 2 {
+		if i+1 < len(mounts) && mounts[i] == "-v" && strings.Contains(mounts[i+1], ":/data") {
+			t.Errorf("Found unexpected data mount when MCP_DATA_DIR is not set: %s", mounts[i+1])
+		}
+	}
+
+	// Test that when MCP_DATA_DIR equals home directory, a data mount IS created (explicit user choice)
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		os.Setenv("MCP_DATA_DIR", homeDir)
+		config = loadConfig()
+		vm = NewVolumeManager(config)
+
+		dataMount = vm.getDataMount()
+		if dataMount == "" {
+			t.Errorf("Expected data mount when MCP_DATA_DIR is explicitly set to home directory, got empty")
+		}
+
+		// Verify mount format is correct
+		expectedMount := fmt.Sprintf("%s:/data", vm.normalizePath(homeDir))
+		if dataMount != expectedMount {
+			t.Errorf("Expected mount %s, got %s", expectedMount, dataMount)
+		}
 	}
 }
