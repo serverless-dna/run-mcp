@@ -21,7 +21,7 @@ This implementation plan converts the secure-by-default design into discrete cod
   - Update configuration loading to not default `MCP_DATA_DIR` to home directory
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
 
-- [x] 2.1 Write property test for explicit data directory mounting
+- [x] 2.1 Write property test for explicit data directory mounting!
   - **Property 4: Explicit Data Directory Mounting**
   - **Validates: Requirements 4.1, 4.3, 8.2**
 
@@ -40,27 +40,27 @@ This implementation plan converts the secure-by-default design into discrete cod
   - **Property 1: Secure Default Container Access** (environment variables part)
   - **Validates: Requirements 9.1, 9.3**
 
-- [ ] 4. Update configuration and validation
+- [x] 4. Update configuration and validation
   - Modify `loadConfig()` to not default `MCP_DATA_DIR` to home directory
   - Update `Config.Validate()` to handle empty `DataDir` gracefully
   - Add `MCP_PASSTHROUGH_ENV` to configuration variable exclusion list
   - _Requirements: 8.1, 9.4_
 
-- [ ] 4.1 Write property test for configuration variable exclusion
+- [x] 4.1 Write property test for configuration variable exclusion
   - **Property 6: Configuration Variable Exclusion**
   - **Validates: Requirements 9.4**
 
-- [ ] 5. Update mount information and cleanup methods
+- [x] 5. Update mount information and cleanup methods
   - Simplify `MountInfo` struct to remove `CredentialMounts` field
   - Update `GetMountInfo()` to only include data mount information
   - Remove credential directory detection from mount info methods
   - _Requirements: 7.4, 7.5_
 
-- [ ] 5.1 Write property test for removed method functionality
+- [x] 5.1 Write property test for removed method functionality
   - **Property 9: Removed Method Functionality**
   - **Validates: Requirements 7.1, 7.2, 7.3, 7.4**
 
-- [ ] 6. Checkpoint - Ensure all tests pass
+- [x] 6. Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 7. Enhance error handling and user guidance

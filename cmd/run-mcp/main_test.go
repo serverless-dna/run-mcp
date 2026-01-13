@@ -416,6 +416,88 @@ func TestProperty5_WildcardEnvironmentVariableMatching(t *testing.T) {
 	}
 }
 
+// Property 9: Removed Method Functionality
+// For any VolumeManager configuration, the system should not have credential mounting methods available,
+// and GetMountInfo should not include credential mount information
+func TestProperty9_RemovedMethodFunctionality(t *testing.T) {
+	// **Feature: remove-default-credential-mounts, Property 9: Removed Method Functionality**
+	// **Validates: Requirements 7.1, 7.2, 7.3, 7.4**
+
+	property := func(dataDir string) bool {
+		// Create a VolumeManager with various configurations
+		config := &Config{
+			DataDir: dataDir,
+		}
+		vm := NewVolumeManager(config)
+
+		// Test 1: GetVolumeMounts should only return data mounts when MCP_DATA_DIR is explicitly set
+		mounts := vm.GetVolumeMounts()
+
+		// If dataDir is empty, should have no mounts
+		if dataDir == "" {
+			if len(mounts) != 0 {
+				return false // Should have no mounts when no data dir
+			}
+		} else {
+			// If dataDir is set, should only have data mount (no credential mounts)
+			foundDataMount := false
+			for i := 0; i < len(mounts); i += 2 {
+				if i+1 < len(mounts) && mounts[i] == "-v" {
+					mountSpec := mounts[i+1]
+					if strings.Contains(mountSpec, ":/data") {
+						foundDataMount = true
+					}
+					// Should not contain any credential directory mounts
+					if strings.Contains(mountSpec, ".aws") ||
+						strings.Contains(mountSpec, ".config") ||
+						strings.Contains(mountSpec, ".ssh") ||
+						strings.Contains(mountSpec, "Library/Keychains") {
+						return false // Found credential mount - should not exist
+					}
+				}
+			}
+			// If dataDir is set, we should find the data mount
+			if dataDir != "" && !foundDataMount {
+				return false
+			}
+		}
+
+		// Test 2: GetMountInfo should not include credential mount information
+		info := vm.GetMountInfo()
+
+		// The MountInfo struct should only have DataMount field (no CredentialMounts field)
+		// We can verify this by checking that DataMount behaves correctly
+		if dataDir == "" {
+			// When no data dir is set, DataMount should be empty
+			if info.DataMount != "" {
+				return false
+			}
+		} else {
+			// When data dir is set, DataMount should contain the data mount info
+			if info.DataMount == "" {
+				return false
+			}
+			// Should not contain credential directory references
+			if strings.Contains(info.DataMount, ".aws") ||
+				strings.Contains(info.DataMount, ".config") ||
+				strings.Contains(info.DataMount, ".ssh") ||
+				strings.Contains(info.DataMount, "Library/Keychains") {
+				return false
+			}
+		}
+
+		// Test 3: Verify that credential directory detection has been removed
+		// This is implicitly tested by the above checks - if credential directories
+		// were being detected and mounted, they would appear in the mounts or mount info
+
+		return true
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Error(err)
+	}
+}
+
 // Property 1: Secure Default Container Access (Environment Variables Part)
 // For any container started with default configuration (no MCP_PASSTHROUGH_ENV set),
 // the container should receive no environment variables from the host
@@ -9055,4 +9137,180 @@ func TestProperty4_ExplicitDataDirectoryMounting(t *testing.T) {
 			t.Errorf("Expected mount %s, got %s", expectedMount, dataMount)
 		}
 	}
+}
+
+// Property 6: Configuration Variable Exclusion
+// For any environment variable that is a run-mcp configuration variable, the system should never pass it to the container regardless of passthrough configuration
+func TestProperty6_ConfigurationVariableExclusion(t *testing.T) {
+	// **Feature: remove-default-credential-mounts, Property 6: Configuration Variable Exclusion**
+	// **Validates: Requirements 9.4**
+
+	if testing.Short() {
+		t.Skip("Skipping property test in short mode")
+	}
+
+	// Save original environment
+	originalVars := make(map[string]string)
+	configVars := ConfigurationMCPEnvVars()
+	for _, varName := range configVars {
+		originalVars[varName] = os.Getenv(varName)
+	}
+	originalPassthrough := os.Getenv("MCP_PASSTHROUGH_ENV")
+
+	defer func() {
+		// Restore original environment
+		for varName, originalValue := range originalVars {
+			if originalValue == "" {
+				os.Unsetenv(varName)
+			} else {
+				os.Setenv(varName, originalValue)
+			}
+		}
+		if originalPassthrough == "" {
+			os.Unsetenv("MCP_PASSTHROUGH_ENV")
+		} else {
+			os.Setenv("MCP_PASSTHROUGH_ENV", originalPassthrough)
+		}
+	}()
+
+	// Property test with multiple iterations
+	for i := 0; i < 100; i++ {
+		t.Run(fmt.Sprintf("iteration_%d", i), func(t *testing.T) {
+			// Set up test environment with configuration variables
+			testValues := map[string]string{
+				"MCP_MOUNT":           "~/test:/test:ro",
+				"MCP_BIND_HOME":       "true",
+				"MCP_HOME_PATH":       "/custom/home",
+				"MCP_PASSTHROUGH_ENV": "AWS_*,GITHUB_TOKEN",
+			}
+
+			// Set all configuration variables
+			for varName, value := range testValues {
+				os.Setenv(varName, value)
+			}
+
+			// Test different passthrough configurations that should NOT allow config vars through
+			passthroughConfigs := []string{
+				"MCP_*",                         // Wildcard that matches config vars
+				"MCP_MOUNT,MCP_BIND_HOME",       // Explicit config var names
+				"*",                             // Universal wildcard
+				"MCP_MOUNT,AWS_*,MCP_HOME_PATH", // Mixed config and non-config vars
+			}
+
+			for _, passthroughConfig := range passthroughConfigs {
+				os.Setenv("MCP_PASSTHROUGH_ENV", passthroughConfig)
+
+				// Create environment filter
+				envFilter := NewEnvFilter()
+				filteredArgs := envFilter.GetFilteredEnvArgs()
+
+				// Convert args to map for easier checking
+				envMap := make(map[string]string)
+				for j := 0; j < len(filteredArgs); j += 2 {
+					if filteredArgs[j] == "-e" && j+1 < len(filteredArgs) {
+						parts := strings.SplitN(filteredArgs[j+1], "=", 2)
+						if len(parts) == 2 {
+							envMap[parts[0]] = parts[1]
+						}
+					}
+				}
+
+				// Verify that ALL configuration variables are excluded
+				for _, configVar := range ConfigurationMCPEnvVars() {
+					if _, exists := envMap[configVar]; exists {
+						t.Errorf("Configuration variable %s should be excluded but was passed through with passthrough config: %s", configVar, passthroughConfig)
+					}
+				}
+
+				// Verify that IsConfigurationEnvVar correctly identifies config vars
+				for _, configVar := range ConfigurationMCPEnvVars() {
+					if !IsConfigurationEnvVar(configVar) {
+						t.Errorf("IsConfigurationEnvVar should return true for %s", configVar)
+					}
+				}
+
+				// Verify that non-configuration MCP variables can still pass through
+				os.Setenv("MCP_DEBUG", "true")
+				os.Setenv("MCP_DATA_DIR", "/test/data")
+
+				// Re-filter with the non-config variables set
+				envFilter = NewEnvFilter()
+				filteredArgs = envFilter.GetFilteredEnvArgs()
+
+				// Convert args to map again
+				envMap = make(map[string]string)
+				for j := 0; j < len(filteredArgs); j += 2 {
+					if filteredArgs[j] == "-e" && j+1 < len(filteredArgs) {
+						parts := strings.SplitN(filteredArgs[j+1], "=", 2)
+						if len(parts) == 2 {
+							envMap[parts[0]] = parts[1]
+						}
+					}
+				}
+
+				// These should pass through if they match the passthrough pattern and are not config vars
+				if passthroughConfig == "MCP_*" || passthroughConfig == "*" {
+					if !IsConfigurationEnvVar("MCP_DEBUG") {
+						if _, exists := envMap["MCP_DEBUG"]; !exists {
+							t.Errorf("Non-configuration variable MCP_DEBUG should pass through with config: %s", passthroughConfig)
+						}
+					}
+					if !IsConfigurationEnvVar("MCP_DATA_DIR") {
+						if _, exists := envMap["MCP_DATA_DIR"]; !exists {
+							t.Errorf("Non-configuration variable MCP_DATA_DIR should pass through with config: %s", passthroughConfig)
+						}
+					}
+				}
+
+				// Clean up the non-config test variables
+				os.Unsetenv("MCP_DEBUG")
+				os.Unsetenv("MCP_DATA_DIR")
+			}
+		})
+	}
+
+	// Test edge cases
+	t.Run("edge_cases", func(t *testing.T) {
+		// Test empty passthrough config
+		os.Setenv("MCP_MOUNT", "~/test:/test")
+		os.Unsetenv("MCP_PASSTHROUGH_ENV")
+
+		envFilter := NewEnvFilter()
+		filteredArgs := envFilter.GetFilteredEnvArgs()
+
+		// Convert args to map
+		envMap := make(map[string]string)
+		for i := 0; i < len(filteredArgs); i += 2 {
+			if filteredArgs[i] == "-e" && i+1 < len(filteredArgs) {
+				parts := strings.SplitN(filteredArgs[i+1], "=", 2)
+				if len(parts) == 2 {
+					envMap[parts[0]] = parts[1]
+				}
+			}
+		}
+
+		// No variables should pass through with empty passthrough config
+		if _, exists := envMap["MCP_MOUNT"]; exists {
+			t.Error("MCP_MOUNT should not pass through with empty passthrough config")
+		}
+
+		// Test that the exclusion works even when trying to explicitly pass config vars
+		os.Setenv("MCP_PASSTHROUGH_ENV", "MCP_MOUNT")
+		envFilter = NewEnvFilter()
+		filteredArgs = envFilter.GetFilteredEnvArgs()
+
+		envMap = make(map[string]string)
+		for i := 0; i < len(filteredArgs); i += 2 {
+			if filteredArgs[i] == "-e" && i+1 < len(filteredArgs) {
+				parts := strings.SplitN(filteredArgs[i+1], "=", 2)
+				if len(parts) == 2 {
+					envMap[parts[0]] = parts[1]
+				}
+			}
+		}
+
+		if _, exists := envMap["MCP_MOUNT"]; exists {
+			t.Error("MCP_MOUNT should not pass through even when explicitly specified in MCP_PASSTHROUGH_ENV")
+		}
+	})
 }
