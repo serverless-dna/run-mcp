@@ -175,156 +175,300 @@ func TestProperty20_LanguageAutoDetection(t *testing.T) {
 }
 
 // Property 21: Secure Environment Variable Passthrough
-// For any environment variable, the system should only pass through variables that match the allowlist
+// For any environment variable, the system should only pass through variables that match the MCP_PASSTHROUGH_ENV patterns
 func TestProperty21_SecureEnvironmentVariablePassthrough(t *testing.T) {
 	// **Feature: mcp-container-images, Property 21: Secure Environment Variable Passthrough**
 	// **Validates: Requirements 13.3, 13.8, 13.10**
 
-	filter := NewEnvFilter()
-
-	// Test allowed prefixes
-	allowedPrefixes := filter.GetAllowedPrefixes()
-	expectedPrefixes := []string{
-		"AWS_", "OPENAI_", "ANTHROPIC_", "AZURE_", "GOOGLE_",
-		"MCP_", "HF_", "REPLICATE_", "COHERE_",
-	}
-
-	for _, expected := range expectedPrefixes {
-		found := false
-		for _, prefix := range allowedPrefixes {
-			if prefix == expected {
-				found = true
-				break
+	// Test 1: With no MCP_PASSTHROUGH_ENV set, no variables should be passed through
+	t.Run("no_passthrough_env_set", func(t *testing.T) {
+		// Save original environment
+		originalEnv := os.Environ()
+		defer func() {
+			os.Clearenv()
+			for _, env := range originalEnv {
+				parts := strings.SplitN(env, "=", 2)
+				if len(parts) == 2 {
+					os.Setenv(parts[0], parts[1])
+				}
 			}
-		}
-		if !found {
-			t.Errorf("Expected prefix %s not found in allowed prefixes", expected)
-		}
-	}
+		}()
 
-	// Test allowed exact matches
-	allowedExact := filter.GetAllowedExact()
-	expectedExact := []string{"GITHUB_TOKEN", "GITLAB_TOKEN", "DATABASE_URL", "REDIS_URL"}
-
-	for _, expected := range expectedExact {
-		found := false
-		for _, exact := range allowedExact {
-			if exact == expected {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("Expected exact match %s not found in allowed exact matches", expected)
-		}
-	}
-
-	// Test environment variable filtering
-	testCases := []struct {
-		envVar   string
-		expected bool
-	}{
-		// Should be allowed (prefixes)
-		{"AWS_ACCESS_KEY_ID=test", true},
-		{"OPENAI_API_KEY=test", true},
-		{"ANTHROPIC_API_KEY=test", true},
-		{"MCP_DATA_DIR=test", true},
-
-		// Should be allowed (exact matches)
-		{"GITHUB_TOKEN=test", true},
-		{"DATABASE_URL=test", true},
-
-		// Should NOT be allowed
-		{"PATH=/usr/bin", false},
-		{"HOME=/home/user", false},
-		{"DANGEROUS_VAR=malicious", false},
-		{"SYSTEM_VAR=value", false},
-	}
-
-	// Save original environment
-	originalEnv := os.Environ()
-	defer func() {
-		// Restore original environment
+		// Clear environment and set test variables
 		os.Clearenv()
-		for _, env := range originalEnv {
-			parts := strings.SplitN(env, "=", 2)
-			if len(parts) == 2 {
-				os.Setenv(parts[0], parts[1])
+		os.Setenv("AWS_ACCESS_KEY_ID", "test")
+		os.Setenv("GITHUB_TOKEN", "test")
+		os.Setenv("DATABASE_URL", "test")
+		os.Setenv("PATH", "/usr/bin")
+
+		// Ensure MCP_PASSTHROUGH_ENV is not set
+		os.Unsetenv("MCP_PASSTHROUGH_ENV")
+
+		filter := NewEnvFilter()
+		envArgs := filter.GetFilteredEnvArgs()
+
+		// With secure defaults, no environment variables should be passed through
+		if len(envArgs) > 0 {
+			t.Errorf("Expected no environment variables to be passed through with secure defaults, got %d args", len(envArgs))
+		}
+	})
+
+	// Test 2: With MCP_PASSTHROUGH_ENV set to wildcards, only matching variables should be passed through
+	t.Run("wildcard_passthrough", func(t *testing.T) {
+		// Save original environment
+		originalEnv := os.Environ()
+		defer func() {
+			os.Clearenv()
+			for _, env := range originalEnv {
+				parts := strings.SplitN(env, "=", 2)
+				if len(parts) == 2 {
+					os.Setenv(parts[0], parts[1])
+				}
 			}
-		}
-	}()
+		}()
 
-	// Clear environment and set test variables
-	os.Clearenv()
-	for _, testCase := range testCases {
-		parts := strings.SplitN(testCase.envVar, "=", 2)
-		if len(parts) == 2 {
-			os.Setenv(parts[0], parts[1])
-		}
-	}
+		// Clear environment and set test variables
+		os.Clearenv()
+		os.Setenv("AWS_ACCESS_KEY_ID", "test")
+		os.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+		os.Setenv("OPENAI_API_KEY", "test")
+		os.Setenv("GITHUB_TOKEN", "test")
+		os.Setenv("DATABASE_URL", "test")
+		os.Setenv("PATH", "/usr/bin")
+		os.Setenv("HOME", "/home/user")
 
-	// Get filtered environment arguments
-	envArgs := filter.GetFilteredEnvArgs()
+		// Set MCP_PASSTHROUGH_ENV with wildcards and exact matches
+		os.Setenv("MCP_PASSTHROUGH_ENV", "AWS_*,GITHUB_TOKEN,DATABASE_URL")
 
-	// Check that only allowed variables are included
-	for _, testCase := range testCases {
-		parts := strings.SplitN(testCase.envVar, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
+		filter := NewEnvFilter()
+		envArgs := filter.GetFilteredEnvArgs()
 
-		found := false
+		// Convert args to map for easier checking
+		passedVars := make(map[string]string)
 		for i := 0; i < len(envArgs); i += 2 {
 			if i+1 < len(envArgs) && envArgs[i] == "-e" {
-				if strings.HasPrefix(envArgs[i+1], parts[0]+"=") {
-					found = true
-					break
+				parts := strings.SplitN(envArgs[i+1], "=", 2)
+				if len(parts) == 2 {
+					passedVars[parts[0]] = parts[1]
 				}
 			}
 		}
 
-		if found != testCase.expected {
-			t.Errorf("Environment variable %s: expected %v, got %v", parts[0], testCase.expected, found)
+		// Check that AWS_* variables are passed through
+		expectedVars := []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "DATABASE_URL"}
+		for _, expectedVar := range expectedVars {
+			if _, found := passedVars[expectedVar]; !found {
+				t.Errorf("Expected variable %s to be passed through but it wasn't", expectedVar)
+			}
 		}
-	}
 
-	// Test custom passthrough variables
-	os.Setenv("MCP_PASSTHROUGH_ENV", "CUSTOM_VAR1,CUSTOM_VAR2")
-	os.Setenv("CUSTOM_VAR1", "value1")
-	os.Setenv("CUSTOM_VAR2", "value2")
-	os.Setenv("NOT_CUSTOM", "should_not_pass")
+		// Check that non-matching variables are NOT passed through
+		unexpectedVars := []string{"OPENAI_API_KEY", "PATH", "HOME"}
+		for _, unexpectedVar := range unexpectedVars {
+			if _, found := passedVars[unexpectedVar]; found {
+				t.Errorf("Variable %s should not be passed through but it was", unexpectedVar)
+			}
+		}
+	})
 
-	envArgs = filter.GetFilteredEnvArgs()
+	// Test 3: Configuration variables should never be passed through
+	t.Run("configuration_variables_excluded", func(t *testing.T) {
+		// Save original environment
+		originalEnv := os.Environ()
+		defer func() {
+			os.Clearenv()
+			for _, env := range originalEnv {
+				parts := strings.SplitN(env, "=", 2)
+				if len(parts) == 2 {
+					os.Setenv(parts[0], parts[1])
+				}
+			}
+		}()
 
-	// Check that custom variables are included
-	customVars := []string{"CUSTOM_VAR1", "CUSTOM_VAR2"}
-	for _, customVar := range customVars {
-		found := false
+		// Clear environment and set test variables including configuration variables
+		os.Clearenv()
+		os.Setenv("MCP_MOUNT", "/host:/container")
+		os.Setenv("MCP_BIND_HOME", "true")
+		os.Setenv("MCP_HOME_PATH", "/custom/home")
+		os.Setenv("AWS_ACCESS_KEY_ID", "test")
+
+		// Set MCP_PASSTHROUGH_ENV to include MCP_* wildcard
+		os.Setenv("MCP_PASSTHROUGH_ENV", "MCP_*,AWS_*")
+
+		filter := NewEnvFilter()
+		envArgs := filter.GetFilteredEnvArgs()
+
+		// Convert args to map for easier checking
+		passedVars := make(map[string]string)
 		for i := 0; i < len(envArgs); i += 2 {
 			if i+1 < len(envArgs) && envArgs[i] == "-e" {
-				if strings.HasPrefix(envArgs[i+1], customVar+"=") {
-					found = true
-					break
+				parts := strings.SplitN(envArgs[i+1], "=", 2)
+				if len(parts) == 2 {
+					passedVars[parts[0]] = parts[1]
 				}
 			}
 		}
-		if !found {
-			t.Errorf("Custom variable %s should be passed through but was not found", customVar)
-		}
-	}
 
-	// Check that non-custom variable is not included
-	found := false
-	for i := 0; i < len(envArgs); i += 2 {
-		if i+1 < len(envArgs) && envArgs[i] == "-e" {
-			if strings.HasPrefix(envArgs[i+1], "NOT_CUSTOM=") {
-				found = true
-				break
+		// Configuration variables should never be passed through
+		configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_HOME_PATH", "MCP_PASSTHROUGH_ENV"}
+		for _, configVar := range configVars {
+			if _, found := passedVars[configVar]; found {
+				t.Errorf("Configuration variable %s should never be passed through but it was", configVar)
 			}
 		}
+
+		// Non-configuration variables should be passed through
+		if _, found := passedVars["AWS_ACCESS_KEY_ID"]; !found {
+			t.Error("Expected AWS_ACCESS_KEY_ID to be passed through but it wasn't")
+		}
+	})
+}
+
+// Property 5: Wildcard Environment Variable Matching
+// For any MCP_PASSTHROUGH_ENV value containing wildcard patterns (e.g., AWS_*,DATABASE_URL),
+// the system should pass through all environment variables matching those patterns and exact names, and no others
+func TestProperty5_WildcardEnvironmentVariableMatching(t *testing.T) {
+	// **Feature: remove-default-credential-mounts, Property 5: Wildcard Environment Variable Matching**
+	// **Validates: Requirements 9.2, 9.6**
+
+	property := func(wildcardPattern string, exactVar string, testVars map[string]string) bool {
+		// Skip invalid inputs
+		if wildcardPattern == "" || exactVar == "" || len(testVars) == 0 {
+			return true
+		}
+
+		// Skip patterns that would match configuration variables
+		configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_PASSTHROUGH_ENV", "MCP_HOME_PATH"}
+		for _, configVar := range configVars {
+			if strings.HasPrefix(configVar, wildcardPattern) {
+				return true // Skip this test case
+			}
+		}
+
+		// Save original environment
+		originalEnv := os.Environ()
+		defer func() {
+			os.Clearenv()
+			for _, env := range originalEnv {
+				parts := strings.SplitN(env, "=", 2)
+				if len(parts) == 2 {
+					os.Setenv(parts[0], parts[1])
+				}
+			}
+		}()
+
+		// Clear environment and set test variables
+		os.Clearenv()
+		for key, value := range testVars {
+			os.Setenv(key, value)
+		}
+
+		// Set MCP_PASSTHROUGH_ENV with wildcard pattern and exact variable
+		passthroughValue := wildcardPattern + "*," + exactVar
+		os.Setenv("MCP_PASSTHROUGH_ENV", passthroughValue)
+
+		// Create filter and get filtered args
+		filter := NewEnvFilter()
+		envArgs := filter.GetFilteredEnvArgs()
+
+		// Convert args to map for easier checking
+		passedVars := make(map[string]string)
+		for i := 0; i < len(envArgs); i += 2 {
+			if i+1 < len(envArgs) && envArgs[i] == "-e" {
+				parts := strings.SplitN(envArgs[i+1], "=", 2)
+				if len(parts) == 2 {
+					passedVars[parts[0]] = parts[1]
+				}
+			}
+		}
+
+		// Check that all variables matching the pattern are passed through
+		for key, expectedValue := range testVars {
+			shouldPass := strings.HasPrefix(key, wildcardPattern) || key == exactVar
+
+			// Skip configuration variables - they should never be passed through
+			isConfigVar := false
+			for _, configVar := range configVars {
+				if key == configVar {
+					isConfigVar = true
+					break
+				}
+			}
+
+			if isConfigVar {
+				shouldPass = false
+			}
+
+			actualValue, found := passedVars[key]
+			if shouldPass && (!found || actualValue != expectedValue) {
+				return false // Variable should have been passed through but wasn't
+			}
+			if !shouldPass && found {
+				return false // Variable shouldn't have been passed through but was
+			}
+		}
+
+		return true
 	}
-	if found {
-		t.Error("Variable NOT_CUSTOM should not be passed through but was found")
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Error(err)
+	}
+}
+
+// Property 1: Secure Default Container Access (Environment Variables Part)
+// For any container started with default configuration (no MCP_PASSTHROUGH_ENV set),
+// the container should receive no environment variables from the host
+func TestProperty1_SecureDefaultContainerAccessEnvVars(t *testing.T) {
+	// **Feature: remove-default-credential-mounts, Property 1: Secure Default Container Access** (environment variables part)
+	// **Validates: Requirements 9.1, 9.3**
+
+	property := func(hostVars map[string]string) bool {
+		// Skip empty test cases
+		if len(hostVars) == 0 {
+			return true
+		}
+
+		// Save original environment
+		originalEnv := os.Environ()
+		defer func() {
+			os.Clearenv()
+			for _, env := range originalEnv {
+				parts := strings.SplitN(env, "=", 2)
+				if len(parts) == 2 {
+					os.Setenv(parts[0], parts[1])
+				}
+			}
+		}()
+
+		// Clear environment and set test variables
+		os.Clearenv()
+		for key, value := range hostVars {
+			os.Setenv(key, value)
+		}
+
+		// Ensure MCP_PASSTHROUGH_ENV is not set (default configuration)
+		os.Unsetenv("MCP_PASSTHROUGH_ENV")
+
+		// Create filter and get filtered args
+		filter := NewEnvFilter()
+		envArgs := filter.GetFilteredEnvArgs()
+
+		// With secure defaults, no environment variables should be passed through
+		// (except for any that might be set by the container runtime itself)
+		expectedCount := 0
+		actualCount := 0
+		for i := 0; i < len(envArgs); i += 2 {
+			if i+1 < len(envArgs) && envArgs[i] == "-e" {
+				actualCount++
+			}
+		}
+
+		return actualCount == expectedCount
+	}
+
+	if err := quick.Check(property, &quick.Config{MaxCount: 100}); err != nil {
+		t.Error(err)
 	}
 }
 
@@ -2605,6 +2749,7 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 	originalBindHome := os.Getenv("MCP_BIND_HOME")
 	originalHomePath := os.Getenv("MCP_HOME_PATH")
 	originalOtherMCP := os.Getenv("MCP_OTHER_VAR")
+	originalPassthrough := os.Getenv("MCP_PASSTHROUGH_ENV")
 
 	defer func() {
 		// Restore original environment
@@ -2628,6 +2773,11 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 		} else {
 			os.Setenv("MCP_OTHER_VAR", originalOtherMCP)
 		}
+		if originalPassthrough == "" {
+			os.Unsetenv("MCP_PASSTHROUGH_ENV")
+		} else {
+			os.Setenv("MCP_PASSTHROUGH_ENV", originalPassthrough)
+		}
 	}()
 
 	// Set test environment variables
@@ -2635,6 +2785,9 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 	os.Setenv("MCP_BIND_HOME", "true")
 	os.Setenv("MCP_HOME_PATH", "/custom/home")
 	os.Setenv("MCP_OTHER_VAR", "should_pass_through")
+
+	// Set MCP_PASSTHROUGH_ENV to include MCP_* wildcard to test filtering
+	os.Setenv("MCP_PASSTHROUGH_ENV", "MCP_*")
 
 	// Create environment filter
 	envFilter := NewEnvFilter()
@@ -2651,7 +2804,7 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 		}
 	}
 
-	// Verify MCP configuration variables are filtered out
+	// Verify MCP configuration variables are filtered out (even with MCP_* wildcard)
 	if _, exists := envMap["MCP_MOUNT"]; exists {
 		t.Errorf("MCP_MOUNT should be filtered out but was passed through")
 	}
@@ -2664,7 +2817,11 @@ func TestMCPConfigurationVariableFiltering(t *testing.T) {
 		t.Errorf("MCP_HOME_PATH should be filtered out but was passed through")
 	}
 
-	// Verify other MCP variables are still passed through
+	if _, exists := envMap["MCP_PASSTHROUGH_ENV"]; exists {
+		t.Errorf("MCP_PASSTHROUGH_ENV should be filtered out but was passed through")
+	}
+
+	// Verify other MCP variables are passed through (since they're not configuration variables)
 	if value, exists := envMap["MCP_OTHER_VAR"]; !exists {
 		t.Errorf("MCP_OTHER_VAR should be passed through but was filtered out")
 	} else if value != "should_pass_through" {
@@ -2841,6 +2998,7 @@ func TestContainerExecutionIntegration(t *testing.T) {
 	originalMount := os.Getenv("MCP_MOUNT")
 	originalBindHome := os.Getenv("MCP_BIND_HOME")
 	originalHomePath := os.Getenv("MCP_HOME_PATH")
+	originalPassthrough := os.Getenv("MCP_PASSTHROUGH_ENV")
 
 	defer func() {
 		// Restore original environment
@@ -2869,15 +3027,21 @@ func TestContainerExecutionIntegration(t *testing.T) {
 		} else {
 			os.Setenv("MCP_HOME_PATH", originalHomePath)
 		}
+		if originalPassthrough == "" {
+			os.Unsetenv("MCP_PASSTHROUGH_ENV")
+		} else {
+			os.Setenv("MCP_PASSTHROUGH_ENV", originalPassthrough)
+		}
 	}()
 
 	testCases := []struct {
-		name        string
-		args        []string
-		language    string
-		envVars     map[string]string
-		mountConfig string
-		description string
+		name           string
+		args           []string
+		language       string
+		envVars        map[string]string
+		passthroughEnv string
+		mountConfig    string
+		description    string
 	}{
 		{
 			name:     "basic_python_command",
@@ -2887,7 +3051,8 @@ func TestContainerExecutionIntegration(t *testing.T) {
 				"AWS_ACCESS_KEY_ID": "test-aws-key",
 				"OPENAI_API_KEY":    "test-openai-key",
 			},
-			description: "Basic Python command with environment variables",
+			passthroughEnv: "AWS_*,OPENAI_*",
+			description:    "Basic Python command with environment variables",
 		},
 		{
 			name:     "nodejs_with_user_mounts",
@@ -2896,8 +3061,9 @@ func TestContainerExecutionIntegration(t *testing.T) {
 			envVars: map[string]string{
 				"GITHUB_TOKEN": "test-github-token",
 			},
-			mountConfig: "~/test-data:/data:ro",
-			description: "Node.js command with user-specified mounts",
+			passthroughEnv: "GITHUB_TOKEN",
+			mountConfig:    "~/test-data:/data:ro",
+			description:    "Node.js command with user-specified mounts",
 		},
 		{
 			name:     "python_with_complex_env",
@@ -2909,19 +3075,27 @@ func TestContainerExecutionIntegration(t *testing.T) {
 				"AWS_SECRET_ACCESS_KEY": "test-secret",
 				"ANTHROPIC_API_KEY":     "test-anthropic",
 			},
-			description: "Python command with multiple environment variables",
+			passthroughEnv: "AWS_*,ANTHROPIC_*",
+			description:    "Python command with multiple environment variables",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Clear MCP_MOUNT for each test case
+			// Clear MCP_MOUNT and MCP_PASSTHROUGH_ENV for each test case
 			os.Unsetenv("MCP_MOUNT")
+			os.Unsetenv("MCP_PASSTHROUGH_ENV")
 
 			// Set up test environment
 			for key, value := range tc.envVars {
 				os.Setenv(key, value)
 				defer os.Unsetenv(key)
+			}
+
+			// Set MCP_PASSTHROUGH_ENV to enable environment variable passthrough
+			if tc.passthroughEnv != "" {
+				os.Setenv("MCP_PASSTHROUGH_ENV", tc.passthroughEnv)
+				defer os.Unsetenv("MCP_PASSTHROUGH_ENV")
 			}
 
 			if tc.mountConfig != "" {
@@ -3508,7 +3682,7 @@ func TestProperty5_ConsistentMountPoint(t *testing.T) {
 }
 
 // Property 7: Environment Variable Passthrough
-// For any user-provided environment variables, run-mcp should pass them through to the container
+// For any user-provided environment variables specified in MCP_PASSTHROUGH_ENV, run-mcp should pass them through to the container
 // without modification, preserving both names and values
 func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 	// **Feature: container-home-isolation, Property 7: Environment Variable Passthrough**
@@ -3521,7 +3695,7 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 		"OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_OPENAI_API_KEY",
 		"GOOGLE_API_KEY", "GITHUB_TOKEN", "GITLAB_TOKEN",
 		"DATABASE_URL", "REDIS_URL", "HF_TOKEN", "REPLICATE_API_TOKEN",
-		"COHERE_API_KEY", "MCP_CUSTOM_VAR", "MCP_PASSTHROUGH_TEST",
+		"COHERE_API_KEY", "MCP_CUSTOM_VAR", "MCP_PASSTHROUGH_TEST", "MCP_PASSTHROUGH_ENV",
 	}
 
 	// Save original values
@@ -3540,13 +3714,14 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 		}
 	}()
 
-	// Test cases with different combinations of environment variables
+	// Test cases with different combinations of environment variables and passthrough patterns
 	testCases := []struct {
-		name        string
-		args        []string
-		language    string
-		envVars     map[string]string
-		description string
+		name           string
+		args           []string
+		language       string
+		envVars        map[string]string
+		passthroughEnv string
+		description    string
 	}{
 		{
 			name:     "aws_credentials",
@@ -3558,7 +3733,8 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 				"AWS_REGION":            "us-east-1",
 				"AWS_SESSION_TOKEN":     "example-session-token",
 			},
-			description: "AWS credentials should be passed through",
+			passthroughEnv: "AWS_*",
+			description:    "AWS credentials should be passed through",
 		},
 		{
 			name:     "ai_api_keys",
@@ -3570,7 +3746,8 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 				"AZURE_OPENAI_API_KEY": "example-azure-key",
 				"GOOGLE_API_KEY":       "example-google-key",
 			},
-			description: "AI API keys should be passed through",
+			passthroughEnv: "OPENAI_*,ANTHROPIC_*,AZURE_*,GOOGLE_*",
+			description:    "AI API keys should be passed through",
 		},
 		{
 			name:     "development_tokens",
@@ -3583,7 +3760,8 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 				"REPLICATE_API_TOKEN": "r8_example_token",
 				"COHERE_API_KEY":      "example_cohere_key",
 			},
-			description: "Development tokens should be passed through",
+			passthroughEnv: "GITHUB_TOKEN,GITLAB_TOKEN,HF_TOKEN,REPLICATE_API_TOKEN,COHERE_API_KEY",
+			description:    "Development tokens should be passed through",
 		},
 		{
 			name:     "database_urls",
@@ -3593,7 +3771,8 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 				"DATABASE_URL": "postgresql://user:pass@localhost:5432/db",
 				"REDIS_URL":    "redis://localhost:6379",
 			},
-			description: "Database URLs should be passed through",
+			passthroughEnv: "DATABASE_URL,REDIS_URL",
+			description:    "Database URLs should be passed through",
 		},
 		{
 			name:     "custom_mcp_vars",
@@ -3604,7 +3783,8 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 				"MCP_PASSTHROUGH_TEST": "test_value",
 				"MCP_SERVER_CONFIG":    "config_value",
 			},
-			description: "Custom MCP variables should be passed through",
+			passthroughEnv: "MCP_*",
+			description:    "Custom MCP variables should be passed through",
 		},
 		{
 			name:     "mixed_environment",
@@ -3617,7 +3797,8 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 				"DATABASE_URL":      "postgresql://localhost:5432/db",
 				"MCP_CUSTOM_VAR":    "mixed_test_value",
 			},
-			description: "Mixed environment variables should all be passed through",
+			passthroughEnv: "AWS_*,OPENAI_*,GITHUB_TOKEN,DATABASE_URL,MCP_*",
+			description:    "Mixed environment variables should all be passed through",
 		},
 	}
 
@@ -3632,6 +3813,9 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 			for key, value := range tc.envVars {
 				os.Setenv(key, value)
 			}
+
+			// Set MCP_PASSTHROUGH_ENV to enable passthrough
+			os.Setenv("MCP_PASSTHROUGH_ENV", tc.passthroughEnv)
 
 			config := &Config{
 				NodejsImage: "ghcr.io/serverless-dna/run-mcp-nodejs:latest",
@@ -3669,6 +3853,20 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 
 			// Test 1: Verify all expected environment variables are passed through
 			for expectedKey, expectedValue := range tc.envVars {
+				// Skip configuration variables - they should never be passed through
+				configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_HOME_PATH", "MCP_PASSTHROUGH_ENV"}
+				isConfigVar := false
+				for _, configVar := range configVars {
+					if expectedKey == configVar {
+						isConfigVar = true
+						break
+					}
+				}
+
+				if isConfigVar {
+					continue // Skip configuration variables
+				}
+
 				if actualValue, exists := containerEnv[expectedKey]; !exists {
 					t.Errorf("Expected environment variable %s not found in container for %s", expectedKey, tc.description)
 				} else if actualValue != expectedValue {
@@ -3677,7 +3875,7 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 			}
 
 			// Test 2: Verify MCP configuration variables are NOT passed through
-			configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_HOME_PATH"}
+			configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_HOME_PATH", "MCP_PASSTHROUGH_ENV"}
 			for _, configVar := range configVars {
 				if _, exists := containerEnv[configVar]; exists {
 					t.Errorf("MCP configuration variable %s should not be passed to container for %s", configVar, tc.description)
@@ -3686,6 +3884,20 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 
 			// Test 3: Verify environment variable names are preserved exactly
 			for expectedKey := range tc.envVars {
+				// Skip configuration variables
+				configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_HOME_PATH", "MCP_PASSTHROUGH_ENV"}
+				isConfigVar := false
+				for _, configVar := range configVars {
+					if expectedKey == configVar {
+						isConfigVar = true
+						break
+					}
+				}
+
+				if isConfigVar {
+					continue
+				}
+
 				found := false
 				for containerKey := range containerEnv {
 					if containerKey == expectedKey {
@@ -3698,31 +3910,42 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 				}
 			}
 
-			// Test 4: Verify environment variable values are preserved exactly (no modification)
-			for expectedKey, expectedValue := range tc.envVars {
-				if actualValue, exists := containerEnv[expectedKey]; exists {
-					// Check for any modifications to the value
-					if len(actualValue) != len(expectedValue) {
-						t.Errorf("Environment variable %s value length changed for %s: expected %d chars, got %d chars", expectedKey, tc.description, len(expectedValue), len(actualValue))
+			// Test 4: Verify environment variable count matches expectations
+			expectedCount := 0
+			for expectedKey := range tc.envVars {
+				// Skip configuration variables
+				configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_HOME_PATH", "MCP_PASSTHROUGH_ENV"}
+				isConfigVar := false
+				for _, configVar := range configVars {
+					if expectedKey == configVar {
+						isConfigVar = true
+						break
 					}
+				}
 
-					// Check character-by-character to ensure no modifications
-					if actualValue != expectedValue {
-						t.Errorf("Environment variable %s value modified for %s: expected '%s', got '%s'", expectedKey, tc.description, expectedValue, actualValue)
-					}
+				if !isConfigVar {
+					expectedCount++
 				}
 			}
 
-			// Test 5: Verify no unexpected environment variables are added
-			// (This test checks that we don't add extra variables beyond what's expected)
-			expectedCount := len(tc.envVars)
 			actualCount := 0
-
 			// Count variables that match our test set
 			for containerKey := range containerEnv {
 				for expectedKey := range tc.envVars {
 					if containerKey == expectedKey {
-						actualCount++
+						// Skip configuration variables
+						configVars := []string{"MCP_MOUNT", "MCP_BIND_HOME", "MCP_HOME_PATH", "MCP_PASSTHROUGH_ENV"}
+						isConfigVar := false
+						for _, configVar := range configVars {
+							if expectedKey == configVar {
+								isConfigVar = true
+								break
+							}
+						}
+
+						if !isConfigVar {
+							actualCount++
+						}
 						break
 					}
 				}
@@ -3732,7 +3955,7 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 				t.Errorf("Environment variable count mismatch for %s: expected %d test variables, found %d", tc.description, expectedCount, actualCount)
 			}
 
-			// Test 6: Verify special characters and edge cases in values are preserved
+			// Test 5: Verify special characters and edge cases in values are preserved
 			t.Run("special_characters", func(t *testing.T) {
 				// Test with special characters in environment variable values
 				specialTestVars := map[string]string{
@@ -3765,6 +3988,9 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 					os.Setenv(key, value)
 				}
 
+				// Set passthrough to include test variables
+				os.Setenv("MCP_PASSTHROUGH_ENV", "TEST_*")
+
 				// Build command with special variables
 				cmd2, _, err2 := buildContainerCommand(config, "docker", tc.language, tc.args)
 				if err2 != nil {
@@ -3785,10 +4011,10 @@ func TestProperty7_EnvironmentVariablePassthrough(t *testing.T) {
 
 				// Verify special characters are preserved
 				for key, expectedValue := range specialTestVars {
-					if actualValue, exists := containerEnv2[key]; exists {
-						if actualValue != expectedValue {
-							t.Errorf("Special character preservation failed for %s: expected '%s', got '%s'", key, expectedValue, actualValue)
-						}
+					if actualValue, exists := containerEnv2[key]; !exists {
+						t.Errorf("Special character test variable %s not found", key)
+					} else if actualValue != expectedValue {
+						t.Errorf("Special character test variable %s value not preserved: expected '%s', got '%s'", key, expectedValue, actualValue)
 					}
 				}
 			})

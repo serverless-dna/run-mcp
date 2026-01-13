@@ -25,18 +25,18 @@ This implementation plan converts the secure-by-default design into discrete cod
   - **Property 4: Explicit Data Directory Mounting**
   - **Validates: Requirements 4.1, 4.3, 8.2**
 
-- [ ] 3. Add wildcard support to environment variable passthrough
+- [x] 3. Add wildcard support to environment variable passthrough
   - Modify `EnvFilter` to support wildcard patterns in `MCP_PASSTHROUGH_ENV`
   - Remove hardcoded `allowedPrefixes` and `allowedExact` defaults
   - Implement pattern matching for `*` suffix wildcards
   - Update `getCustomPassthroughVars()` to parse wildcards and exact matches
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
-- [ ] 3.1 Write property test for wildcard environment variable matching
+- [x] 3.1 Write property test for wildcard environment variable matching
   - **Property 5: Wildcard Environment Variable Matching**
   - **Validates: Requirements 9.2, 9.6**
 
-- [ ] 3.2 Write property test for no default environment variable passthrough
+- [x] 3.2 Write property test for no default environment variable passthrough
   - **Property 1: Secure Default Container Access** (environment variables part)
   - **Validates: Requirements 9.1, 9.3**
 
