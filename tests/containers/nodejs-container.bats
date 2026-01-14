@@ -118,38 +118,28 @@ teardown() {
 # For any Node.js container, it should support both CommonJS and ES module systems
 # and include TypeScript compilation capabilities
 @test "Property 15: Node.js container supports both CommonJS and ES modules" {
-    # Build the container
-    run $RUNTIME build -t "$TEST_IMAGE_TAG" nodejs/
-    [ "$status" -eq 0 ]
+    # Use the pre-built image from setup instead of rebuilding
+    # This avoids timing issues when running multiple tests
     
     # Test CommonJS support - create a simple CommonJS module
-    CJS_TEST='
-const fs = require("fs");
+    CJS_TEST='const fs = require("fs");
 const path = require("path");
 console.log("CommonJS module system works");
-module.exports = { test: true };
-'
+module.exports = { test: true };'
     
     # Test ES modules support - create a simple ES module
-    ESM_TEST='
-import fs from "fs";
+    ESM_TEST='import fs from "fs";
 import path from "path";
 console.log("ES module system works");
-export default { test: true };
-'
+export default { test: true };'
     
-    # Create test files in a temporary volume
-    mkdir -p test-modules
-    echo "$CJS_TEST" > test-modules/test.cjs
-    echo "$ESM_TEST" > test-modules/test.mjs
-    
-    # Test CommonJS execution (use --entrypoint to bypass logging)
-    run $RUNTIME run --rm --entrypoint="" -v "$PWD/test-modules:/test" "$TEST_IMAGE_TAG" node /test/test.cjs
+    # Test CommonJS execution by piping code directly to node
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "echo '$CJS_TEST' | node --input-type=commonjs"
     [ "$status" -eq 0 ]
     [[ "$output" =~ "CommonJS module system works" ]]
     
-    # Test ES modules execution (use --entrypoint to bypass logging)
-    run $RUNTIME run --rm --entrypoint="" -v "$PWD/test-modules:/test" "$TEST_IMAGE_TAG" node /test/test.mjs
+    # Test ES modules execution by piping code directly to node
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "echo '$ESM_TEST' | node --input-type=module"
     [ "$status" -eq 0 ]
     [[ "$output" =~ "ES module system works" ]]
     
@@ -164,9 +154,6 @@ export default { test: true };
     [ "$status" -eq 0 ]
     # Either tsx is installed or we get the expected message
     [[ "$output" =~ "/app/node_modules/.bin/tsx" ]] || [[ "$output" =~ "tsx not pre-installed" ]]
-    
-    # Clean up test files
-    rm -rf test-modules
 }
 
 # Additional property test: Container runs as non-root user (UID 1000)
