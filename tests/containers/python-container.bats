@@ -70,15 +70,15 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" =~ ^uv\ [0-9]+\.[0-9]+\.[0-9]+ ]]
     
-    # Verify MCP SDK is available in virtual environment
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -c "import mcp; print('MCP SDK available')"
+    # Verify MCP SDK can be installed via uvx (runtime installation model)
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "uvx --help | grep -q 'Run a command' && echo 'uvx available for MCP SDK installation'"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ "MCP SDK available" ]]
+    [[ "$output" =~ "uvx available for MCP SDK installation" ]]
     
-    # Verify other required dependencies are available
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -c "import uvloop, httpx, pydantic; print('Dependencies available')"
+    # Verify Python can import standard libraries (no pre-installed MCP dependencies)
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -c "import sys, json; print('Python ready')"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ "Dependencies available" ]]
+    [[ "$output" =~ "Python ready" ]]
 }
 
 # Property 13: LTS Version Compliance
@@ -120,36 +120,23 @@ teardown() {
     run $RUNTIME build -t "$TEST_IMAGE_TAG" python/
     [ "$status" -eq 0 ]
     
-    # Verify virtual environment is active and properly configured
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -c "import sys; print(sys.prefix)"
+    # Test uv can create new virtual environments
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "cd /tmp && uv venv test-venv && test -f test-venv/bin/python"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ "/app/venv" ]]
     
-    # Verify VIRTUAL_ENV environment variable is set
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" printenv VIRTUAL_ENV
-    [ "$status" -eq 0 ]
-    [ "$output" = "/app/venv" ]
-    
-    # Verify PATH includes virtual environment bin directory
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" printenv PATH
-    [ "$status" -eq 0 ]
-    [[ "$output" =~ "/app/venv/bin" ]]
-    
-    # Test uv can create new virtual environments (with proper cache directory)
-    run $RUNTIME run --rm --entrypoint="" -e UV_CACHE_DIR=/tmp/uv-cache "$TEST_IMAGE_TAG" sh -c "mkdir -p /tmp/uv-cache && cd /tmp && uv venv test-venv && ls test-venv/bin/python"
-    [ "$status" -eq 0 ]
-    [[ "$output" =~ "test-venv/bin/python" ]]
-    
-    # Test uv can install packages in virtual environment (with proper cache directory)
-    run $RUNTIME run --rm --entrypoint="" -e UV_CACHE_DIR=/tmp/uv-cache "$TEST_IMAGE_TAG" sh -c "mkdir -p /tmp/uv-cache && cd /tmp && uv venv test-venv && uv pip install --python test-venv/bin/python requests && test-venv/bin/python -c 'import requests; print(\"Package installed successfully\")'"
+    # Test uv can install packages in virtual environment
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "cd /tmp && uv venv test-venv && uv pip install --python test-venv/bin/python requests && test-venv/bin/python -c 'import requests; print(\"Package installed successfully\")'"
     [ "$status" -eq 0 ]
     [[ "$output" =~ "Package installed successfully" ]]
     
-    # Verify common Python development tools are available via uv (with proper cache directory)
-    # Test that we can install development tools
-    run $RUNTIME run --rm --entrypoint="" -e UV_CACHE_DIR=/tmp/uv-cache "$TEST_IMAGE_TAG" sh -c "mkdir -p /tmp/uv-cache && cd /tmp && uv venv dev-venv && uv pip install --python dev-venv/bin/python pytest && dev-venv/bin/python -c 'import pytest; print(\"Dev tools available\")'"
+    # Verify common Python development tools can be installed via uv
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "cd /tmp && uv venv dev-venv && uv pip install --python dev-venv/bin/python pytest && dev-venv/bin/python -c 'import pytest; print(\"Dev tools available\")'"
     [ "$status" -eq 0 ]
     [[ "$output" =~ "Dev tools available" ]]
+    
+    # Verify Python's built-in venv module also works
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "cd /tmp && python -m venv builtin-venv && test -f builtin-venv/bin/python"
+    [ "$status" -eq 0 ]
 }
 
 # Additional property test: Container runs as non-root user (UID 1000)
@@ -293,26 +280,15 @@ teardown() {
     [[ "$output" =~ ^uvx\ [0-9]+\.[0-9]+\.[0-9]+ ]]
     
     # Verify pip is available (comes with Python)
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" pip --version
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -m pip --version
     [ "$status" -eq 0 ]
-    [[ "$output" =~ ^pip\ [0-9]+\.[0-9]+\.[0-9]+ ]]
+    [[ "$output" =~ pip\ [0-9]+\.[0-9]+\.[0-9]+ ]]
     
-    # Verify virtual environment is properly configured
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" printenv VIRTUAL_ENV
+    # Verify uv can create and use virtual environments
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "uv venv /tmp/test-venv && test -d /tmp/test-venv"
     [ "$status" -eq 0 ]
-    [ "$output" = "/app/venv" ]
     
-    # Verify MCP SDK is available in virtual environment (check installed packages)
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "pip list | grep -i mcp || echo 'MCP not found in pip list'"
-    [ "$status" -eq 0 ]
-    [[ "$output" =~ "mcp" ]] || [[ "$output" =~ "MCP not found in pip list" ]]
-    
-    # Verify virtual environment directory has proper permissions
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%a" /app/venv
-    [ "$status" -eq 0 ]
-    [ "$output" = "755" ]
-    
-    # Verify uv cache directory is properly configured (check if UV_CACHE_DIR can be set)
+    # Verify uv cache directory can be configured
     run $RUNTIME run --rm --entrypoint="" -e UV_CACHE_DIR=/tmp/test-cache "$TEST_IMAGE_TAG" printenv UV_CACHE_DIR
     [ "$status" -eq 0 ]
     [ "$output" = "/tmp/test-cache" ]

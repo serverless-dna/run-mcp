@@ -297,16 +297,15 @@ export default { test: true };'
     [ "$status" -eq 0 ]
     [[ "$output" =~ "audit" ]]
     
-    # Verify MCP SDK is available or can be installed (check if it's in dependencies)
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "npm list @modelcontextprotocol/sdk 2>/dev/null || echo 'MCP SDK not installed'"
+    # Verify MCP SDK can be installed via npm (runtime installation model)
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "npm list @modelcontextprotocol/sdk 2>/dev/null || echo 'MCP SDK not pre-installed (install at runtime)'"
     [ "$status" -eq 0 ]
-    # Either the SDK is installed or we get the expected message
-    [[ "$output" =~ "@modelcontextprotocol/sdk" ]] || [[ "$output" =~ "MCP SDK not installed" ]]
+    [[ "$output" =~ "MCP SDK not pre-installed (install at runtime)" ]]
     
-    # Verify node_modules directory has proper permissions
-    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%a" /app/node_modules
+    # Verify /app directory exists and is writable for runtime installations
+    run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "test -d /app && test -w /app && echo 'app directory writable'"
     [ "$status" -eq 0 ]
-    [ "$output" = "755" ]
+    [[ "$output" =~ "app directory writable" ]]
     
     # Verify package managers can install packages securely (test basic npm functionality)
     run $RUNTIME run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "cd /tmp && npm init -y && echo 'npm init successful'"

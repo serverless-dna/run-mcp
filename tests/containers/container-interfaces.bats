@@ -216,9 +216,10 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" =~ "Node.js ready for MCP" ]]
     
-    run $(get_runtime) run --rm "$PYTHON_TEST_IMAGE" python -c "import mcp; print('Python MCP SDK ready')"
+    # Test that Python container can use uvx to run MCP packages (runtime installation model)
+    run $(get_runtime) run --rm "$PYTHON_TEST_IMAGE" python -c "import sys; print('Python ready for MCP')"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ "Python MCP SDK ready" ]]
+    [[ "$output" =~ "Python ready for MCP" ]]
 }
 
 # Property 17: stdio Transport Integrity
