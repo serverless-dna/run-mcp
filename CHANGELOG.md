@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Generating changelog for version 1.0.3 (since v1.0.3)
+## [1.0.3] - 2026-01-15
+
+### Container Images
+- Fix heombrew (#30)
+
+### Container Images
+- Updated base images and dependencies
+- Multi-architecture builds (AMD64/ARM64)
+
+### Binary Releases
+- Windows (AMD64): run-mcp-windows-amd64.exe
+- macOS (Intel): run-mcp-darwin-amd64
+- macOS (Apple Silicon): run-mcp-darwin-arm64
+- Linux (AMD64): run-mcp-linux-amd64
+- Linux (ARM64): run-mcp-linux-arm64
+
+[1.0.3]: https://github.com/modelcontextprotocol/mcp-container-images/releases/tag/v1.0.3
+
 <<<<<<< HEAD
 ## [Unreleased]
 
