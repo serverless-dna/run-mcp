@@ -1,0 +1,43 @@
+# Ensure consistent line endings across platforms
+# Auto detect text files and normalize to LF
+* text=auto eol=lf
+
+# Shell scripts must use LF
+*.sh text eol=lf
+
+# Makefiles must use LF and tabs
+Makefile text eol=lf
+*.mk text eol=lf
+
+# Go files
+*.go text eol=lf
+
+# YAML files
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Markdown files
+*.md text eol=lf
+
+# Dockerfile
+Dockerfile* text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.mov binary
+*.mp4 binary
+*.mp3 binary
+*.flv binary
+*.fla binary
+*.swf binary
+*.gz binary
+*.zip binary
+*.7z binary
+*.ttf binary
+*.eot binary
+*.woff binary
+*.woff2 binary

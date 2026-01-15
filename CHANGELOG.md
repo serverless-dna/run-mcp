@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Fixed container test suite to align with simplified runtime dependency model
+  - Updated Property 3 test to verify Python readiness without pre-installed MCP SDK
+  - Updated Property 1 Python test to check uvx availability instead of pre-installed dependencies
+  - Updated Property 14 Node.js test to verify /app directory writability for runtime installations
+  - Fixed Property 15 Node.js test to use piped input instead of volume mounts for better portability
+  - All 30 container tests now pass consistently across Docker and Podman
+
+### Changed
+- Added .gitattributes file to enforce consistent Unix line endings across all platforms
+  - Ensures Makefile, shell scripts, and YAML files use LF line endings
+  - Prevents CRLF issues in GitHub Actions and cross-platform development
+
 ## [v1.0.2] - 2026-01-05
 
 ### Fixed
