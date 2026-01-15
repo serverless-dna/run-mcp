@@ -292,16 +292,9 @@ export default { test: true };
     [ "$status" -eq 0 ]
     [[ "$output" =~ "audit" ]]
     
-    # Verify MCP SDK is available or can be installed (check if it's in dependencies)
-    run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "npm list @modelcontextprotocol/sdk 2>/dev/null || echo 'MCP SDK not installed'"
+    # Verify /app directory is writable for runtime dependency installation
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" touch /app/test-write-file
     [ "$status" -eq 0 ]
-    # Either the SDK is installed or we get the expected message
-    [[ "$output" =~ "@modelcontextprotocol/sdk" ]] || [[ "$output" =~ "MCP SDK not installed" ]]
-    
-    # Verify node_modules directory has proper permissions
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%a" /app/node_modules
-    [ "$status" -eq 0 ]
-    [ "$output" = "755" ]
     
     # Verify package managers can install packages securely (test basic npm functionality)
     run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "cd /tmp && npm init -y && echo 'npm init successful'"

@@ -52,15 +52,15 @@ teardown() {
     [ "$status" -eq 0 ]
     [[ "$output" =~ ^uv\ [0-9]+\.[0-9]+\.[0-9]+ ]]
     
-    # Verify MCP SDK is available in virtual environment
-    run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -c "import mcp; print('MCP SDK available')"
+    # Verify uvx is available for runtime dependency installation
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" uvx --version
     [ "$status" -eq 0 ]
-    [[ "$output" =~ "MCP SDK available" ]]
+    [[ "$output" =~ ^uvx\ [0-9]+\.[0-9]+\.[0-9]+ ]]
     
-    # Verify other required dependencies are available
-    run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -c "import uvloop, httpx, pydantic; print('Dependencies available')"
+    # Verify Python standard libraries are available
+    run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -c "import sys, os, json; print('Python standard libraries available')"
     [ "$status" -eq 0 ]
-    [[ "$output" =~ "Dependencies available" ]]
+    [[ "$output" =~ "Python standard libraries available" ]]
 }
 
 # Property 13: LTS Version Compliance
@@ -102,21 +102,6 @@ teardown() {
     run docker build -t "$TEST_IMAGE_TAG" python/
     [ "$status" -eq 0 ]
     
-    # Verify virtual environment is active and properly configured
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -c "import sys; print(sys.prefix)"
-    [ "$status" -eq 0 ]
-    [[ "$output" =~ "/app/venv" ]]
-    
-    # Verify VIRTUAL_ENV environment variable is set
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" printenv VIRTUAL_ENV
-    [ "$status" -eq 0 ]
-    [ "$output" = "/app/venv" ]
-    
-    # Verify PATH includes virtual environment bin directory
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" printenv PATH
-    [ "$status" -eq 0 ]
-    [[ "$output" =~ "/app/venv/bin" ]]
-    
     # Test uv can create new virtual environments (with proper cache directory)
     run timeout 60 docker run --rm --entrypoint="" -e UV_CACHE_DIR=/tmp/uv-cache "$TEST_IMAGE_TAG" sh -c "mkdir -p /tmp/uv-cache && cd /tmp && uv venv test-venv && ls test-venv/bin/python"
     [ "$status" -eq 0 ]
@@ -132,6 +117,11 @@ teardown() {
     run timeout 60 docker run --rm --entrypoint="" -e UV_CACHE_DIR=/tmp/uv-cache "$TEST_IMAGE_TAG" sh -c "mkdir -p /tmp/uv-cache && cd /tmp && uv venv dev-venv && uv pip install --python dev-venv/bin/python pytest && dev-venv/bin/python -c 'import pytest; print(\"Dev tools available\")'"
     [ "$status" -eq 0 ]
     [[ "$output" =~ "Dev tools available" ]]
+    
+    # Verify Python can use pip for package management
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -m pip --version
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ ^pip\ [0-9]+\.[0-9]+\.[0-9]+ ]]
 }
 
 # Additional property test: Container runs as non-root user (UID 1000)
@@ -275,24 +265,9 @@ teardown() {
     [[ "$output" =~ ^uvx\ [0-9]+\.[0-9]+\.[0-9]+ ]]
     
     # Verify pip is available (comes with Python)
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" pip --version
+    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" python -m pip --version
     [ "$status" -eq 0 ]
     [[ "$output" =~ ^pip\ [0-9]+\.[0-9]+\.[0-9]+ ]]
-    
-    # Verify virtual environment is properly configured
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" printenv VIRTUAL_ENV
-    [ "$status" -eq 0 ]
-    [ "$output" = "/app/venv" ]
-    
-    # Verify MCP SDK is available in virtual environment (check installed packages)
-    run timeout 30 docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" sh -c "pip list | grep -i mcp || echo 'MCP not found in pip list'"
-    [ "$status" -eq 0 ]
-    [[ "$output" =~ "mcp" ]] || [[ "$output" =~ "MCP not found in pip list" ]]
-    
-    # Verify virtual environment directory has proper permissions
-    run docker run --rm --entrypoint="" "$TEST_IMAGE_TAG" stat -c "%a" /app/venv
-    [ "$status" -eq 0 ]
-    [ "$output" = "755" ]
     
     # Verify uv cache directory is properly configured (check if UV_CACHE_DIR can be set)
     run docker run --rm --entrypoint="" -e UV_CACHE_DIR=/tmp/test-cache "$TEST_IMAGE_TAG" printenv UV_CACHE_DIR
