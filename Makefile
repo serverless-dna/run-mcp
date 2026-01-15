@@ -405,6 +405,14 @@ lint-makefile: ## Lint Makefile syntax
 	@if command -v checkmake >/dev/null 2>&1; then \
 		checkmake --config=checkmake.ini Makefile; \
 	fi
+	@echo "$(BLUE)Checking for CRLF line endings...$(NC)"
+	@if file Makefile | grep -q "CRLF"; then \
+		echo "$(RED)✗ Makefile contains CRLF line endings (Windows style)$(NC)"; \
+		echo "$(YELLOW)Fix with: sed -i 's/\r$$//' Makefile$(NC)"; \
+		exit 1; \
+	else \
+		echo "$(GREEN)✓ Makefile uses LF line endings (Unix style)$(NC)"; \
+	fi
 
 lint-workflows: ## Lint GitHub Actions workflows
 	@echo "$(BLUE)Linting GitHub Actions workflows...$(NC)"
@@ -415,6 +423,16 @@ lint-workflows: ## Lint GitHub Actions workflows
 	else \
 		echo "$(YELLOW)actionlint not found, skipping workflow linting$(NC)"; \
 		echo "$(YELLOW)Install with: go install github.com/rhysd/actionlint/cmd/actionlint@latest$(NC)"; \
+	fi
+	@echo "$(BLUE)Checking workflow files for CRLF line endings...$(NC)"
+	@CRLF_FILES=$$(find .github/workflows -name "*.yml" -exec file {} \; | grep CRLF | cut -d: -f1); \
+	if [ -n "$$CRLF_FILES" ]; then \
+		echo "$(RED)✗ The following workflow files contain CRLF line endings:$(NC)"; \
+		echo "$$CRLF_FILES"; \
+		echo "$(YELLOW)Fix with: find .github/workflows -name '*.yml' -exec sed -i 's/\r$$//' {} \;$(NC)"; \
+		exit 1; \
+	else \
+		echo "$(GREEN)✓ All workflow files use LF line endings$(NC)"; \
 	fi
 
 validate-dockerfiles: ## Validate Dockerfiles with hadolint

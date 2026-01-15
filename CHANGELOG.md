@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added .gitattributes file to enforce consistent Unix line endings across all platforms
   - Ensures Makefile, shell scripts, and YAML files use LF line endings
   - Prevents CRLF issues in GitHub Actions and cross-platform development
+- Enhanced Makefile linting to detect CRLF line endings
+  - `make lint-makefile` now checks for Windows line endings in Makefile
+  - `make lint-workflows` now checks for Windows line endings in workflow files
+  - Provides helpful fix commands when CRLF is detected
 
 ## [v1.0.2] - 2026-01-05
 
