@@ -3,9 +3,7 @@
 
 # Docker command detection for WSL2 and cross-platform
 DOCKER_CMD := $(shell \
-	if command -v docker >/dev/null 2>&1; then \
-		echo "docker"; \
-	elif command -v podman >/dev/null 2>&1; then \
+	if command -v podman >/dev/null 2>&1; then \
 		echo "podman"; \
 	elif command -v nerdctl >/dev/null 2>&1; then \
 		echo "nerdctl"; \
@@ -13,6 +11,8 @@ DOCKER_CMD := $(shell \
 		echo "finch"; \
 	elif command -v docker.exe >/dev/null 2>&1; then \
 		echo "docker.exe"; \
+	elif command -v docker >/dev/null 2>&1; then \
+		echo "docker"; \
 	else \
 		echo ""; \
 	fi)
@@ -323,7 +323,7 @@ push-python-matrix: ## Push all Python matrix images to registry
 # TESTING TARGETS
 # =============================================================================
 
-test: test-scripts test-containers test-workflows test-run-mcp-full ## Run all tests (CI/CD mode)
+test: build test-scripts test-containers test-workflows test-run-mcp-full ## Run all tests (CI/CD mode)
 
 test-dev: test-scripts test-containers test-workflows test-run-mcp ## Run development tests (fast mode with unit + container tests)
 
@@ -360,7 +360,7 @@ test-containers: ## Run container tests with Bats
 		exit 1; \
 	fi
 	@if [ -d "tests/containers" ]; then \
-		bats tests/containers/; \
+		CONTAINER_RUNTIME=$(DOCKER_CMD) bats tests/containers/; \
 	else \
 		echo "$(YELLOW)No container tests found$(NC)"; \
 	fi

@@ -5,6 +5,8 @@
 
 set -e
 
+
+
 # Ensure unbuffered stdio for MCP protocol communication
 # This is critical for JSON-RPC over stdio transport
 export NODE_OPTIONS="${NODE_OPTIONS} --no-warnings"
@@ -22,6 +24,8 @@ echo "[MCP-CONTAINER] Environment:" >&2
 echo "[MCP-CONTAINER]   NODE_OPTIONS: ${NODE_OPTIONS}" >&2
 echo "[MCP-CONTAINER]   FORCE_COLOR: ${FORCE_COLOR}" >&2
 echo "[MCP-CONTAINER]   PATH: ${PATH}" >&2
+echo "[MCP-CONTAINER] Container image:" >&2
+echo "[MCP-CONTAINER]   Image: ${MCP_CONTAINER_IMAGE:-unknown}" >&2
 echo "[MCP-CONTAINER] Runtime versions:" >&2
 echo "[MCP-CONTAINER]   Node.js: $(node --version)" >&2
 echo "[MCP-CONTAINER]   NPM: $(npm --version)" >&2

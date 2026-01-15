@@ -5,6 +5,7 @@
 
 set -e
 
+
 # Set unbuffered output for Python (critical for MCP protocol)
 export PYTHONUNBUFFERED=1
 export PYTHONDONTWRITEBYTECODE=1
@@ -22,6 +23,8 @@ echo "[MCP-CONTAINER]   PYTHONUNBUFFERED: ${PYTHONUNBUFFERED}" >&2
 echo "[MCP-CONTAINER]   PYTHONDONTWRITEBYTECODE: ${PYTHONDONTWRITEBYTECODE}" >&2
 echo "[MCP-CONTAINER]   VIRTUAL_ENV: ${VIRTUAL_ENV:-'(not set)'}" >&2
 echo "[MCP-CONTAINER]   PATH: ${PATH}" >&2
+echo "[MCP-CONTAINER] Container image:" >&2
+echo "[MCP-CONTAINER]   Image: ${MCP_CONTAINER_IMAGE:-unknown}" >&2
 echo "[MCP-CONTAINER] Runtime versions:" >&2
 echo "[MCP-CONTAINER]   Python: $(python --version)" >&2
 echo "[MCP-CONTAINER]   uv: $(uv --version)" >&2

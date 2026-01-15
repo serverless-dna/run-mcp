@@ -11,26 +11,11 @@ type EnvFilter struct {
 	allowedExact    map[string]bool
 }
 
-// NewEnvFilter creates a new environment filter with secure defaults
+// NewEnvFilter creates a new environment filter with secure defaults (no hardcoded allowlists)
 func NewEnvFilter() *EnvFilter {
 	return &EnvFilter{
-		allowedPrefixes: []string{
-			"AWS_",
-			"OPENAI_",
-			"ANTHROPIC_",
-			"AZURE_",
-			"GOOGLE_",
-			"MCP_",
-			"HF_",
-			"REPLICATE_",
-			"COHERE_",
-		},
-		allowedExact: map[string]bool{
-			"GITHUB_TOKEN": true,
-			"GITLAB_TOKEN": true,
-			"DATABASE_URL": true,
-			"REDIS_URL":    true,
-		},
+		allowedPrefixes: []string{},            // Empty by default - secure by default
+		allowedExact:    make(map[string]bool), // Empty by default - secure by default
 	}
 }
 
@@ -38,80 +23,84 @@ func NewEnvFilter() *EnvFilter {
 func (ef *EnvFilter) GetFilteredEnvArgs() []string {
 	var args []string
 	seen := make(map[string]bool)
-	
-	// Add user-specified additional vars from MCP_PASSTHROUGH_ENV
-	customVars := ef.getCustomPassthroughVars()
-	for _, v := range customVars {
+
+	// Parse MCP_PASSTHROUGH_ENV for exact vars and patterns
+	exactVars, patterns := ef.getCustomPassthroughVars()
+
+	// Add exact variables to allowlist
+	for _, v := range exactVars {
 		ef.allowedExact[v] = true
 	}
-	
+
+	// Store patterns for prefix matching
+	ef.allowedPrefixes = patterns
+
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
 		key := parts[0]
-		
+
 		// Skip if already processed
 		if seen[key] {
 			continue
 		}
-		
+
 		// Check if variable should be passed through
 		if ef.shouldPassthrough(key) {
 			args = append(args, "-e", env)
 			seen[key] = true
 		}
 	}
-	
+
 	return args
 }
 
 // shouldPassthrough determines if an environment variable should be passed to the container
 func (ef *EnvFilter) shouldPassthrough(key string) bool {
-	// Exclude run-mcp configuration variables (Requirement 3.5)
+	// Exclude run-mcp configuration variables (Requirement 9.4)
 	// These should be consumed by run-mcp and not passed to the container
-	configVars := []string{
-		"MCP_MOUNT",
-		"MCP_BIND_HOME", 
-		"MCP_HOME_PATH",
+	if IsConfigurationEnvVar(key) {
+		return false
 	}
-	
-	for _, configVar := range configVars {
-		if key == configVar {
-			return false
-		}
-	}
-	
+
 	// Check exact match first
 	if ef.allowedExact[key] {
 		return true
 	}
-	
+
 	// Check prefix match
 	for _, prefix := range ef.allowedPrefixes {
 		if strings.HasPrefix(key, prefix) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
-// getCustomPassthroughVars parses MCP_PASSTHROUGH_ENV for additional variables
-func (ef *EnvFilter) getCustomPassthroughVars() []string {
-	var vars []string
-	
-	if extra := os.Getenv("MCP_PASSTHROUGH_ENV"); extra != "" {
+// getCustomPassthroughVars parses MCP_PASSTHROUGH_ENV for wildcard patterns and exact variables
+func (ef *EnvFilter) getCustomPassthroughVars() ([]string, []string) {
+	var exactVars []string
+	var patterns []string
+
+	if extra := os.Getenv(MCPPassthroughEnv); extra != "" {
 		for _, v := range strings.Split(extra, ",") {
 			v = strings.TrimSpace(v)
 			if v != "" {
-				vars = append(vars, v)
+				if strings.HasSuffix(v, "*") {
+					// Wildcard pattern - remove the * suffix
+					patterns = append(patterns, strings.TrimSuffix(v, "*"))
+				} else {
+					// Exact match
+					exactVars = append(exactVars, v)
+				}
 			}
 		}
 	}
-	
-	return vars
+
+	return exactVars, patterns
 }
 
 // GetAllowedPrefixes returns the list of allowed environment variable prefixes
@@ -142,33 +131,41 @@ func (ef *EnvFilter) AddAllowedExact(name string) {
 func (ef *EnvFilter) GetFilteredEnvCount() int {
 	count := 0
 	seen := make(map[string]bool)
-	
-	// Add custom vars to exact matches temporarily
-	customVars := ef.getCustomPassthroughVars()
+
+	// Parse MCP_PASSTHROUGH_ENV for exact vars and patterns
+	exactVars, patterns := ef.getCustomPassthroughVars()
+
+	// Store original state
 	originalExact := make(map[string]bool)
 	for k, v := range ef.allowedExact {
 		originalExact[k] = v
 	}
-	
-	for _, v := range customVars {
+	originalPrefixes := append([]string{}, ef.allowedPrefixes...)
+
+	// Add exact variables to allowlist temporarily
+	for _, v := range exactVars {
 		ef.allowedExact[v] = true
 	}
-	
+
+	// Store patterns for prefix matching temporarily
+	ef.allowedPrefixes = patterns
+
 	for _, env := range os.Environ() {
 		parts := strings.SplitN(env, "=", 2)
 		if len(parts) != 2 {
 			continue
 		}
 		key := parts[0]
-		
+
 		if !seen[key] && ef.shouldPassthrough(key) {
 			count++
 			seen[key] = true
 		}
 	}
-	
-	// Restore original exact matches
+
+	// Restore original state
 	ef.allowedExact = originalExact
-	
+	ef.allowedPrefixes = originalPrefixes
+
 	return count
 }
