@@ -242,6 +242,11 @@ jobs:
       actions: read
     
     steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
       - name: Checkout tap repository
         uses: actions/checkout@v4
         with:
@@ -265,6 +270,23 @@ jobs:
           fi
           # Remove 'v' prefix for homebrew version (homebrew versions are just numbers)
           HOMEBREW_VERSION=${VERSION#v}
+          
+          echo "=== Debug: Current directory and files ==="
+          pwd
+          ls -la
+          echo ""
+          echo "=== Debug: Checking for Makefile ==="
+          if [ -f "Makefile" ]; then
+            echo "✅ Makefile found"
+            echo "Checking for update-homebrew-github target..."
+            grep -n "update-homebrew-github:" Makefile || echo "❌ Target not found in Makefile"
+          else
+            echo "❌ Makefile not found"
+          fi
+          echo ""
+          echo "=== Debug: Checking for script ==="
+          ls -la scripts/update-homebrew-formula-github.sh || echo "❌ Script not found"
+          echo ""
           
           echo "Updating homebrew formula for version: $HOMEBREW_VERSION (from tag: $VERSION)"
           

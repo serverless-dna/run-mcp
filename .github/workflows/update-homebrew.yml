@@ -60,6 +60,23 @@ jobs:
           VERSION="${{ github.event.inputs.version }}"
           TAG="${{ github.event.inputs.tag }}"
           
+          echo "=== Debug: Current directory and files ==="
+          pwd
+          ls -la
+          echo ""
+          echo "=== Debug: Checking for Makefile ==="
+          if [ -f "Makefile" ]; then
+            echo "✅ Makefile found"
+            echo "Checking for update-homebrew-github target..."
+            grep -n "update-homebrew-github:" Makefile || echo "❌ Target not found in Makefile"
+          else
+            echo "❌ Makefile not found"
+          fi
+          echo ""
+          echo "=== Debug: Checking for script ==="
+          ls -la scripts/update-homebrew-formula-github.sh || echo "❌ Script not found"
+          echo ""
+          
           echo "Updating homebrew formula for version: $VERSION (from tag: $TAG)"
           make update-homebrew-github VERSION="$VERSION" TAG="$TAG"
       
