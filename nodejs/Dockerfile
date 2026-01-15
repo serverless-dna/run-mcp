@@ -2,72 +2,25 @@
 # Accept Node.js version as build argument
 ARG NODE_VERSION=22.11.0
 
-# Build stage - for dependency installation and compilation
-FROM node:${NODE_VERSION}-alpine AS builder
-
-# Install build dependencies with proper version constraints
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    git
-
-# Set up working directory
-WORKDIR /app
-
-# Copy package files for dependency caching
-COPY package*.json ./
-COPY yarn.lock* ./
-
-# Install dependencies (both npm and yarn available)
-RUN npm install --only=production && \
-    npm cache clean --force
-
 # Runtime stage - minimal production image
 FROM node:${NODE_VERSION}-alpine AS runtime
 
-# Install security updates and create non-root user
+# Copy entrypoint script
+COPY --chown=node:node entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# Install security updates, set up directories, and configure system
 RUN apk update && \
     apk upgrade && \
-    apk add --no-cache \
-    dumb-init \
-    && rm -rf /var/cache/apk/* \
-    && rm -rf /tmp/* \
-    && rm -rf /var/tmp/*
-
-# Remove unnecessary packages and files to minimize attack surface
-RUN apk del --no-cache \
-    wget \
-    curl || true
-
-# Use existing node user (already UID 1000 in node:lts-alpine)
-# No need to create new user - node user already exists with UID 1000
-
-# Set up directories with proper permissions
-RUN mkdir -p /app /data && \
-    chown -R node:node /app /data && \
-    chmod 755 /app /data
-
-# Copy built dependencies from builder stage
-COPY --from=builder --chown=node:node /app/node_modules /app/node_modules
-
-# Install global package managers (npm already included, yarn already available)
-# Just ensure yarn is up to date
-RUN npm install -g yarn@latest --force && \
-    npm cache clean --force
-
-# Copy entrypoint script with secure permissions
-COPY --chown=node:node entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod 755 /usr/local/bin/entrypoint.sh && \
-    chown node:node /usr/local/bin/entrypoint.sh
-
-# Remove write permissions from system directories for security
-RUN chmod -R go-w /usr/local/bin/ /usr/bin/ /bin/ /sbin/ || true
-
-# Create home directory for node user with proper permissions (as root)
-RUN mkdir -p /home/mcp && \
-    chown -R node:node /home/mcp && \
-    chmod 755 /home/mcp
+    apk add --no-cache dumb-init && \
+    apk del --no-cache wget curl || true && \
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/* && \
+    mkdir -p /app /data /home/mcp && \
+    chown -R node:node /app /data /home/mcp && \
+    chmod 755 /app /data /home/mcp && \
+    npm install -g yarn@latest --force && \
+    npm cache clean --force && \
+    chmod 755 /usr/local/bin/entrypoint.sh && \
+    chmod -R go-w /usr/local/bin/ /usr/bin/ /bin/ /sbin/ || true
 
 # Switch to non-root user
 USER node
