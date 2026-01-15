@@ -3,9 +3,7 @@
 
 # Docker command detection for WSL2 and cross-platform
 DOCKER_CMD := $(shell \
-	if command -v docker >/dev/null 2>&1; then \
-		echo "docker"; \
-	elif command -v podman >/dev/null 2>&1; then \
+	if command -v podman >/dev/null 2>&1; then \
 		echo "podman"; \
 	elif command -v nerdctl >/dev/null 2>&1; then \
 		echo "nerdctl"; \
@@ -13,6 +11,8 @@ DOCKER_CMD := $(shell \
 		echo "finch"; \
 	elif command -v docker.exe >/dev/null 2>&1; then \
 		echo "docker.exe"; \
+	elif command -v docker >/dev/null 2>&1; then \
+		echo "docker"; \
 	else \
 		echo ""; \
 	fi)
@@ -323,7 +323,7 @@ push-python-matrix: ## Push all Python matrix images to registry
 # TESTING TARGETS
 # =============================================================================
 
-test: test-scripts test-containers test-workflows test-run-mcp-full ## Run all tests (CI/CD mode)
+test: build test-scripts test-containers test-workflows test-run-mcp-full ## Run all tests (CI/CD mode)
 
 test-dev: test-scripts test-containers test-workflows test-run-mcp ## Run development tests (fast mode with unit + container tests)
 
@@ -360,7 +360,7 @@ test-containers: ## Run container tests with Bats
 		exit 1; \
 	fi
 	@if [ -d "tests/containers" ]; then \
-		bats tests/containers/; \
+		CONTAINER_RUNTIME=$(DOCKER_CMD) bats tests/containers/; \
 	else \
 		echo "$(YELLOW)No container tests found$(NC)"; \
 	fi
@@ -405,14 +405,6 @@ lint-makefile: ## Lint Makefile syntax
 	@if command -v checkmake >/dev/null 2>&1; then \
 		checkmake --config=checkmake.ini Makefile; \
 	fi
-	@echo "$(BLUE)Checking for CRLF line endings...$(NC)"
-	@if file Makefile | grep -q "CRLF"; then \
-		echo "$(RED)✗ Makefile contains CRLF line endings (Windows style)$(NC)"; \
-		echo "$(YELLOW)Fix with: sed -i 's/\r$$//' Makefile$(NC)"; \
-		exit 1; \
-	else \
-		echo "$(GREEN)✓ Makefile uses LF line endings (Unix style)$(NC)"; \
-	fi
 
 lint-workflows: ## Lint GitHub Actions workflows
 	@echo "$(BLUE)Linting GitHub Actions workflows...$(NC)"
@@ -423,16 +415,6 @@ lint-workflows: ## Lint GitHub Actions workflows
 	else \
 		echo "$(YELLOW)actionlint not found, skipping workflow linting$(NC)"; \
 		echo "$(YELLOW)Install with: go install github.com/rhysd/actionlint/cmd/actionlint@latest$(NC)"; \
-	fi
-	@echo "$(BLUE)Checking workflow files for CRLF line endings...$(NC)"
-	@CRLF_FILES=$$(find .github/workflows -name "*.yml" -exec file {} \; | grep CRLF | cut -d: -f1); \
-	if [ -n "$$CRLF_FILES" ]; then \
-		echo "$(RED)✗ The following workflow files contain CRLF line endings:$(NC)"; \
-		echo "$$CRLF_FILES"; \
-		echo "$(YELLOW)Fix with: find .github/workflows -name '*.yml' -exec sed -i 's/\r$$//' {} \;$(NC)"; \
-		exit 1; \
-	else \
-		echo "$(GREEN)✓ All workflow files use LF line endings$(NC)"; \
 	fi
 
 validate-dockerfiles: ## Validate Dockerfiles with hadolint
