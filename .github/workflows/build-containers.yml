@@ -1,24 +1,25 @@
 name: Build Container Images
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'nodejs/**'
-      - 'python/**'
-      - 'scripts/**'
-      - '.github/workflows/build-containers.yml'
-      - 'Dockerfile*'
-      - 'Makefile'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'nodejs/**'
-      - 'python/**'
-      - 'scripts/**'
-      - '.github/workflows/build-containers.yml'
-      - 'Dockerfile*'
-      - 'Makefile'
+  # Temporarily disabled automatic builds - will be re-enabled with path filtering
+  # push:
+  #   branches: [main]
+  #   paths:
+  #     - 'nodejs/**'
+  #     - 'python/**'
+  #     - 'scripts/**'
+  #     - '.github/workflows/build-containers.yml'
+  #     - 'Dockerfile*'
+  #     - 'Makefile'
+  # pull_request:
+  #   branches: [main]
+  #   paths:
+  #     - 'nodejs/**'
+  #     - 'python/**'
+  #     - 'scripts/**'
+  #     - '.github/workflows/build-containers.yml'
+  #     - 'Dockerfile*'
+  #     - 'Makefile'
   workflow_dispatch:
     inputs:
       build_matrix:

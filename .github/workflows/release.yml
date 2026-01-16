@@ -137,17 +137,18 @@ jobs:
           name: run-mcp-binaries
           path: build/run-mcp-*
       
-      - name: Build and push containers
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Run complete container lifecycle
-          make containers
-          
-          # Also build matrix versions for releases
-          if [ "${{ github.event_name }}" = "release" ]; then
-            make containers-matrix
-          fi
+      # Temporarily disabled - containers should be built separately via build-containers workflow
+      # - name: Build and push containers
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   run: |
+      #     # Run complete container lifecycle
+      #     make containers
+      #     
+      #     # Also build matrix versions for releases
+      #     if [ "${{ github.event_name }}" = "release" ]; then
+      #       make containers-matrix
+      #     fi
       
       - name: Create release assets
         if: github.event_name == 'workflow_dispatch'
